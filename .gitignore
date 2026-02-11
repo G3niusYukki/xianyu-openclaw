@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# OpenClaw
+data/*.db
+logs/
+.DS_Store
+
+# User-specific
+config/config.yaml
+config/.env

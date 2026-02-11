@@ -1,0 +1,21 @@
+# General Configuration
+app:
+  debug: true
+  log_level: "INFO"
+
+# OpenClaw Settings
+openclaw:
+  host: "localhost"
+  port: 9222 # Default remote debugging port if applicable
+  executable_path: "/path/to/openclaw" # Update this
+
+# AI Settings
+ai:
+  provider: "openai" # openai, deepseek, etc.
+  api_key: "YOUR_API_KEY"
+  model: "gpt-3.5-turbo"
+
+# Xianyu Account Settings (Use with caution)
+accounts:
+  - id: "account_1"
+    cookie: "YOUR_COOKIE_HERE" # Or login credentials if supported
