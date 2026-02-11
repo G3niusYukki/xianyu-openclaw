@@ -1,19 +1,21 @@
 # Core
-requests>=2.31.0
 pyyaml>=6.0.1
-pandas>=2.2.0
+python-dotenv>=1.0.1
+loguru>=0.7.2
+pydantic>=2.5.0
+dataclasses-json>=0.6.3
+python-dateutil>=2.8.2
+httpx>=0.25.0
 
 # Image Processing
 Pillow>=10.2.0
-opencv-python>=4.9.0
+
+# Async / Database
+asyncio>=3.4.3
+aiosqlite>=0.19.0
 
 # AI / LLM
 openai>=1.12.0
 
-# Automation / Web
-# selenium>=4.18.0  # (Optional, depends on OpenClaw integration method)
-# playwright>=1.41.0 # (Optional)
-
-# Utilities
-python-dotenv>=1.0.1
-loguru>=0.7.2
+# Browser Automation (Optional - depends on OpenClaw)
+# playwright>=1.41.0

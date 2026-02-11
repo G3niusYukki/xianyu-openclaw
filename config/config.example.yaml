@@ -1,21 +1,100 @@
-# General Configuration
-app:
-  debug: true
-  log_level: "INFO"
+# 闲鱼自动化工具配置文件
+# Xianyu Automation Tool Configuration
 
-# OpenClaw Settings
+# 应用配置
+app:
+  name: "xianyu-openclaw"
+  version: "1.0.0"
+  debug: false
+  log_level: "INFO"
+  data_dir: "data"
+  logs_dir: "logs"
+
+# OpenClaw连接配置
 openclaw:
   host: "localhost"
-  port: 9222 # Default remote debugging port if applicable
-  executable_path: "/path/to/openclaw" # Update this
+  port: 9222
+  executable_path: ""
+  timeout: 30
+  retry_times: 3
 
-# AI Settings
+# AI服务配置
 ai:
-  provider: "openai" # openai, deepseek, etc.
-  api_key: "YOUR_API_KEY"
-  model: "gpt-3.5-turbo"
+  provider: "deepseek"  # 支持: openai, deepseek
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "https://api.deepseek.com/v1"
+  model: "deepseek-chat"
+  temperature: 0.7
+  max_tokens: 1000
+  fallback_enabled: true
+  fallback_model: "gpt-3.5-turbo"
 
-# Xianyu Account Settings (Use with caution)
+# 数据库配置
+database:
+  type: "sqlite"
+  path: "data/agent.db"
+  max_connections: 5
+  timeout: 30
+
+# 多账号配置
 accounts:
   - id: "account_1"
-    cookie: "YOUR_COOKIE_HERE" # Or login credentials if supported
+    name: "主账号"
+    cookie: "${XIANYU_COOKIE_1}"
+    priority: 1
+    enabled: true
+
+# 默认账号设置
+default_account: "account_1"
+
+# 定时任务配置
+scheduler:
+  enabled: false
+  timezone: "Asia/Shanghai"
+  polish:
+    enabled: true
+    cron: "0 9 * * *"
+  metrics:
+    enabled: true
+    cron: "0 */4 * * *"
+
+# 媒体处理配置
+media:
+  max_image_size: 5242880  # 最大5MB
+  supported_formats: ["jpg", "jpeg", "png", "webp"]
+  output_format: "jpeg"
+  output_quality: 85
+  max_width: 1500
+  max_height: 1500
+  watermark:
+    enabled: false
+    text: "闲鱼助手"
+    position: "bottom-right"
+    font_size: 24
+    color: "#FFFFFF"
+
+# 内容生成配置
+content:
+  title:
+    max_length: 25
+    min_length: 10
+    keywords_enabled: true
+  description:
+    max_length: 500
+    min_length: 50
+    structure_enabled: true
+  templates:
+    enabled: true
+    path: "config/templates"
+
+# 浏览器配置
+browser:
+  headless: true
+  user_agent: ""
+  viewport:
+    width: 1280
+    height: 800
+  delay:
+    min: 1
+    max: 3
+  upload_timeout: 60
