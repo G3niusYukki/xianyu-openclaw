@@ -7,6 +7,7 @@ Logging Module
 
 import os
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -17,20 +18,24 @@ from src.core.config import get_config
 class Logger:
     """
     日志管理类
-    
+
     封装loguru，提供配置化的日志输出
     """
 
     _instance: Optional["Logger"] = None
+    _lock = threading.Lock()
     _initialized: bool = False
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
-        if not self._initialized:
+        if not hasattr(self, '_initialized') or not self._initialized:
             self._setup_logger()
             Logger._initialized = True
 

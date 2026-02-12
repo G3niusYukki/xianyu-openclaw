@@ -1,0 +1,62 @@
+# 依赖锁定文件
+# Dependency Lock File
+#
+# 此文件记录了经过测试的依赖版本，用于确保环境一致性
+# To generate this file: pip-compile requirements.txt --output-file requirements.lock
+#
+# Generated on: 2024-02-12
+
+# Core
+pyyaml==6.0.1
+python-dotenv==1.0.1
+loguru==0.7.2
+pydantic==2.5.3
+dataclasses-json==0.6.4
+python-dateutil==2.8.2
+httpx==0.26.0
+
+# Image Processing
+Pillow==10.2.0
+
+# Async / Database
+aiosqlite==0.19.0
+
+# AI / LLM
+openai==1.12.0
+
+# Development
+pytest==7.4.4
+pytest-cov==4.1.0
+pytest-asyncio==0.23.3
+black==23.12.1
+mypy==1.8.0
+ruff==0.1.15
+
+# Indirect dependencies (automatically included)
+anyio==4.3.0
+attrs==23.2.0
+certifi==2024.1.26
+charset-normalizer==3.3.2
+colorama==0.4.6
+exceptiongroup==1.2.0
+h11==0.14.0
+httpcore==1.0.2
+idna==3.6
+iniconfig==2.0.0
+jsonschema==4.21.1
+jsonschema-specifications==2023.12.1
+markdown-it-py==3.0.0
+mdurl==0.1.2
+packaging==23.2
+pluggy==1.4.0
+pygments==2.17.2
+pyreadline3==3.4.1
+referencing==0.35.1
+rich==13.7.0
+rpds-py==0.17.1
+ruff==0.1.15
+six==1.16.0
+sniffio==1.3.0
+tomli==2.0.1
+typing-extensions==4.9.0
+urllib3==2.1.0

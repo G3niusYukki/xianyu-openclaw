@@ -410,7 +410,8 @@ class Scheduler:
             try:
                 next_run = self._get_next_cron_run(task.cron_expression, task.last_run)
                 return datetime.now() >= next_run
-            except:
+            except (ValueError, IndexError) as e:
+                self.logger.debug(f"Invalid cron expression: {e}")
                 return False
 
         if task.interval:
@@ -430,7 +431,8 @@ class Scheduler:
             next_time = last_run + timedelta(hours=1)
 
             return next_time
-        except:
+        except (ValueError, IndexError) as e:
+            self.logger.debug(f"Error parsing cron expression: {e}")
             return last_run + timedelta(hours=1)
 
     async def start(self) -> None:
@@ -446,7 +448,7 @@ class Scheduler:
             self._scheduler_task.cancel()
             try:
                 await self._scheduler_task
-            except:
+            except asyncio.CancelledError:
                 pass
 
         for task_id in list(self.running_tasks.keys()):

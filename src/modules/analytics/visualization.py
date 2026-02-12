@@ -102,7 +102,7 @@ class DataVisualizer:
 
         return "\n".join(lines)
 
-    def generate_metrics_dashboard(self) -> str:
+    async def generate_metrics_dashboard(self) -> str:
         """
         生成指标仪表盘
 
@@ -114,7 +114,7 @@ class DataVisualizer:
         lines.append("=" * 50)
         lines.append("")
 
-        asyncio.run(self._fill_dashboard(lines))
+        await self._fill_dashboard(lines)
 
         lines.append("")
         lines.append("=" * 50)
@@ -141,7 +141,7 @@ class DataVisualizer:
             bar = "█" * min(len(value), 20)
             lines.append(f"{label:10} │ {bar} {value}")
 
-    def generate_weekly_trend(self, weeks: int = 4) -> str:
+    async def generate_weekly_trend(self, weeks: int = 4) -> str:
         """
         生成周趋势图
 
@@ -151,7 +151,7 @@ class DataVisualizer:
         Returns:
             ASCII图表
         """
-        asyncio.run(self._generate_trend_chart())
+        return await self._generate_trend_chart(weeks)
 
     async def _generate_trend_chart(self, weeks: int = 4):
         """生成趋势图"""

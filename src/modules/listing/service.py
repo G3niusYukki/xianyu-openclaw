@@ -314,7 +314,8 @@ class ListingService:
             parsed = urlparse(url)
             path_parts = parsed.path.split('/')
             return path_parts[-1] if path_parts else ""
-        except:
+        except (ValueError, IndexError, AttributeError) as e:
+            self.logger.debug(f"Failed to extract product ID from URL: {e}")
             return ""
 
     async def batch_create_listings(self, listings: List[Listing],

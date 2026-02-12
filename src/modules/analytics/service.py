@@ -51,7 +51,28 @@ class AnalyticsService:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.db_path = db_path
 
+        self._allowed_metrics = {"views", "wants", "sales", "inquiries"}
+        self._allowed_export_types = {"products", "logs", "metrics"}
+        self._allowed_formats = {"csv", "json"}
+
         self._init_db()
+
+    def _validate_metric(self, metric: str) -> str:
+        """
+        验证指标类型
+
+        Args:
+            metric: 指标类型
+
+        Returns:
+            验证后的指标类型
+
+        Raises:
+            ValueError: 指标类型不在白名单中
+        """
+        if metric not in self._allowed_metrics:
+            raise ValueError(f"Invalid metric: {metric}. Must be one of {self._allowed_metrics}")
+        return metric
 
     async def _init_db(self) -> None:
         """初始化数据库"""
@@ -102,26 +123,23 @@ class AnalyticsService:
             """)
 
             await db.execute("""
-                CREATE TABLE IF NOT EXISTS daily_stats (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date DATE UNIQUE,
-                    new_listings INTEGER DEFAULT 0,
-                    polished_count INTEGER DEFAULT 0,
-                    price_updates INTEGER DEFAULT 0,
-                    delist_count INTEGER DEFAULT 0,
-                    total_views INTEGER DEFAULT 0,
-                    total_wants INTEGER DEFAULT 0,
-                    total_inquiries INTEGER DEFAULT 0,
-                    total_sales INTEGER DEFAULT 0,
-                    revenue REAL DEFAULT 0,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
+                CREATE INDEX IF NOT EXISTS idx_op_logs_type_time
+                ON operation_logs(operation_type, timestamp, account_id)
             """)
 
             await db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_op_logs_type ON operation_logs(operation_type);
-                CREATE INDEX IF NOT EXISTS idx_op_logs_time ON operation_logs(timestamp);
-                CREATE INDEX IF NOT EXISTS idx_prod_metrics_time ON product_metrics(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_op_logs_time
+                ON operation_logs(timestamp)
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_metrics_product_time
+                ON product_metrics(product_id, timestamp)
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_products_account
+                ON products(account_id)
             """)
 
             await db.commit()
@@ -574,6 +592,8 @@ class AnalyticsService:
         Returns:
             趋势数据列表
         """
+        metric = self._validate_metric(metric)
+
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
 
@@ -602,6 +622,12 @@ class AnalyticsService:
         Returns:
             导出文件路径
         """
+        if data_type not in self._allowed_export_types:
+            raise ValueError(f"Invalid data_type: {data_type}. Must be one of {self._allowed_export_types}")
+
+        if format not in self._allowed_formats:
+            raise ValueError(f"Invalid format: {format}. Must be one of {self._allowed_formats}")
+
         if not filepath:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filepath = f"data/export_{data_type}_{timestamp}.{format}"

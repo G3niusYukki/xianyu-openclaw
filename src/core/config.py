@@ -6,32 +6,44 @@ Configuration Management Module
 """
 
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 from functools import lru_cache
 
 import yaml
 from dotenv import load_dotenv
+from pydantic import ValidationError
+
+from src.core.config_models import ConfigModel
+from src.core.logger import get_logger
+from src.core.error_handler import ConfigError
 
 
 class Config:
     """
     配置管理类
-    
+
     负责加载和管理应用程序的配置，支持YAML配置文件和环境变量
     """
 
     _instance: Optional["Config"] = None
+    _lock = threading.Lock()
     _config: Dict[str, Any] = {}
 
-    def __new__(cls):
+    def __new__(cls, config_path: Optional[str] = None):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self):
-        if not self._config:
-            self._load_config()
+    def __init__(self, config_path: Optional[str] = None):
+        if not hasattr(self, '_initialized') or not self._initialized:
+            self.logger = get_logger()
+            self._load_config(config_path)
+            self._initialized = True
 
     def _load_config(self, config_path: Optional[str] = None) -> None:
         """
@@ -72,9 +84,25 @@ class Config:
         """
         try:
             with open(config_path, "r", encoding="utf-8") as f:
-                self._config = yaml.safe_load(f) or {}
+                config_data = yaml.safe_load(f) or {}
+
+            if config_data:
+                try:
+                    validated_config = ConfigModel.from_dict(config_data)
+                    self._config = validated_config.to_dict()
+                    self.logger.debug(f"Config validation passed: {config_path}")
+                except ValidationError as e:
+                    self.logger.error(f"Config validation failed: {e}")
+                    raise ConfigError(f"Invalid configuration: {e}")
+
+        except FileNotFoundError:
+            self.logger.warning(f"Config file not found: {config_path}")
+            self._config = {}
+        except yaml.YAMLError as e:
+            self.logger.error(f"Invalid YAML in config file: {e}")
+            raise ConfigError(f"Invalid YAML: {e}")
         except Exception as e:
-            print(f"[Config] Failed to load config file: {e}")
+            self.logger.error(f"Failed to load config file: {e}")
             self._config = {}
 
     def _load_env_file(self) -> None:
@@ -93,7 +121,7 @@ class Config:
     def _resolve_env_variables(self) -> None:
         """
         解析环境变量引用
-        
+
         将配置中的 ${VAR_NAME} 替换为实际的环境变量值
         """
         self._config = self._resolve_dict(self._config)
@@ -111,7 +139,11 @@ class Config:
             return [self._resolve_dict(item) for item in obj]
         elif isinstance(obj, str) and obj.startswith("${") and obj.endswith("}"):
             env_key = obj[2:-1]
-            return os.getenv(env_key, obj)
+            value = os.getenv(env_key)
+            if value is None:
+                self.logger.warning(f"Environment variable {env_key} not found, using placeholder")
+                return obj
+            return value
         return obj
 
     def _set_defaults(self) -> None:
@@ -183,17 +215,18 @@ class Config:
         
         return value
 
-    def get_section(self, section: str) -> Dict[str, Any]:
+    def get_section(self, section: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         获取配置段落
-        
+
         Args:
             section: 段落名称
-            
+            default: 默认值
+
         Returns:
             配置段落字典
         """
-        return self._config.get(section, {})
+        return self._config.get(section, default or {})
 
     @property
     def app(self) -> Dict[str, Any]:
@@ -247,11 +280,14 @@ class Config:
 
 
 @lru_cache(maxsize=1)
-def get_config() -> Config:
+def get_config(config_path: Optional[str] = None) -> Config:
     """
     获取配置单例
-    
+
+    Args:
+        config_path: 配置文件路径
+
     Returns:
         Config实例
     """
-    return Config()
+    return Config(config_path)

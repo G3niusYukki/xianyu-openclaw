@@ -144,7 +144,8 @@ class MediaService:
 
                 try:
                     font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
-                except:
+                except (IOError, OSError) as e:
+                    self.logger.debug(f"Failed to load custom font: {e}")
                     font = ImageFont.load_default()
 
                 text_bbox = draw.textbbox((0, 0), text, font=font)

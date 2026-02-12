@@ -84,6 +84,21 @@ class AccountsService:
             return os.getenv(env_key, value)
         return value
 
+    def _mask_sensitive_data(self, data: str, show_chars: int = 5) -> str:
+        """
+        敏感数据脱敏
+
+        Args:
+            data: 原始数据
+            show_chars: 首尾显示的字符数
+
+        Returns:
+            脱敏后的数据
+        """
+        if not data or len(data) < show_chars * 2:
+            return "****"
+        return f"{data[:show_chars]}...{data[-show_chars:]}"
+
     def _load_account_stats(self) -> None:
         """加载账号统计"""
         stats_file = Path("data/account_stats.json")
@@ -102,33 +117,44 @@ class AccountsService:
         with open(stats_file, 'w', encoding='utf-8') as f:
             json.dump(self.account_stats, f, ensure_ascii=False, indent=2)
 
-    def get_accounts(self, enabled_only: bool = True) -> List[Dict[str, Any]]:
+    def get_accounts(self, enabled_only: bool = True, mask_sensitive: bool = True) -> List[Dict[str, Any]]:
         """
         获取账号列表
 
         Args:
             enabled_only: 只返回启用的账号
+            mask_sensitive: 是否脱敏敏感信息
 
         Returns:
             账号列表
         """
-        if enabled_only:
-            return [acc for acc in self.accounts if acc.get("enabled", True)]
-        return self.accounts
+        accounts = [acc for acc in self.accounts if not enabled_only or acc.get("enabled", True)]
+        if mask_sensitive:
+            accounts = [
+                {**acc, "cookie": self._mask_sensitive_data(acc.get("cookie", ""))}
+                for acc in accounts
+            ]
+        return accounts
 
-    def get_account(self, account_id: str) -> Optional[Dict[str, Any]]:
+    def get_account(self, account_id: str, mask_sensitive: bool = True) -> Optional[Dict[str, Any]]:
         """
         获取指定账号
 
         Args:
             account_id: 账号ID
+            mask_sensitive: 是否脱敏敏感信息
 
         Returns:
             账号信息，不存在返回None
         """
         for acc in self.accounts:
             if acc.get("id") == account_id:
-                return acc
+                account_dict = acc.copy()
+                if mask_sensitive and "cookie" in account_dict:
+                    account_dict["cookie"] = self._mask_sensitive_data(
+                        account_dict["cookie"]
+                    )
+                return account_dict
         return None
 
     def set_current_account(self, account_id: str) -> bool:
@@ -167,7 +193,7 @@ class AccountsService:
 
     def get_cookie(self, account_id: Optional[str] = None) -> Optional[str]:
         """
-        获取账号Cookie
+        获取账号Cookie（原始值，不脱敏）
 
         Args:
             account_id: 账号ID，不指定使用当前账号
@@ -175,9 +201,10 @@ class AccountsService:
         Returns:
             Cookie字符串
         """
-        account = self.get_account(account_id or self.current_account_id)
-        if account:
-            return account.get("cookie")
+        account_id = account_id or self.current_account_id
+        for acc in self.accounts:
+            if acc.get("id") == account_id:
+                return acc.get("cookie")
         return None
 
     def add_account(self, account_id: str, cookie: str, name: Optional[str] = None,

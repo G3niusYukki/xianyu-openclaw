@@ -16,6 +16,7 @@ from enum import Enum
 import httpx
 from src.core.config import get_config
 from src.core.logger import get_logger
+from src.core.error_handler import handle_controller_errors, handle_operation_errors
 
 
 class BrowserState(Enum):
@@ -156,15 +157,13 @@ class OpenClawController:
         self.state = BrowserState.DISCONNECTED
         self.logger.info("Disconnected from OpenClaw")
 
+    @handle_controller_errors(default_return=False)
     async def is_connected(self) -> bool:
         """检查连接状态"""
         if self.state != BrowserState.CONNECTED:
             return False
-        try:
-            response = await self.client.get(f"{self.base_url}/json/version")
-            return response.status_code == 200
-        except:
-            return False
+        response = await self.client.get(f"{self.base_url}/json/version")
+        return response.status_code == 200
 
     async def ensure_connected(self) -> bool:
         """确保已连接"""
@@ -185,18 +184,16 @@ class OpenClawController:
         else:
             raise Exception(f"Failed to create page: {response.text}")
 
+    @handle_operation_errors(default_return=False)
     async def close_page(self, page_id: str) -> bool:
         """关闭页面"""
-        try:
-            response = await self.client.send(
-                f"{self.base_url}/json/prototype/Page/{page_id}/close",
-                method="DELETE"
-            )
-            if page_id == self.current_page_id:
-                self.current_page_id = None
-            return response.status_code == 200
-        except:
-            return False
+        response = await self.client.send(
+            f"{self.base_url}/json/prototype/Page/{page_id}/close",
+            method="DELETE"
+        )
+        if page_id == self.current_page_id:
+            self.current_page_id = None
+        return response.status_code == 200
 
     async def navigate(self, page_id: str, url: str, wait_load: bool = True) -> bool:
         """
@@ -322,18 +319,16 @@ class OpenClawController:
         self.logger.warning(f"Failed to click: {selector}")
         return False
 
+    @handle_operation_errors(default_return=False)
     async def double_click(self, page_id: str, selector: str) -> bool:
         """双击元素"""
         element = await self.find_element(page_id, selector)
         if element:
-            try:
-                response = await self.client.post(
-                    f"{self.base_url}/json/prototype/Node/{element.object_id}/click",
-                    json={"clickCount": 2}
-                )
-                return response.status_code == 200
-            except:
-                pass
+            response = await self.client.post(
+                f"{self.base_url}/json/prototype/Node/{element.object_id}/click",
+                json={"clickCount": 2}
+            )
+            return response.status_code == 200
         return False
 
     async def type_text(self, page_id: str, selector: str, text: str,
@@ -379,62 +374,54 @@ class OpenClawController:
 
         return False
 
+    @handle_operation_errors(default_return=None)
     async def get_text(self, page_id: str, selector: str) -> Optional[str]:
         """获取元素文本"""
         element = await self.find_element(page_id, selector)
         if element:
-            try:
-                response = await self.client.post(
-                    f"{self.base_url}/json/prototype/Node/{element.object_id}/getProperties",
-                    json={"name": "textContent"}
-                )
-                if response.status_code == 200:
-                    return response.json().get("value", "")
-            except:
-                pass
+            response = await self.client.post(
+                f"{self.base_url}/json/prototype/Node/{element.object_id}/getProperties",
+                json={"name": "textContent"}
+            )
+            if response.status_code == 200:
+                return response.json().get("value", "")
         return None
 
+    @handle_operation_errors(default_return=None)
     async def get_value(self, page_id: str, selector: str) -> Optional[str]:
         """获取输入框值"""
         element = await self.find_element(page_id, selector)
         if element:
-            try:
-                response = await self.client.post(
-                    f"{self.base_url}/json/prototype/Node/{element.object_id}/getProperties",
-                    json={"name": "value"}
-                )
-                if response.status_code == 200:
-                    return response.json().get("value", "")
-            except:
-                pass
+            response = await self.client.post(
+                f"{self.base_url}/json/prototype/Node/{element.object_id}/getProperties",
+                json={"name": "value"}
+            )
+            if response.status_code == 200:
+                return response.json().get("value", "")
         return None
 
+    @handle_operation_errors(default_return=False)
     async def select_option(self, page_id: str, selector: str, value: str) -> bool:
         """选择下拉选项"""
         element = await self.find_element(page_id, selector)
         if element:
-            try:
-                response = await self.client.post(
-                    f"{self.base_url}/json/prototype/Node/{element.object_id}/select",
-                    json={"value": value}
-                )
-                return response.status_code == 200
-            except:
-                pass
+            response = await self.client.post(
+                f"{self.base_url}/json/prototype/Node/{element.object_id}/select",
+                json={"value": value}
+            )
+            return response.status_code == 200
         return False
 
+    @handle_operation_errors(default_return=False)
     async def check(self, page_id: str, selector: str, checked: bool = True) -> bool:
         """勾选/取消勾选复选框"""
         element = await self.find_element(page_id, selector)
         if element:
-            try:
-                response = await self.client.post(
-                    f"{self.base_url}/json/prototype/Node/{element.object_id}/setProperty",
-                    json={"name": "checked", "value": str(checked).lower()}
-                )
-                return response.status_code == 200
-            except:
-                pass
+            response = await self.client.post(
+                f"{self.base_url}/json/prototype/Node/{element.object_id}/setProperty",
+                json={"name": "checked", "value": str(checked).lower()}
+            )
+            return response.status_code == 200
         return False
 
     async def upload_file(self, page_id: str, selector: str, file_path: str) -> bool:
@@ -562,16 +549,16 @@ class OpenClawController:
                     url = response.json().get("result", "")
                     if pattern in url:
                         return True
-            except:
-                pass
+            except Exception as e:
+                self.logger.debug(f"Error checking URL: {e}")
             await asyncio.sleep(0.5)
         return False
 
     async def scroll_to_element(self, page_id: str, selector: str) -> bool:
         """滚动到元素"""
         script = f"""
-           .querySelector('{selector}');
-            if (element) { const element = document{
+            const element = document.querySelector('{selector}');
+            if (element) {{
                 element.scrollIntoView({{behavior: 'smooth', block: 'center'}});
                 true;
             }} else {{
@@ -638,87 +625,69 @@ class OpenClawController:
             self.logger.error(f"Screenshot error: {e}")
             return False
 
+    @handle_operation_errors(default_return=[])
     async def get_cookies(self, page_id: str) -> List[Dict[str, str]]:
         """获取页面Cookie"""
-        try:
-            response = await self.client.get(
-                f"{self.base_url}/json/prototype/Page/{page_id}/getCookies"
-            )
-            if response.status_code == 200:
-                return response.json().get("cookies", [])
-        except:
-            pass
+        response = await self.client.get(
+            f"{self.base_url}/json/prototype/Page/{page_id}/getCookies"
+        )
+        if response.status_code == 200:
+            return response.json().get("cookies", [])
         return []
 
+    @handle_operation_errors(default_return=False)
     async def add_cookie(self, page_id: str, cookie: Dict[str, str]) -> bool:
         """添加Cookie"""
-        try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/addCookie",
-                json={"cookie": cookie}
-            )
-            return response.status_code == 200
-        except:
-            pass
-        return False
+        response = await self.client.post(
+            f"{self.base_url}/json/prototype/Page/{page_id}/addCookie",
+            json={"cookie": cookie}
+        )
+        return response.status_code == 200
 
+    @handle_operation_errors(default_return=False)
     async def delete_cookies(self, page_id: str, name: Optional[str] = None) -> bool:
         """删除Cookie"""
-        try:
-            url = f"{self.base_url}/json/prototype/Page/{page_id}/clearCookies"
-            if name:
-                url += f"?name={name}"
-            response = await self.client.send(url, method="DELETE")
-            return response.status_code == 200
-        except:
-            pass
-        return False
+        url = f"{self.base_url}/json/prototype/Page/{page_id}/clearCookies"
+        if name:
+            url += f"?name={name}"
+        response = await self.client.send(url, method="DELETE")
+        return response.status_code == 200
 
+    @handle_operation_errors(default_return=False)
     async def reload(self, page_id: str) -> bool:
         """刷新页面"""
-        try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/reload"
-            )
-            return response.status_code == 200
-        except:
-            pass
-        return False
+        response = await self.client.post(
+            f"{self.base_url}/json/prototype/Page/{page_id}/reload"
+        )
+        return response.status_code == 200
 
+    @handle_operation_errors(default_return=False)
     async def go_back(self, page_id: str) -> bool:
         """返回上一页"""
-        try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/goBack"
-            )
-            return response.status_code == 200
-        except:
-            pass
-        return False
+        response = await self.client.post(
+            f"{self.base_url}/json/prototype/Page/{page_id}/goBack"
+        )
+        return response.status_code == 200
 
+    @handle_operation_errors(default_return=False)
     async def go_forward(self, page_id: str) -> bool:
         """前进一页"""
-        try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/goForward"
-            )
-            return response.status_code == 200
-        except:
-            pass
-        return False
+        response = await self.client.post(
+            f"{self.base_url}/json/prototype/Page/{page_id}/goForward"
+        )
+        return response.status_code == 200
 
+    @handle_operation_errors(default_return=None)
     async def get_page_source(self, page_id: str) -> Optional[str]:
         """获取页面源码"""
-        try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/getContent"
-            )
-            if response.status_code == 200:
-                return response.json().get("result", "")
-        except:
-            pass
+        response = await self.client.post(
+            f"{self.base_url}/json/prototype/Page/{page_id}/getContent"
+        )
+        if response.status_code == 200:
+            return response.json().get("result", "")
         return None
 
+    @handle_operation_errors(default_return=False)
     async def handle_dialog(self, page_id: str, accept: bool = True,
                            text: str = "") -> bool:
         """
@@ -732,15 +701,11 @@ class OpenClawController:
         Returns:
             是否成功
         """
-        try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/handleDialog",
-                json={"accept": accept, "promptText": text}
-            )
-            return response.status_code == 200
-        except:
-            pass
-        return False
+        response = await self.client.post(
+            f"{self.base_url}/json/prototype/Page/{page_id}/handleDialog",
+            json={"accept": accept, "promptText": text}
+        )
+        return response.status_code == 200
 
 
 async def create_controller(config: Optional[Dict[str, Any]] = None) -> OpenClawController:

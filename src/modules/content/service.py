@@ -8,7 +8,7 @@ Content Generation Service
 import os
 from typing import List, Optional, Dict, Any
 
-from openai import OpenAI, AsyncOpenAI
+from openai import OpenAI, AsyncOpenAI, APIError, APITimeoutError
 
 from src.core.config import get_config
 from src.core.logger import get_logger
@@ -36,6 +36,7 @@ class ContentService:
         self.model = self.config.get("model", "deepseek-chat")
         self.temperature = self.config.get("temperature", 0.7)
         self.max_tokens = self.config.get("max_tokens", 1000)
+        self.timeout = self.config.get("timeout", 30)
         self.fallback_enabled = self.config.get("fallback_enabled", True)
         self.fallback_model = self.config.get("fallback_model", "gpt-3.5-turbo")
 
@@ -77,10 +78,17 @@ class ContentService:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
                 max_tokens=max_tokens or self.max_tokens,
+                timeout=self.timeout,
             )
             return response.choices[0].message.content.strip()
+        except APITimeoutError as e:
+            self.logger.error(f"AI call timeout after {self.timeout}s: {e}")
+            return None
+        except APIError as e:
+            self.logger.error(f"AI API error: {e}")
+            return None
         except Exception as e:
-            self.logger.error(f"AI call failed: {e}")
+            self.logger.error(f"Unexpected AI call error: {e}")
             return None
 
     def generate_title(self, product_name: str, features: List[str],

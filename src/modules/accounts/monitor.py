@@ -84,9 +84,13 @@ class Monitor:
         self.config = config or get_config()
         self.logger = get_logger()
 
-        self.alerts: List[Alert] = []
-        self.alert_callbacks: List[Callable] = []
+        self._alerts: List[Alert] = []
+        self._alert_callbacks: List[Callable] = []
         self.alert_file = Path("data/alerts.json")
+
+        self._alerts_lock = asyncio.Lock()
+        self._file_lock = asyncio.Lock()
+
         self._load_alerts()
 
         self.monitoring_rules = self._default_rules()
@@ -137,17 +141,24 @@ class Monitor:
             try:
                 with open(self.alert_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    self.alerts = [Alert(**a) for a in data]
-                self.logger.info(f"Loaded {len(self.alerts)} alerts")
+                    self._alerts = [Alert(**a) for a in data]
+                self.logger.info(f"Loaded {len(self._alerts)} alerts")
             except Exception as e:
                 self.logger.warning(f"Failed to load alerts: {e}")
-                self.alerts = []
+                self._alerts = []
 
-    def _save_alerts(self) -> None:
-        """保存告警"""
+    async def _save_alerts(self) -> None:
+        """保存告警（异步版本，使用锁）"""
+        async with self._file_lock:
+            self.alert_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.alert_file, 'w', encoding='utf-8') as f:
+                json.dump([a.to_dict() for a in self._alerts], f, ensure_ascii=False, indent=2)
+
+    def _save_alerts_sync(self) -> None:
+        """保存告警（同步版本，不使用锁，用于__init__）"""
         self.alert_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.alert_file, 'w', encoding='utf-8') as f:
-            json.dump([a.to_dict() for a in self.alerts], f, ensure_ascii=False, indent=2)
+            json.dump([a.to_dict() for a in self._alerts], f, ensure_ascii=False, indent=2)
 
     def register_callback(self, callback: Callable[[Alert], None]) -> None:
         """
@@ -169,9 +180,9 @@ class Monitor:
             except Exception as e:
                 self.logger.error(f"Alert callback error: {e}")
 
-    def raise_alert(self, alert_type: str, title: str, message: str,
-                   source: str = "", details: Dict = None,
-                   auto_resolve: bool = False) -> Alert:
+    async def raise_alert(self, alert_type: str, title: str, message: str,
+                    source: str = "", details: Dict = None,
+                    auto_resolve: bool = False) -> Alert:
         """
         触发告警
 
@@ -199,8 +210,10 @@ class Monitor:
             auto_resolve=auto_resolve,
         )
 
-        self.alerts.append(alert)
-        self._save_alerts()
+        async with self._alerts_lock:
+            self._alerts.append(alert)
+
+        await self._save_alerts()
 
         self.logger.warning(f"[{alert.level.upper()}] {title}: {message}")
 
@@ -215,9 +228,15 @@ class Monitor:
         """自动恢复告警"""
         await asyncio.sleep(300)
 
-        alert.status = "resolved"
-        alert.resolved_at = datetime.now().isoformat()
-        self._save_alerts()
+        async with self._alerts_lock:
+            for a in self._alerts:
+                if a.alert_id == alert.alert_id:
+                    a.status = "resolved"
+                    a.resolved_at = datetime.now().isoformat()
+                    alert = a
+                    break
+
+        await self._save_alerts()
 
         self.logger.info(f"Auto-resolved alert: {alert.alert_id}")
 
@@ -242,7 +261,7 @@ class Monitor:
                 recent_failures = self._count_recent_failures(condition_type, rule.get("window_minutes", 10))
 
                 if recent_failures >= rule.get("max_failures", 3):
-                    self.raise_alert(
+                    await self.raise_alert(
                         alert_type=condition_type,
                         title=f"Multiple {condition_type} failures detected",
                         message=f"Failed {recent_failures} times in last {rule.get('window_minutes')} minutes",
@@ -251,7 +270,7 @@ class Monitor:
                             "condition_type": condition_type,
                             "failure_count": recent_failures,
                             "window_minutes": rule.get("window_minutes"),
-                            **context or {}
+                            **(context or {})
                         },
                         auto_resolve=True
                     )
@@ -263,7 +282,7 @@ class Monitor:
         """计算近期失败次数"""
         window_start = datetime.now() - timedelta(minutes=window_minutes)
         return len([
-            a for a in self.alerts
+            a for a in self._alerts
             if a.source == condition_type
             and a.status == "active"
             and datetime.fromisoformat(a.created_at) >= window_start
@@ -296,7 +315,7 @@ class Monitor:
         self.logger.info("Waiting longer due to rate limiting...")
         await asyncio.sleep(1800)
 
-    def resolve_alert(self, alert_id: str) -> bool:
+    async def resolve_alert(self, alert_id: str) -> bool:
         """
         手动解除告警
 
@@ -306,15 +325,16 @@ class Monitor:
         Returns:
             是否成功
         """
-        for alert in self.alerts:
-            if alert.alert_id == alert_id:
-                alert.status = "resolved"
-                alert.resolved_at = datetime.now().isoformat()
-                self._save_alerts()
-                return True
+        async with self._alerts_lock:
+            for alert in self._alerts:
+                if alert.alert_id == alert_id:
+                    alert.status = "resolved"
+                    alert.resolved_at = datetime.now().isoformat()
+                    await self._save_alerts()
+                    return True
         return False
 
-    def get_active_alerts(self, level: str = None) -> List[Alert]:
+    async def get_active_alerts(self, level: str = None) -> List[Alert]:
         """
         获取活跃告警
 
@@ -324,32 +344,34 @@ class Monitor:
         Returns:
             告警列表
         """
-        alerts = [a for a in self.alerts if a.status == "active"]
+        async with self._alerts_lock:
+            alerts = [a for a in self._alerts if a.status == "active"]
         if level:
             alerts = [a for a in alerts if a.level == level]
         return alerts
 
-    def get_alert_summary(self) -> Dict[str, Any]:
+    async def get_alert_summary(self) -> Dict[str, Any]:
         """
         获取告警摘要
 
         Returns:
             告警统计
         """
-        active = [a for a in self.alerts if a.status == "active"]
-        resolved = [a for a in self.alerts if a.status == "resolved"]
+        async with self._alerts_lock:
+            active = [a for a in self._alerts if a.status == "active"]
+            resolved = [a for a in self._alerts if a.status == "resolved"]
 
-        by_level = {}
-        for alert in active:
-            by_level[alert.level] = by_level.get(alert.level, 0) + 1
+            by_level = {}
+            for alert in active:
+                by_level[alert.level] = by_level.get(alert.level, 0) + 1
 
-        return {
-            "total_alerts": len(self.alerts),
-            "active_alerts": len(active),
-            "resolved_alerts": len(resolved),
-            "by_level": by_level,
-            "recent_alerts": [a.to_dict() for a in active[-10:]],
-        }
+            return {
+                "total_alerts": len(self._alerts),
+                "active_alerts": len(active),
+                "resolved_alerts": len(resolved),
+                "by_level": by_level,
+                "recent_alerts": [a.to_dict() for a in active[-10:]],
+            }
 
     async def cleanup_old_alerts(self, days: int = 30) -> int:
         """
@@ -364,12 +386,15 @@ class Monitor:
         cutoff = datetime.now() - timedelta(days=days)
         old_count = 0
 
-        self.alerts = [
-            a for a in self.alerts
-            if a.status == "active" or datetime.fromisoformat(a.created_at) >= cutoff
-        ]
+        async with self._alerts_lock:
+            old_count = len(self._alerts)
+            self._alerts = [
+                a for a in self._alerts
+                if a.status == "active" or datetime.fromisoformat(a.created_at) >= cutoff
+            ]
+            old_count = old_count - len(self._alerts)
 
-        self._save_alerts()
+        await self._save_alerts()
         return old_count
 
 
