@@ -1338,6 +1338,68 @@ mkdir -p data/export
 
 ## 更新日志
 
+### v1.1.0 (2024-02-12) 🚀 全面代码质量与架构优化
+
+**阶段1：紧急修复（P0优先级）**
+- ✅ 修复asyncio依赖错误（Python标准库不应作为外部依赖）
+- ✅ 修复19处裸except语句（吞噬KeyboardInterrupt和SystemExit等）
+- ✅ 修复2处asyncio.run()误用（会导致运行时错误）
+- ✅ 实现敏感信息脱敏（Cookie等敏感数据保护）
+
+**阶段2：短期改进（P1优先级）**
+- ✅ 配置验证与Schema定义（Pydantic配置模型）
+- ✅ 修复并发安全问题（添加asyncio.Lock保护共享资源）
+- ✅ SQL注入防护（指标白名单验证）
+- ✅ 添加AI调用超时控制（防止无限期挂起）
+
+**阶段3：中期优化（P2优先级）**
+- ✅ 依赖版本管理（版本锁定、依赖指南）
+- ✅ 引入抽象接口层（9个核心服务接口）
+- ✅ 改进单例模式（线程安全的Double-checked locking）
+- ✅ 统一错误处理（7个装饰器、扩展异常类）
+
+**阶段4：长期改进（P3优先级）**
+- ✅ 完善测试覆盖（1200+行测试代码）
+- ✅ 性能优化（异步缓存、批量处理、数据库索引优化）
+- ✅ 代码质量工具（Black、isort、Ruff、Mypy、pytest-cov）
+- ✅ 文档完善（依赖指南、优化总结报告）
+
+**新增核心模块**：
+- `src/core/config_models.py` - 配置模型与验证
+- `src/core/error_handler.py` - 统一异常处理（扩展）
+- `src/core/service_container.py` - 依赖注入容器
+- `src/core/performance.py` - 性能优化工具
+- `src/modules/interfaces.py` - 服务接口抽象层
+
+**新增测试文件**：
+- `pytest.ini` - pytest配置
+- `tests/conftest.py` - 测试fixtures
+- `tests/test_config.py` - 配置测试
+- `tests/test_interfaces.py` - 接口测试
+- `tests/test_error_handler.py` - 异常处理测试
+- `tests/test_integration.py` - 集成测试
+
+**新增配置和脚本**：
+- `requirements.lock` - 依赖锁定文件
+- `DEPENDENCIES.md` - 依赖管理指南
+- `pyproject.toml` - 项目统一配置
+- `scripts/check_code_quality.sh` - 代码质量检查脚本
+- `scripts/format_code.sh` - 代码格式化脚本
+
+**统计**：
+- 新增文件：16个
+- 修改文件：14个
+- 新增代码：~2150行
+- 修改代码：~215行
+- 修复问题：23+
+- 新增接口：9个
+- 新增装饰器：7个
+- 新增测试：1200+行
+
+**详细改进报告**：详见 [IMPROVEMENTS.md](IMPROVEMENTS.md)
+
+---
+
 ### v1.0.0 (2024-02-11)
 
 - ✨ 初始版本发布
