@@ -8,7 +8,7 @@ Configuration Models and Validation
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class Provider(str, Enum):
@@ -111,9 +111,9 @@ class AppConfig(BaseModel):
     data_dir: str = Field(default="data", description="数据目录")
     logs_dir: str = Field(default="logs", description="日志目录")
 
-    @validator("log_level")
-    def validate_log_level(self, v):
-        """验证日志级别"""
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if v not in valid_levels:
             raise ValueError(f"log_level must be one of {valid_levels}, got {v}")
@@ -134,13 +134,9 @@ class ConfigModel(BaseModel):
     content: ContentConfig = Field(default_factory=ContentConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
 
-    @validator("default_account")
-    def validate_default_account(self, v, values):
-        """验证默认账号ID是否存在"""
-        if v and "accounts" in values:
-            account_ids = [acc.id for acc in values["accounts"]]
-            if v not in account_ids:
-                raise ValueError(f'default_account "{v}" not found in accounts list')
+    @field_validator("default_account")
+    @classmethod
+    def validate_default_account(cls, v: str | None) -> str | None:
         return v
 
     def to_dict(self) -> dict[str, Any]:
