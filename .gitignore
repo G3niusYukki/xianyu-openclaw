@@ -147,15 +147,23 @@ output/
 *.pem
 *.key
 
-# Config files (keep example, ignore actual)
+# Config files (keep examples, ignore actual)
 config/*.yaml
+config/*.json
 !config/*.example.yaml
-!config/config.example.yaml
+!config/*.example.json
 
 # Temporary files
 *.tmp
 *.bak
 *~
 
-# Frontend dependencies
-web/frontend/node_modules/
+# Node
+node_modules/
+
+# Ruff
+.ruff_cache/
+
+# Cursor / Codex
+.cursor/
+.codex/

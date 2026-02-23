@@ -1,212 +1,330 @@
-# 闲鱼自动化工具 (Xianyu OpenClaw)
+<p align="center">
+  <img src="https://img.shields.io/badge/🐟-Xianyu_OpenClaw-FF6A00?style=for-the-badge&labelColor=1a1a2e" alt="Xianyu OpenClaw" />
+</p>
 
-基于 [OpenClaw](https://github.com/openclaw/openclaw) 的闲鱼自动化运营工具。通过自然语言对话操作闲鱼：发布商品、擦亮、调价、数据分析、多账号管理。
+<h1 align="center">xianyu-openclaw</h1>
 
-**v4.0.0**: 深度集成 OpenClaw — 浏览器自动化由 OpenClaw Gateway 统一管理，用 AI 对话替代传统 Web 界面，Docker 一键部署。
+<p align="center">
+  <strong>AI-powered Xianyu (闲鱼) automation — talk to your store, not click through it.</strong>
+</p>
 
-[![Release](https://img.shields.io/github/v/release/G3niusYukki/xianyu-openclaw?style=flat-square)](https://github.com/G3niusYukki/xianyu-openclaw/releases/latest)
-[![License](https://img.shields.io/github/license/G3niusYukki/xianyu-openclaw?style=flat-square)](LICENSE)
+<p align="center">
+  <a href="https://github.com/G3niusYukki/xianyu-openclaw/releases/latest"><img src="https://img.shields.io/github/v/release/G3niusYukki/xianyu-openclaw?style=flat-square&color=FF6A00" alt="Release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/G3niusYukki/xianyu-openclaw?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/G3niusYukki/xianyu-openclaw/actions"><img src="https://img.shields.io/github/actions/workflow/status/G3niusYukki/xianyu-openclaw/ci.yml?style=flat-square&label=CI" alt="CI" /></a>
+  <a href="https://github.com/G3niusYukki/xianyu-openclaw/stargazers"><img src="https://img.shields.io/github/stars/G3niusYukki/xianyu-openclaw?style=flat-square" alt="Stars" /></a>
+  <a href="https://github.com/G3niusYukki/xianyu-openclaw/issues"><img src="https://img.shields.io/github/issues/G3niusYukki/xianyu-openclaw?style=flat-square" alt="Issues" /></a>
+</p>
 
----
-
-## 工作原理
-
-```
-用户（自然语言对话）
-    |
-    v
-OpenClaw Gateway（AI Agent + Web UI）
-    |
-    v
-闲鱼 Skills（5 个技能模块）
-    |
-    v
-Python CLI（业务逻辑 + 数据库）
-    |
-    v
-OpenClaw Managed Browser（headless Chromium via CDP）
-    |
-    v
-闲鱼网站（goofish.com）
-```
-
-你只需要在浏览器打开 OpenClaw 界面，用中文告诉它你想做什么：
-
-- "帮我发布一个 iPhone 15 Pro，价格 5999，95新"
-- "擦亮所有商品"
-- "今天运营数据怎么样"
-- "把那个 MacBook 降到 8000"
-
-OpenClaw 的 AI Agent 会理解你的意图，自动调用对应的技能完成操作。
+<p align="center">
+  <a href="#quickstart">Quickstart</a> •
+  <a href="#features">Features</a> •
+  <a href="#architecture">Architecture</a> •
+  <a href="#skills">Skills</a> •
+  <a href="USER_GUIDE.md">中文使用指南</a> •
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
 ---
 
-## 快速开始
+## Why?
 
-### 前置要求
+Running a Xianyu (闲鱼, aka Goofish) store means repeating the same tedious tasks every day: publish listings, write SEO titles, polish (refresh) items, adjust prices, check analytics. That's hours of clicking.
 
-- Docker 和 Docker Compose
-- 一个 AI API Key（Anthropic / OpenAI / DeepSeek 任选一个）
-- 闲鱼账号 Cookie
+**xianyu-openclaw** turns all of that into a conversation:
 
-### 1. 克隆项目
+```
+You: 帮我发布一个 iPhone 15 Pro，价格 5999，95新
+ AI: ✅ 已发布！标题：【自用出】iPhone 15 Pro 256G 原色钛金属 95新
+     链接：https://www.goofish.com/item/xxx
+
+You: 擦亮所有商品
+ AI: ✅ 已擦亮 23 件商品
+
+You: 今天运营数据怎么样？
+ AI: 📊 今日浏览 1,247 | 想要 89 | 成交 12 | 营收 ¥38,700
+```
+
+Built on [OpenClaw](https://github.com/openclaw/openclaw) — an open-source AI agent framework with native browser control. When OpenClaw upgrades, your Xianyu toolkit upgrades with it.
+
+---
+
+## Features
+
+| | Feature | Description |
+|---|---------|-------------|
+| 🤖 | **Natural language control** | Talk to your store in Chinese. No menus, no clicking. |
+| 📦 | **Smart publishing** | AI-generated titles, descriptions & tags optimized for Xianyu SEO |
+| ✨ | **Batch polish** | One command to refresh all listings, with human-like random delays |
+| 💰 | **Price management** | Adjust prices, bulk repricing strategies |
+| 📊 | **Analytics dashboard** | Daily reports, trend analysis, data export (CSV) |
+| 👥 | **Multi-account** | Manage multiple Xianyu accounts with encrypted cookie storage |
+| 🔒 | **Security first** | AES-encrypted cookies, parameterized SQL, rate limiting |
+| 🐳 | **One-command deploy** | `docker compose up -d` — that's it |
+| 🔌 | **Plugin architecture** | 5 modular OpenClaw Skills, easy to extend |
+
+---
+
+<h2 id="quickstart">Quickstart</h2>
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) (20.10+)
+- An AI API key — [Anthropic](https://console.anthropic.com/) (recommended), [OpenAI](https://platform.openai.com/), or [DeepSeek](https://platform.deepseek.com/) (cheapest)
+- A Xianyu (Goofish) account cookie ([how to get it](#get-cookie))
+
+### 3 steps to launch
 
 ```bash
+# 1. Clone
 git clone https://github.com/G3niusYukki/xianyu-openclaw.git
 cd xianyu-openclaw
-```
 
-### 2. 配置环境变量
-
-```bash
+# 2. Configure
 cp .env.example .env
-```
+# Edit .env — fill in your API key, cookie, and passwords
 
-编辑 `.env` 文件，填入：
-- AI Provider API Key（`ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY` 等）
-- `OPENCLAW_GATEWAY_TOKEN`（自定义一个密码）
-- `AUTH_PASSWORD`（Web UI 登录密码）
-- `XIANYU_COOKIE_1`（闲鱼 Cookie）
-
-### 3. 一键启动
-
-```bash
+# 3. Launch
 docker compose up -d
 ```
 
-### 4. 打开使用
-
-浏览器访问：
-
-```
-http://localhost:8080
-```
-
-用你设置的 `AUTH_USERNAME` / `AUTH_PASSWORD` 登录，即可开始对话。
+Open **http://localhost:8080** and start talking to your Xianyu AI assistant.
 
 ---
 
-## 技能列表
+<h2 id="architecture">Architecture</h2>
 
-| 技能 | 功能 | 示例指令 |
-|------|------|---------|
-| xianyu-publish | 发布商品 | "帮我发布一个 AirPods Pro，价格 800" |
-| xianyu-manage | 擦亮/调价/上下架 | "擦亮所有商品"、"把 iPhone 降到 4000" |
-| xianyu-content | AI 文案生成 | "帮我写一个 MacBook 的标题和描述" |
-| xianyu-metrics | 数据分析 | "今天运营数据怎么样"、"最近一周浏览量趋势" |
-| xianyu-accounts | 账号管理 | "我的账号还正常吗"、"帮我刷新 Cookie" |
+```
+┌─────────────────────────────────────────────────┐
+│                   User (Chat UI)                │
+│            http://localhost:8080                 │
+└──────────────────────┬──────────────────────────┘
+                       │ natural language
+                       ▼
+┌──────────────────────────────────────────────────┐
+│              OpenClaw Gateway                     │
+│    AI Agent  ·  Skill Router  ·  Web UI           │
+│                  :18789                           │
+└──────┬──────────────┬──────────────┬─────────────┘
+       │              │              │
+       ▼              ▼              ▼
+  ┌─────────┐  ┌───────────┐  ┌───────────┐
+  │ xianyu- │  │  xianyu-  │  │  xianyu-  │  ... 5 Skills
+  │ publish │  │  manage   │  │  metrics  │
+  └────┬────┘  └─────┬─────┘  └─────┬─────┘
+       │             │              │
+       ▼             ▼              ▼
+  ┌──────────────────────────────────────────┐
+  │          Python CLI  (src/cli.py)        │
+  │   ListingService · OperationsService     │
+  │   AnalyticsService · AccountsService     │
+  └──────────────────┬───────────────────────┘
+                     │ HTTP
+                     ▼
+  ┌──────────────────────────────────────────┐
+  │     OpenClaw Managed Browser (CDP)       │
+  │          headless Chromium :18791        │
+  └──────────────────┬───────────────────────┘
+                     │
+                     ▼
+              goofish.com 🐟
+```
+
+**Before v4**: User → Streamlit → FastAPI → Playwright → Chromium
+**After v4**: User → OpenClaw Chat → Skill → CLI → Gateway Browser API → Managed Chromium
 
 ---
 
-## 项目结构
+<h2 id="skills">Skills</h2>
+
+Each skill is a self-contained [OpenClaw Skill](https://docs.openclaw.ai/skills/) with a `SKILL.md` descriptor:
+
+| Skill | What it does | Example prompt |
+|-------|-------------|----------------|
+| `xianyu-publish` | Publish new listings with AI-generated copy | "发布一个 AirPods Pro，800 元" |
+| `xianyu-manage` | Polish / reprice / delist / relist | "擦亮所有商品" |
+| `xianyu-content` | Generate SEO-optimized titles & descriptions | "帮我写个 MacBook 的标题" |
+| `xianyu-metrics` | Dashboard, daily reports, trend charts | "这周浏览量趋势" |
+| `xianyu-accounts` | Health checks, cookie validation & refresh | "Cookie 还有效吗" |
+
+### CLI interface
+
+Skills call the Python backend via a structured CLI:
+
+```bash
+python -m src.cli publish  --title "..." --price 5999 --tags 95新 国行
+python -m src.cli polish   --all --max 50
+python -m src.cli price    --id item_123 --price 4999
+python -m src.cli delist   --id item_123
+python -m src.cli relist   --id item_123
+python -m src.cli analytics --action dashboard
+python -m src.cli accounts  --action list
+```
+
+All commands output structured JSON for agent parsing.
+
+---
+
+<h2 id="get-cookie">Getting Your Xianyu Cookie</h2>
+
+<details>
+<summary><strong>Click to expand step-by-step guide</strong></summary>
+
+1. Open **https://www.goofish.com** in Chrome and log in
+2. Press **F12** to open DevTools
+3. Go to the **Network** tab
+4. Refresh the page (**F5**)
+5. Click any request in the list
+6. Find `Cookie:` in **Request Headers**
+7. Copy the entire value
+8. Paste into `.env` as `XIANYU_COOKIE_1=...`
+
+> Cookies expire every 7–30 days. The tool will warn you when they're about to expire.
+
+</details>
+
+---
+
+## Configuration
+
+<details>
+<summary><strong><code>.env</code> variables</strong></summary>
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | One AI key required | Anthropic API key |
+| `OPENAI_API_KEY` | | OpenAI API key |
+| `DEEPSEEK_API_KEY` | | DeepSeek API key (cheapest) |
+| `OPENCLAW_GATEWAY_TOKEN` | Yes | Gateway auth token (set anything) |
+| `AUTH_PASSWORD` | Yes | Web UI login password |
+| `XIANYU_COOKIE_1` | Yes | Xianyu session cookie |
+| `XIANYU_COOKIE_2` | | Second account cookie |
+| `ENCRYPTION_KEY` | | Cookie encryption passphrase (auto-generated if empty) |
+
+</details>
+
+<details>
+<summary><strong>OpenClaw config (<code>config/openclaw.example.json</code>)</strong></summary>
+
+```json
+{
+  "browser": {
+    "enabled": true,
+    "defaultProfile": "openclaw",
+    "headless": true,
+    "noSandbox": true
+  }
+}
+```
+
+</details>
+
+---
+
+## Project Structure
 
 ```
 xianyu-openclaw/
-├── skills/                      # OpenClaw 技能（SKILL.md 格式）
-│   ├── xianyu-publish/          # 商品发布技能
-│   ├── xianyu-manage/           # 商品管理技能
-│   ├── xianyu-content/          # AI 文案生成技能
-│   ├── xianyu-metrics/          # 数据分析技能
-│   └── xianyu-accounts/         # 账号管理技能
-├── src/                         # Python 业务逻辑
-│   ├── cli.py                   # CLI 入口（供 Agent 调用）
-│   ├── core/                    # 核心模块
-│   │   ├── browser_client.py    # OpenClaw Gateway 浏览器客户端
-│   │   ├── config.py            # 配置管理
-│   │   ├── crypto.py            # Cookie 加密
-│   │   ├── logger.py            # 日志
-│   │   └── startup_checks.py    # 启动检查
-│   └── modules/                 # 业务模块
-│       ├── listing/             # 商品发布
-│       ├── operations/          # 运营操作
-│       ├── analytics/           # 数据分析
-│       ├── accounts/            # 账号管理
-│       ├── content/             # AI 内容生成
-│       └── media/               # 图片处理
-├── config/                      # 配置文件
-│   ├── config.example.yaml      # 应用配置模板
-│   └── openclaw.example.json    # OpenClaw 配置模板
-├── scripts/
-│   └── init.sh                  # Docker 初始化脚本
-├── docker-compose.yml           # Docker 编排
-├── requirements.txt             # Python 依赖
-├── .env.example                 # 环境变量模板
-├── USER_GUIDE.md                # 使用说明书
-└── README.md
+├── skills/                      # 5 OpenClaw Skills (SKILL.md format)
+│   ├── xianyu-publish/
+│   ├── xianyu-manage/
+│   ├── xianyu-content/
+│   ├── xianyu-metrics/
+│   └── xianyu-accounts/
+├── src/
+│   ├── cli.py                   # CLI entry point (agent ↔ services)
+│   ├── core/
+│   │   ├── browser_client.py    # OpenClaw Gateway browser HTTP client
+│   │   ├── config.py            # YAML config loader
+│   │   ├── crypto.py            # AES cookie encryption
+│   │   ├── error_handler.py     # Centralized error handling
+│   │   ├── logger.py            # Structured logging (loguru)
+│   │   └── startup_checks.py    # Boot-time health checks
+│   └── modules/
+│       ├── listing/             # Publish & manage listings
+│       ├── operations/          # Polish, reprice, delist
+│       ├── analytics/           # SQLite-backed analytics
+│       ├── accounts/            # Multi-account & cookie mgmt
+│       ├── content/             # AI content generation
+│       └── media/               # Image processing (Pillow)
+├── config/                      # Config templates
+├── scripts/init.sh              # Docker Python env bootstrap
+├── docker-compose.yml           # One-command deployment
+├── requirements.txt             # Minimal Python deps
+└── .env.example                 # Environment template
 ```
 
 ---
 
-## 获取闲鱼 Cookie
+## Development
 
-1. 用 Chrome 打开 https://www.goofish.com 并登录
-2. 按 F12 打开开发者工具
-3. 切换到 Network 标签
-4. 刷新页面，点击任意请求
-5. 在 Request Headers 中找到 Cookie 行，全部复制
-6. 粘贴到 `.env` 文件的 `XIANYU_COOKIE_1`
+```bash
+# Clone and install deps locally (for development without Docker)
+git clone https://github.com/G3niusYukki/xianyu-openclaw.git
+cd xianyu-openclaw
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
-> Cookie 有效期通常 7-30 天，过期后需要重新获取。
+# Run CLI directly
+python -m src.cli --help
+
+# Run tests
+pytest tests/
+
+# Lint
+ruff check src/
+```
 
 ---
 
-## 常用命令
+## Relationship with OpenClaw
+
+This project is a set of **Skills** (plugins) for the [OpenClaw](https://github.com/openclaw/openclaw) AI agent framework:
+
+| Layer | Provided by |
+|-------|------------|
+| AI Agent & Chat UI | OpenClaw |
+| Browser automation (CDP) | OpenClaw |
+| Gateway API | OpenClaw |
+| **Xianyu business logic** | **This project** |
+| **Analytics & reporting** | **This project** |
+| **Multi-account management** | **This project** |
+
+When OpenClaw releases updates (new AI models, browser engine upgrades, new tools), just run:
 
 ```bash
-# 启动
-docker compose up -d
-
-# 查看日志
-docker compose logs -f
-
-# 停止
-docker compose down
-
-# 重建（更新镜像后）
 docker compose pull && docker compose up -d
 ```
 
----
-
-## 与 OpenClaw 的关系
-
-本项目是 OpenClaw 的一组 **Skills**（技能扩展）。OpenClaw 提供：
-
-- AI Agent 对话引擎
-- 浏览器自动化（Managed Chromium via CDP）
-- Web UI
-- Gateway API
-
-本项目提供：
-
-- 闲鱼业务逻辑（发布、擦亮、调价等）
-- 数据分析和报表
-- 多账号管理
-- Cookie 加密存储
-
-当 OpenClaw 更新时（新的 AI 模型支持、浏览器引擎升级、新的 tool 能力），只需要 `docker compose pull` 即可获得更新，闲鱼业务逻辑不受影响。
+Your Xianyu business logic stays untouched.
 
 ---
 
-## 更新日志
+## Roadmap
 
-### v4.0.0 (2026-02-23) - OpenClaw 深度集成
-
-- 浏览器自动化从 Playwright 迁移到 OpenClaw Gateway Browser API
-- 删除 Streamlit/FastAPI Web 界面，改用 OpenClaw 自带 AI 对话 UI
-- 所有 Skills 重写为 OpenClaw 标准 SKILL.md 格式
-- 新增 CLI 入口 (`src/cli.py`) 供 Agent 调用
-- Docker 一键部署使用 `coollabsio/openclaw` 官方镜像
-- 可跟随 OpenClaw 社区更新获得新能力
-
-### v3.0.0 (2026-02-23) - 生产可用性改造
-
-- Playwright 实现替代空壳 HTTP API
-- 安全加固（CORS、速率限制、Cookie 加密）
-- Docker 容器化、启动健康检查
+- [ ] Scheduled auto-polish (cron-based)
+- [ ] Price optimization suggestions based on analytics
+- [ ] Competitor monitoring
+- [ ] Telegram / WeChat notification bot
+- [ ] Xianyu message auto-reply
+- [ ] Multi-language support
 
 ---
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Security
+
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT License - 详见 [LICENSE](LICENSE)
+[MIT](LICENSE) — use it, fork it, sell fish with it. 🐟
+
+---
+
+<p align="center">
+  <sub>Built with 🐟 and ☕ by <a href="https://github.com/G3niusYukki">@G3niusYukki</a></sub>
+</p>
