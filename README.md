@@ -2,7 +2,7 @@
 
 基于 [OpenClaw](https://github.com/openclaw/openclaw) 框架的闲鱼自动化运营工具。支持商品发布、智能做图、文案生成、一键擦亮、数据记录、多账号管理等全流程自动化功能。
 
-**v2.0.0 重磅更新**: 新增可视化Web界面和一键部署功能！🎉
+**v2.1.0 最新更新**: 完成 1-6 阶段改造，Web端核心页面已接入真实 API，新增任务管理接口与上线清单。🎉
 
 [![Release](https://img.shields.io/github/v/release/G3niusYukki/xianyu-openclaw?style=flat-square)](https://github.com/G3niusYukki/xianyu-openclaw/releases/latest)
 [![License](https://img.shields.io/github/license/G3niusYukki/xianyu-openclaw?style=flat-square)](LICENSE)
@@ -48,7 +48,7 @@
 
 ## 功能特性
 
-### 💻 可视化Web界面（v2.0新增）
+### 💻 可视化Web界面（v2.1已打通核心链路）
 
 - **现代化界面** - 基于Streamlit + React的响应式Web界面
 - **操作简化** - 无需命令行，点击即可完成所有操作
@@ -1416,6 +1416,48 @@ mkdir -p data/export
 ---
 
 ## 更新日志
+
+### v2.1.0 (2026-02-23) ✅ 核心链路打通与发布收口
+
+**本次更新重点**: 完成阶段 1-6 改造，后端主流程稳定可用，前端核心页面去 mock 并接入真实 API，新增任务管理与上线回滚清单。
+
+#### 核心能力
+
+**🛒 发布链路**
+- 修复发布流程关键问题（DTO映射、图片上传逻辑、异常处理）
+- `/api/products/publish` 与前端发布页已打通
+
+**⚙️ 运营链路**
+- 运营页已接入真实接口：单个擦亮、批量擦亮、调价、操作日志查询
+- 新增 `/api/operations/logs` 接口
+
+**📈 分析链路**
+- 分析页改为真实数据驱动（仪表盘/日报/周报/趋势/商品表现）
+- 新增 `/api/analytics/products/performance`
+- 趋势接口支持 `metric` 参数：`/api/analytics/trend?metric=views|wants|sales|inquiries`
+
+**👥 账号链路**
+- 账号页改为真实读写（新增/编辑/删除/启停）
+- 新增账号相关 API：
+  - `GET /api/accounts/health`
+  - `POST /api/accounts`
+  - `PUT /api/accounts/{account_id}`
+  - `DELETE /api/accounts/{account_id}`
+  - `POST /api/accounts/{account_id}/toggle`
+
+**⏰ 任务管理**
+- 新增任务管理 API（创建/列表/更新/启停/立即执行/删除）
+- 账号页“定时任务”Tab 已支持真实任务操作
+
+#### 质量与交付
+
+- 后端关键测试通过：`40 passed, 3 skipped`
+- 新增任务 API 测试：`tests/test_tasks_api.py`
+- 前端构建通过（Vite）
+- 新增上线文档：`docs/RELEASE_CHECKLIST.md`
+- 依赖策略更新：忽略 `web/frontend/node_modules/`，保留 `web/frontend/package-lock.json`
+
+---
 
 ### v2.0.0 (2026-02-12) 🎉 可视化Web界面和一键部署
 
