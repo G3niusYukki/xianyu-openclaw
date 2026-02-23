@@ -148,6 +148,10 @@ class ContentService:
         }
         return keywords.get(category, keywords["General"])
 
+    def _get_sample_keywords(self, category: str) -> List[str]:
+        """兼容旧接口：返回分类关键词样本"""
+        return self._get_category_keywords(category)
+
     def generate_description(self, product_name: str, condition: str,
                             reason: str, tags: List[str],
                             extra_info: Optional[str] = None) -> str:

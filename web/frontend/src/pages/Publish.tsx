@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Card, Form, Input, InputNumber, Select, Button, Upload, message, Steps, Divider, Row, Col, Switch, Space } from 'antd'
 import { UploadOutlined, ShoppingOutlined } from '@ant-design/icons'
 import type { UploadProps } from 'antd'
+import { api } from '../services'
 
 const { Step } = Steps
 const { TextArea } = Input
@@ -171,15 +172,38 @@ const Publish: React.FC = () => {
       }
 
       setLoading(true)
-      // TODO: 调用API发布商品
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      message.success('商品发布成功！')
+      const featureList =
+        typeof values.features === 'string'
+          ? values.features.split(',').map((s: string) => s.trim()).filter(Boolean)
+          : []
+
+      const imageList = fileList.map((f) => {
+        const origin = f.originFileObj as any
+        return origin?.path || f.name
+      })
+
+      const resp = await api.products.publish({
+        name: values.name,
+        category: values.category,
+        price: values.price,
+        condition: values.condition,
+        reason: values.reason,
+        features: featureList,
+        images: imageList,
+      })
+
+      if (!resp.success) {
+        message.error(resp.error || '商品发布失败')
+        return
+      }
+
+      message.success(resp.data?.url ? `商品发布成功：${resp.data.url}` : '商品发布成功！')
       form.resetFields()
       setFileList([])
       setCurrent(0)
     } catch (error) {
       console.error('发布失败:', error)
+      message.error('发布失败，请检查后端服务或参数')
     } finally {
       setLoading(false)
     }

@@ -9,9 +9,21 @@ from .listing.service import ListingService
 from .listing.models import Listing, ListingImage, PublishResult
 from .media.service import MediaService
 from .content.service import ContentService
-from .operations.service import OperationsService
-from .analytics.service import AnalyticsService
-from .accounts.service import AccountsService
+
+try:
+    from .operations.service import OperationsService
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    OperationsService = None
+
+try:
+    from .analytics.service import AnalyticsService
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    AnalyticsService = None
+
+try:
+    from .accounts.service import AccountsService
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    AccountsService = None
 
 __all__ = [
     "ListingService",

@@ -8,6 +8,7 @@ Analytics Service
 import asyncio
 import json
 import csv
+import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -54,8 +55,9 @@ class AnalyticsService:
         self._allowed_metrics = {"views", "wants", "sales", "inquiries"}
         self._allowed_export_types = {"products", "logs", "metrics"}
         self._allowed_formats = {"csv", "json"}
-
-        self._init_db()
+        self._db_timeout = int(self.config.get("timeout", 30))
+        self._write_lock = asyncio.Lock()
+        self._init_db_sync()
 
     def _validate_metric(self, metric: str) -> str:
         """
@@ -76,7 +78,7 @@ class AnalyticsService:
 
     async def _init_db(self) -> None:
         """初始化数据库"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS operation_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,6 +147,70 @@ class AnalyticsService:
             await db.commit()
             self.logger.success("Analytics database initialized")
 
+    def _init_db_sync(self) -> None:
+        """同步初始化数据库，确保服务创建后表结构可立即使用"""
+        with sqlite3.connect(self.db_path, timeout=self._db_timeout) as db:
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS operation_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    operation_type TEXT NOT NULL,
+                    product_id TEXT,
+                    account_id TEXT,
+                    details TEXT,
+                    status TEXT,
+                    error_message TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS product_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id TEXT NOT NULL,
+                    product_title TEXT,
+                    views INTEGER DEFAULT 0,
+                    wants INTEGER DEFAULT 0,
+                    inquiries INTEGER DEFAULT 0,
+                    sales INTEGER DEFAULT 0,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id TEXT UNIQUE,
+                    title TEXT,
+                    price REAL,
+                    cost_price REAL,
+                    status TEXT,
+                    category TEXT,
+                    account_id TEXT,
+                    product_url TEXT,
+                    views INTEGER DEFAULT 0,
+                    wants INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    sold_at DATETIME
+                )
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_op_logs_type_time
+                ON operation_logs(operation_type, timestamp, account_id)
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_op_logs_time
+                ON operation_logs(timestamp)
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_metrics_product_time
+                ON product_metrics(product_id, timestamp)
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_products_account
+                ON products(account_id)
+            """)
+            db.commit()
+        self.logger.success("Analytics database initialized")
+
     async def log_operation(self, operation_type: str, product_id: Optional[str] = None,
                             account_id: Optional[str] = None, details: Optional[Dict] = None,
                             status: str = "success", error_message: Optional[str] = None) -> int:
@@ -162,21 +228,22 @@ class AnalyticsService:
         Returns:
             日志ID
         """
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("""
-                INSERT INTO operation_logs
-                (operation_type, product_id, account_id, details, status, error_message)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                operation_type,
-                product_id,
-                account_id,
-                json.dumps(details, ensure_ascii=False) if details else None,
-                status,
-                error_message
-            ))
-            await db.commit()
-            return cursor.lastrowid
+        async with self._write_lock:
+            async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
+                cursor = await db.execute("""
+                    INSERT INTO operation_logs
+                    (operation_type, product_id, account_id, details, status, error_message)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    operation_type,
+                    product_id,
+                    account_id,
+                    json.dumps(details, ensure_ascii=False) if details else None,
+                    status,
+                    error_message
+                ))
+                await db.commit()
+                return cursor.lastrowid
 
     async def record_metrics(self, product_id: str, product_title: Optional[str] = None,
                              views: int = 0, wants: int = 0, inquiries: int = 0,
@@ -195,14 +262,15 @@ class AnalyticsService:
         Returns:
             记录ID
         """
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("""
-                INSERT INTO product_metrics
-                (product_id, product_title, views, wants, inquiries, sales)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (product_id, product_title, views, wants, inquiries, sales))
-            await db.commit()
-            return cursor.lastrowid
+        async with self._write_lock:
+            async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
+                cursor = await db.execute("""
+                    INSERT INTO product_metrics
+                    (product_id, product_title, views, wants, inquiries, sales)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (product_id, product_title, views, wants, inquiries, sales))
+                await db.commit()
+                return cursor.lastrowid
 
     async def add_product(self, product_id: str, title: str, price: float,
                           category: str = None, account_id: str = None) -> int:
@@ -219,14 +287,15 @@ class AnalyticsService:
         Returns:
             商品ID
         """
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("""
-                INSERT OR REPLACE INTO products
-                (product_id, title, price, category, account_id, status, created_at)
-                VALUES (?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
-            """, (product_id, title, price, category, account_id))
-            await db.commit()
-            return cursor.lastrowid
+        async with self._write_lock:
+            async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
+                cursor = await db.execute("""
+                    INSERT OR REPLACE INTO products
+                    (product_id, title, price, category, account_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
+                """, (product_id, title, price, category, account_id))
+                await db.commit()
+                return cursor.lastrowid
 
     async def update_product_status(self, product_id: str, status: str) -> bool:
         """
@@ -239,17 +308,18 @@ class AnalyticsService:
         Returns:
             是否成功
         """
-        async with aiosqlite.connect(self.db_path) as db:
-            if status == "sold":
-                await db.execute("""
-                    UPDATE products SET status = ?, sold_at = CURRENT_TIMESTAMP WHERE product_id = ?
-                """, (status, product_id))
-            else:
-                await db.execute("""
-                    UPDATE products SET status = ? WHERE product_id = ?
-                """, (status, product_id))
-            await db.commit()
-            return True
+        async with self._write_lock:
+            async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
+                if status == "sold":
+                    await db.execute("""
+                        UPDATE products SET status = ?, sold_at = CURRENT_TIMESTAMP WHERE product_id = ?
+                    """, (status, product_id))
+                else:
+                    await db.execute("""
+                        UPDATE products SET status = ? WHERE product_id = ?
+                    """, (status, product_id))
+                await db.commit()
+                return True
 
     async def get_operation_logs(self, limit: int = 100,
                                  operation_type: Optional[str] = None,
@@ -267,7 +337,7 @@ class AnalyticsService:
         Returns:
             日志列表
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
             query = "SELECT * FROM operation_logs WHERE 1=1"
@@ -305,7 +375,7 @@ class AnalyticsService:
         Returns:
             指标历史列表
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
             cursor = await db.execute("""
@@ -325,7 +395,7 @@ class AnalyticsService:
         Returns:
             统计数据字典
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
             total_operations = await db.execute_fetchone(
@@ -384,7 +454,7 @@ class AnalyticsService:
         target_date = date or (datetime.now() - timedelta(days=1))
         date_str = target_date.strftime("%Y-%m-%d")
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
             day_start = f"{date_str} 00:00:00"
@@ -434,7 +504,7 @@ class AnalyticsService:
         end = end_date or datetime.now()
         start = end - timedelta(days=7)
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
             week_start = start.strftime("%Y-%m-%d 00:00:00")
@@ -507,7 +577,7 @@ class AnalyticsService:
         start_date = f"{target_year}-{target_month:02d}-01"
         end_date = f"{target_year}-{target_month:02d}-{days_in_month:02d}"
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
             operations = await db.execute_fetchall("""
@@ -563,7 +633,7 @@ class AnalyticsService:
         Returns:
             商品表现列表
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
             cursor = await db.execute("""
@@ -594,7 +664,7 @@ class AnalyticsService:
         """
         metric = self._validate_metric(metric)
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
             cursor = await db.execute(f"""
@@ -650,7 +720,7 @@ class AnalyticsService:
 
     async def _export_products(self) -> List[Dict[str, Any]]:
         """导出商品数据"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM products ORDER BY created_at DESC")
             return [dict(row) for row in await cursor.fetchall()]
@@ -661,7 +731,7 @@ class AnalyticsService:
 
     async def _export_metrics(self) -> List[Dict[str, Any]]:
         """导出指标数据"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("""
                 SELECT * FROM product_metrics
@@ -700,22 +770,23 @@ class AnalyticsService:
         Returns:
             清理统计
         """
-        async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute("""
-                DELETE FROM operation_logs
-                WHERE timestamp < datetime('now', ?)
-            """, (f"-{days} days",))
-            logs_deleted = cursor.rowcount
+        async with self._write_lock:
+            async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
+                cursor = await db.execute("""
+                    DELETE FROM operation_logs
+                    WHERE timestamp < datetime('now', ?)
+                """, (f"-{days} days",))
+                logs_deleted = cursor.rowcount
 
-            cursor = await db.execute("""
-                DELETE FROM product_metrics
-                WHERE timestamp < datetime('now', ?)
-            """, (f"-{days} days",))
-            metrics_deleted = cursor.rowcount
+                cursor = await db.execute("""
+                    DELETE FROM product_metrics
+                    WHERE timestamp < datetime('now', ?)
+                """, (f"-{days} days",))
+                metrics_deleted = cursor.rowcount
 
-            await db.commit()
+                await db.commit()
 
-            return {
-                "logs_deleted": logs_deleted,
-                "metrics_deleted": metrics_deleted
-            }
+                return {
+                    "logs_deleted": logs_deleted,
+                    "metrics_deleted": metrics_deleted
+                }

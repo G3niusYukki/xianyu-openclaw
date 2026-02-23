@@ -30,6 +30,7 @@ class Config:
     _instance: Optional["Config"] = None
     _lock = threading.Lock()
     _config: Dict[str, Any] = {}
+    _config_path: Optional[str] = None
 
     def __new__(cls, config_path: Optional[str] = None):
         if cls._instance is None:
@@ -40,10 +41,15 @@ class Config:
         return cls._instance
 
     def __init__(self, config_path: Optional[str] = None):
+        default_path = self._find_config_file()
         if not hasattr(self, '_initialized') or not self._initialized:
             self.logger = get_logger()
             self._load_config(config_path)
             self._initialized = True
+        elif config_path and config_path != self._config_path:
+            self.reload(config_path)
+        elif config_path is None and self._config_path != default_path:
+            self.reload(default_path)
 
     def _load_config(self, config_path: Optional[str] = None) -> None:
         """
@@ -54,6 +60,8 @@ class Config:
         """
         if config_path is None:
             config_path = self._find_config_file()
+
+        self._config_path = config_path
 
         if config_path and os.path.exists(config_path):
             self._load_yaml_config(config_path)
@@ -276,7 +284,7 @@ class Config:
             config_path: 新的配置文件路径
         """
         self._config = {}
-        self._load_config(config_path)
+        self._load_config(config_path or self._config_path)
 
 
 @lru_cache(maxsize=1)

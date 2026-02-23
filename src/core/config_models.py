@@ -109,6 +109,14 @@ class AppConfig(BaseModel):
     data_dir: str = Field(default="data", description="数据目录")
     logs_dir: str = Field(default="logs", description="日志目录")
 
+    @validator("log_level")
+    def validate_log_level(cls, v):
+        """验证日志级别"""
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        if v not in valid_levels:
+            raise ValueError(f"log_level must be one of {valid_levels}, got {v}")
+        return v
+
 
 class ConfigModel(BaseModel):
     """完整配置模型"""
@@ -123,16 +131,6 @@ class ConfigModel(BaseModel):
     content: ContentConfig = Field(default_factory=ContentConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
 
-    @validator('log_level', pre=True)
-    def validate_log_level(cls, v):
-        """验证日志级别"""
-        if isinstance(v, dict):
-            v = v.get("app", {}).get("log_level", "INFO")
-        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-        if v not in valid_levels:
-            raise ValueError(f'log_level must be one of {valid_levels}, got {v}')
-        return v
-
     @validator('default_account')
     def validate_default_account(cls, v, values):
         """验证默认账号ID是否存在"""
@@ -144,7 +142,7 @@ class ConfigModel(BaseModel):
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
-        return self.dict()
+        return self.model_dump()
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ConfigModel':

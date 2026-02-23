@@ -1,23 +1,73 @@
-import React, { useState } from 'react'
-import { Card, Tabs, Button, InputNumber, Slider, Table, message, Row, Col, Select, Space, Tag } from 'antd'
-import { ReloadOutlined, DeleteOutlined, DollarOutlined } from '@ant-design/icons'
+import React, { useEffect, useMemo, useState } from 'react'
+import { Card, Tabs, Button, InputNumber, Slider, Table, message, Row, Col, Select, Space, Tag, Divider, Input } from 'antd'
+import { ReloadOutlined, DollarOutlined } from '@ant-design/icons'
+import { api, OperationLog, ProductPerformance } from '../services'
 
 const { TabPane } = Tabs
 const { Option } = Select
 
 const Operations: React.FC = () => {
   const [loading, setLoading] = useState(false)
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logs, setLogs] = useState<OperationLog[]>([])
+  const [products, setProducts] = useState<ProductPerformance[]>([])
+  const [singleProductId, setSingleProductId] = useState('')
+  const [priceProductId, setPriceProductId] = useState<string | undefined>()
+  const [newPrice, setNewPrice] = useState<number | null>(null)
   const [polishSettings, setPolishSettings] = useState({
     maxItems: 50,
     delayMin: 3,
     delayMax: 6,
   })
 
-  const mockProducts = [
-    { id: 'item_001', title: 'iPhone 15 Pro 256GB', price: 6999, views: 1234, wants: 56 },
-    { id: 'item_002', title: 'MacBook Pro M3', price: 12999, views: 890, wants: 23 },
-    { id: 'item_003', title: 'AirPods Pro 2', price: 1599, views: 2345, wants: 89 },
-  ]
+  const loadData = async () => {
+    setLogsLoading(true)
+    try {
+      const [logResp, productResp] = await Promise.all([
+        api.operations.getLogs(50),
+        api.analytics.getProductPerformance(30),
+      ])
+      if (logResp.success) setLogs(logResp.data || [])
+      if (productResp.success) setProducts(productResp.data || [])
+    } catch (error) {
+      message.error('加载运营数据失败')
+    } finally {
+      setLogsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadData()
+  }, [])
+
+  const selectableProductIds = useMemo(() => {
+    const fromPerformance = (products || []).map((p) => p.product_id).filter(Boolean)
+    const fromLogs = (logs || []).map((l) => l.product_id || '').filter(Boolean)
+    return Array.from(new Set([...fromPerformance, ...fromLogs]))
+  }, [products, logs])
+
+  const productRows = useMemo(() => {
+    if (products.length > 0) {
+      return products.map((p) => ({
+        id: p.product_id,
+        title: p.title || p.product_id,
+        price: p.price || 0,
+        views: p.total_views || 0,
+        wants: p.total_wants || 0,
+        status: p.status || 'unknown',
+      }))
+    }
+    return logs
+      .filter((l) => l.product_id)
+      .map((l) => ({
+        id: l.product_id as string,
+        title: l.product_id as string,
+        price: 0,
+        views: 0,
+        wants: 0,
+        status: 'unknown',
+      }))
+  }, [products, logs])
 
   const productColumns = [
     { title: '商品ID', dataIndex: 'id', key: 'id' },
@@ -30,8 +80,13 @@ const Operations: React.FC = () => {
   const handleBatchPolish = async () => {
     setLoading(true)
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      message.success(`成功擦亮 ${polishSettings.maxItems} 个商品`)
+      const resp = await api.operations.polishBatch(polishSettings.maxItems)
+      if (!resp.success) {
+        message.error('批量擦亮失败')
+        return
+      }
+      message.success(`批量擦亮完成，成功 ${resp.data?.success ?? 0} 个`)
+      await loadData()
     } catch (error) {
       message.error('批量擦亮失败')
     } finally {
@@ -39,12 +94,48 @@ const Operations: React.FC = () => {
     }
   }
 
-  const handleSinglePolish = async (productId: string) => {
+  const handleSinglePolish = async (productId?: string) => {
+    const targetId = (productId || singleProductId).trim()
+    if (!targetId) {
+      message.warning('请先输入商品ID')
+      return
+    }
     try {
-      await new Promise(resolve => setTimeout(resolve, 500))
-      message.success(`商品 ${productId} 擦亮成功`)
+      const resp = await api.operations.polish(targetId)
+      if (!resp.success) {
+        message.error('擦亮失败')
+        return
+      }
+      message.success(`商品 ${targetId} 擦亮成功`)
+      await loadData()
     } catch (error) {
       message.error('擦亮失败')
+    }
+  }
+
+  const handleUpdatePrice = async () => {
+    if (!priceProductId) {
+      message.warning('请选择商品')
+      return
+    }
+    if (newPrice === null || Number.isNaN(newPrice)) {
+      message.warning('请输入新价格')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const resp = await api.operations.updatePrice(priceProductId, Number(newPrice))
+      if (!resp.success) {
+        message.error('更新价格失败')
+        return
+      }
+      message.success('价格更新成功')
+      await loadData()
+    } catch (error) {
+      message.error('更新价格失败')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -62,9 +153,9 @@ const Operations: React.FC = () => {
           <TabPane tab="批量擦亮" key="polish">
             <div style={{ marginBottom: 24 }}>
               <p style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 16 }}>
-                💡 擦亮可以提高商品在搜索结果中的排名，建议每天执行一次
+                擦亮可以提高商品在搜索结果中的排名，建议每天执行一次
               </p>
-              
+
               <Row gutter={24} style={{ marginBottom: 24 }}>
                 <Col span={8}>
                   <label style={{ display: 'block', marginBottom: 8, fontWeight: 500 }}>
@@ -102,24 +193,44 @@ const Operations: React.FC = () => {
                 </Col>
               </Row>
 
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                loading={loading}
-                onClick={handleBatchPolish}
-                size="large"
-              >
-                开始批量擦亮
-              </Button>
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  loading={loading}
+                  onClick={handleBatchPolish}
+                  size="large"
+                >
+                  开始批量擦亮
+                </Button>
+                <Input
+                  placeholder="输入商品ID执行单个擦亮"
+                  value={singleProductId}
+                  onChange={(e) => setSingleProductId(e.target.value)}
+                  style={{ width: 300 }}
+                />
+                <Button icon={<ReloadOutlined />} onClick={() => handleSinglePolish()}>
+                  单个擦亮
+                </Button>
+              </Space>
             </div>
 
             <Divider />
 
             <h4>商品列表</h4>
             <Table
-              dataSource={mockProducts}
+              loading={logsLoading}
+              dataSource={productRows}
               columns={[
                 ...productColumns,
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  key: 'status',
+                  render: (status: string) => (
+                    <Tag color={status === 'active' ? 'green' : 'default'}>{status}</Tag>
+                  ),
+                },
                 {
                   title: '操作',
                   key: 'action',
@@ -135,86 +246,70 @@ const Operations: React.FC = () => {
                 },
               ]}
               rowKey="id"
-              pagination={false}
+              pagination={{ pageSize: 10 }}
             />
           </TabPane>
 
           <TabPane tab="价格调整" key="price">
             <div style={{ marginBottom: 24 }}>
-              <Row gutter={24}>
-                <Col span={8}>
-                  <Card title="单个调整">
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      <div>
-                        <label style={{ display: 'block', marginBottom: 8 }}>商品ID</label>
-                        <Select placeholder="选择商品" style={{ width: '100%' }}>
-                          {mockProducts.map(p => (
-                            <Option key={p.id} value={p.id}>{p.title}</Option>
-                          ))}
-                        </Select>
-                      </div>
-                      <div>
-                        <label style={{ display: 'block', marginBottom: 8 }}>新价格（元）</label>
-                        <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="0.00" />
-                      </div>
-                      <Button type="primary" icon={<DollarOutlined />} block>
-                        更新价格
-                      </Button>
-                    </Space>
-                  </Card>
-                </Col>
-                <Col span={16}>
-                  <Card title="批量调整">
-                    <p style={{ color: 'rgba(0,0,0,0.45)', marginBottom: 16 }}>
-                      支持从Excel/CSV文件批量调整商品价格
-                    </p>
-                    <Button type="dashed" block style={{ height: 120 }}>
-                      点击上传文件
-                    </Button>
-                  </Card>
-                </Col>
-              </Row>
+              <Card title="单个调整">
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 8 }}>商品ID</label>
+                    <Select
+                      placeholder="选择商品"
+                      style={{ width: '100%' }}
+                      value={priceProductId}
+                      onChange={(value) => setPriceProductId(value)}
+                      showSearch
+                      optionFilterProp="children"
+                    >
+                      {selectableProductIds.map((id) => (
+                        <Option key={id} value={id}>
+                          {id}
+                        </Option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 8 }}>新价格（元）</label>
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      min={0}
+                      precision={2}
+                      placeholder="0.00"
+                      value={newPrice as number | null}
+                      onChange={(value) => setNewPrice(value)}
+                    />
+                  </div>
+                  <Button type="primary" icon={<DollarOutlined />} block loading={loading} onClick={handleUpdatePrice}>
+                    更新价格
+                  </Button>
+                </Space>
+              </Card>
             </div>
           </TabPane>
 
-          <TabPane tab="商品管理" key="manage">
-            <div style={{ marginBottom: 24 }}>
-              <Space>
-                <Button danger icon={<DeleteOutlined />}>
-                  批量下架
-                </Button>
-                <Button type="primary">
-                  重新上架
-                </Button>
-              </Space>
-            </div>
-
+          <TabPane tab="最近操作" key="logs">
             <Table
-              dataSource={mockProducts}
+              loading={logsLoading}
+              dataSource={logs}
+              rowKey="id"
+              pagination={{ pageSize: 10 }}
               columns={[
-                ...productColumns,
+                { title: '时间', dataIndex: 'timestamp', key: 'timestamp' },
+                { title: '操作类型', dataIndex: 'operation_type', key: 'operation_type' },
+                { title: '商品ID', dataIndex: 'product_id', key: 'product_id' },
+                { title: '账号', dataIndex: 'account_id', key: 'account_id' },
                 {
                   title: '状态',
                   dataIndex: 'status',
                   key: 'status',
-                  render: () => <Tag color="green">在售</Tag>,
-                },
-                {
-                  title: '操作',
-                  key: 'action',
-                  render: (_: any, record: any) => (
-                    <Space>
-                      <Button type="link" danger size="small">
-                        下架
-                      </Button>
-                      <Button type="link" size="small">
-                        编辑
-                      </Button>
-                    </Space>
+                  render: (status: string) => (
+                    <Tag color={status === 'success' ? 'green' : 'red'}>{status || 'unknown'}</Tag>
                   ),
                 },
               ]}
-              rowKey="id"
             />
           </TabPane>
         </Tabs>

@@ -163,7 +163,7 @@ def retry(max_attempts: int = 3, delay: float = 1.0,
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            logger = kwargs.get('logger') or get_logger()
+            logger = kwargs.pop("logger", None) or get_logger()
 
             for attempt in range(max_attempts):
                 try:
@@ -182,7 +182,7 @@ def retry(max_attempts: int = 3, delay: float = 1.0,
 
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
-            logger = kwargs.get('logger') or get_logger()
+            logger = kwargs.pop("logger", None) or get_logger()
 
             for attempt in range(max_attempts):
                 try:
@@ -358,4 +358,3 @@ def handle_errors(exceptions: Optional[tuple] = None,
         else:
             return sync_wrapper
     return decorator
-

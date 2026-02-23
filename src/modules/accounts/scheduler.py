@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 from pathlib import Path
 import json
-import crontab
 
 from src.core.config import get_config
 from src.core.logger import get_logger

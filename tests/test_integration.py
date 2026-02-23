@@ -5,6 +5,7 @@ Integration Tests
 
 import pytest
 import asyncio
+import aiosqlite
 from pathlib import Path
 
 

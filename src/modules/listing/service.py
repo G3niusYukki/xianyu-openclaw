@@ -187,7 +187,7 @@ class ListingService:
         file_inputs = await self.controller.find_elements(page_id, self.selectors.IMAGE_UPLOAD)
 
         if file_inputs:
-            image_paths = [img for img in images if image_paths and isinstance(images[0], str)]
+            image_paths = [img for img in images if isinstance(img, str) and img.strip()]
             if image_paths:
                 await self.controller.upload_files(page_id, self.selectors.IMAGE_UPLOAD, image_paths)
                 self.logger.success(f"Uploaded {len(image_paths)} images")

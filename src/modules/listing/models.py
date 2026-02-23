@@ -38,6 +38,7 @@ class Listing:
     original_price: Optional[float] = None
     category: str = "General"
     images: List[str] = field(default_factory=list)
+    features: List[str] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
     location: Optional[str] = None
     brand: Optional[str] = None
@@ -61,6 +62,7 @@ class Listing:
             "original_price": self.original_price,
             "category": self.category,
             "images": self.images,
+            "features": self.features,
             "tags": self.tags,
             "location": self.location,
             "brand": self.brand,

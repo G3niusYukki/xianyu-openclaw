@@ -156,3 +156,6 @@ config/*.yaml
 *.tmp
 *.bak
 *~
+
+# Frontend dependencies
+web/frontend/node_modules/

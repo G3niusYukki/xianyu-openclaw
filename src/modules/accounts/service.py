@@ -277,12 +277,12 @@ class AccountsService:
         Returns:
             是否成功
         """
-        account = self.get_account(account_id)
-        if account:
-            account["enabled"] = False
-            account["status"] = AccountStatus.MAINTENANCE
-            self.logger.info(f"Disabled account: {account_id}")
-            return True
+        for account in self.accounts:
+            if account.get("id") == account_id:
+                account["enabled"] = False
+                account["status"] = AccountStatus.MAINTENANCE
+                self.logger.info(f"Disabled account: {account_id}")
+                return True
         return False
 
     def enable_account(self, account_id: str) -> bool:
@@ -295,11 +295,43 @@ class AccountsService:
         Returns:
             是否成功
         """
-        account = self.get_account(account_id)
-        if account:
-            account["enabled"] = True
-            account["status"] = AccountStatus.ACTIVE
-            self.logger.info(f"Enabled account: {account_id}")
+        for account in self.accounts:
+            if account.get("id") == account_id:
+                account["enabled"] = True
+                account["status"] = AccountStatus.ACTIVE
+                self.logger.info(f"Enabled account: {account_id}")
+                return True
+        return False
+
+    def update_account(self, account_id: str, name: Optional[str] = None,
+                       cookie: Optional[str] = None, priority: Optional[int] = None,
+                       enabled: Optional[bool] = None) -> bool:
+        """
+        更新账号信息
+
+        Args:
+            account_id: 账号ID
+            name: 账号名称
+            cookie: Cookie
+            priority: 优先级
+            enabled: 是否启用
+
+        Returns:
+            是否成功
+        """
+        for account in self.accounts:
+            if account.get("id") != account_id:
+                continue
+            if name is not None:
+                account["name"] = name
+            if cookie is not None:
+                account["cookie"] = cookie
+                account["last_login"] = datetime.now().isoformat()
+            if priority is not None:
+                account["priority"] = priority
+            if enabled is not None:
+                account["enabled"] = enabled
+                account["status"] = AccountStatus.ACTIVE if enabled else AccountStatus.MAINTENANCE
             return True
         return False
 
@@ -411,12 +443,12 @@ class AccountsService:
         Returns:
             是否成功
         """
-        account = self.get_account(account_id)
-        if account:
-            account["cookie"] = new_cookie
-            account["last_login"] = datetime.now().isoformat()
-            self.logger.info(f"Refreshed cookie for account: {account_id}")
-            return True
+        for account in self.accounts:
+            if account.get("id") == account_id:
+                account["cookie"] = new_cookie
+                account["last_login"] = datetime.now().isoformat()
+                self.logger.info(f"Refreshed cookie for account: {account_id}")
+                return True
         return False
 
     def validate_cookie(self, account_id: str) -> bool:

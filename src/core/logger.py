@@ -12,7 +12,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from loguru import logger
-from src.core.config import get_config
 
 
 class Logger:
@@ -43,12 +42,9 @@ class Logger:
         """
         设置日志输出
         """
-        config = get_config()
-        app_config = config.app
-        
-        log_level = app_config.get("log_level", "INFO")
-        logs_dir = app_config.get("logs_dir", "logs")
-        debug = app_config.get("debug", False)
+        log_level = os.getenv("APP_LOG_LEVEL", "INFO")
+        logs_dir = os.getenv("APP_LOGS_DIR", "logs")
+        debug = os.getenv("APP_DEBUG", "false").lower() == "true"
 
         logs_dir = Path(logs_dir)
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -117,7 +113,7 @@ class Logger:
         logger.info(f"<green>{message}</green>", **kwargs)
 
 
-def get_logger() -> Logger:
+def get_logger(*_args, **_kwargs) -> Logger:
     """
     获取日志单例
     
