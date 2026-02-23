@@ -12,50 +12,47 @@ from typing import Dict, List, Optional, Any
 
 from src.core.config import get_config
 from src.core.logger import get_logger
+from src.core.error_handler import BrowserError
 from src.modules.analytics.service import AnalyticsService
 
 
 class OperationsSelectors:
-    """运营页面元素选择器"""
+    """
+    运营页面元素选择器
 
-    # 我的发布页面
+    使用 Playwright 文本匹配和稳定属性选择器，
+    避免依赖 React 动态生成的 class 名。
+    """
+
     MY_SELLING = "https://www.goofish.com/my/selling"
 
-    # 商品列表
-    SELLING_ITEM = ".selling-item, .item-card"
-    ITEM_TITLE = ".item-title, .title"
-    ITEM_PRICE = ".item-price, .price"
+    SELLING_ITEM = "[class*='item-card'], [class*='goods-item'], [class*='product-card']"
+    ITEM_TITLE = "[class*='title']"
+    ITEM_PRICE = "[class*='price']"
 
-    # 擦亮
-    POLISH_BUTTON = "button:has-text('擦亮')"
-    POLISH_CONFIRM = "button:has-text('确认')"
-    POLISH_SUCCESS = ".polish-success"
+    POLISH_BUTTON = "button:has-text('擦亮'), a:has-text('擦亮'), [class*='polish'] button"
+    POLISH_CONFIRM = "button:has-text('确认'), button:has-text('确定')"
+    POLISH_SUCCESS = "[class*='success'], [class*='toast']"
 
-    # 调价
-    EDIT_PRICE = "button:has-text('调价')"
-    PRICE_INPUT = "input[placeholder*='价格'], input.price-input"
-    PRICE_MODAL = ".price-modal, .edit-price-modal"
-    PRICE_SUBMIT = "button:has-text('确认')"
+    EDIT_PRICE = "button:has-text('调价'), button:has-text('改价'), a:has-text('调价')"
+    PRICE_INPUT = "input[placeholder*='价格'], [class*='modal'] input[type='number'], [class*='price'] input"
+    PRICE_MODAL = "[class*='modal'], [class*='dialog'], [role='dialog']"
+    PRICE_SUBMIT = "button:has-text('确认'), button:has-text('确定')"
 
-    # 下架
-    DELIST_BUTTON = "button:has-text('下架')"
-    DELIST_CONFIRM = "button:has-text('确定')"
-    DELIST_REASON = ".reason-select"
+    DELIST_BUTTON = "button:has-text('下架'), a:has-text('下架'), button:has-text('删除')"
+    DELIST_CONFIRM = "button:has-text('确定'), button:has-text('确认')"
+    DELIST_REASON = "[class*='reason'] select, [class*='reason'] [class*='select']"
 
-    # 重新上架
-    RELIST_BUTTON = "button:has-text('重新上架')"
-    RELIST_CONFIRM = "button:has-text('确定')"
+    RELIST_BUTTON = "button:has-text('重新上架'), a:has-text('重新上架'), button:has-text('上架')"
+    RELIST_CONFIRM = "button:has-text('确定'), button:has-text('确认')"
 
-    # 刷新按钮
-    REFRESH_BUTTON = "button:has-text('刷新')"
+    REFRESH_BUTTON = "button:has-text('刷新'), a:has-text('刷新')"
 
-    # 批量操作
-    BATCH_SELECT = ".batch-select, .select-all"
-    BATCH_ACTION = ".batch-action"
+    BATCH_SELECT = "[class*='batch'] [class*='select'], input[type='checkbox'][class*='all']"
+    BATCH_ACTION = "[class*='batch'] [class*='action'], [class*='toolbar']"
 
-    # 分页
-    NEXT_PAGE = "button:has-text('下一页'), .next-page"
-    PAGE_INFO = ".page-info"
+    NEXT_PAGE = "button:has-text('下一页'), a:has-text('下一页'), [class*='next']"
+    PAGE_INFO = "[class*='page'], [class*='pagination']"
 
 
 class OperationsService:
@@ -107,7 +104,7 @@ class OperationsService:
         self.logger.info(f"Polishing listing: {product_id}")
 
         if not self.controller:
-            return self._mock_result("polish", product_id)
+            raise BrowserError("Browser controller is not initialized. Cannot polish listing.")
 
         try:
             page_id = await self.controller.new_page()
@@ -155,7 +152,7 @@ class OperationsService:
         self.logger.info(f"Starting batch polish (max: {max_items})...")
 
         if not self.controller:
-            return self._mock_batch_result("polish", product_ids or [])
+            raise BrowserError("Browser controller is not initialized. Cannot batch polish.")
 
         try:
             page_id = await self.controller.new_page()
@@ -225,14 +222,7 @@ class OperationsService:
         self.logger.info(f"Updating price for {product_id}: {original_price} -> {new_price}")
 
         if not self.controller:
-            return {
-                "success": True,
-                "product_id": product_id,
-                "action": "price_update",
-                "old_price": original_price,
-                "new_price": new_price,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-            }
+            raise BrowserError("Browser controller is not initialized. Cannot update price.")
 
         try:
             page_id = await self.controller.new_page()
@@ -331,7 +321,7 @@ class OperationsService:
         self.logger.info(f"Delisting {product_id}, reason: {reason}")
 
         if not self.controller:
-            return self._mock_result("delist", product_id)
+            raise BrowserError("Browser controller is not initialized. Cannot delist.")
 
         try:
             page_id = await self.controller.new_page()
@@ -379,7 +369,7 @@ class OperationsService:
         self.logger.info(f"Relisting {product_id}")
 
         if not self.controller:
-            return self._mock_result("relist", product_id)
+            raise BrowserError("Browser controller is not initialized. Cannot relist.")
 
         try:
             page_id = await self.controller.new_page()
@@ -421,7 +411,7 @@ class OperationsService:
         self.logger.info("Refreshing inventory...")
 
         if not self.controller:
-            return {"success": True, "action": "inventory_refresh"}
+            raise BrowserError("Browser controller is not initialized. Cannot refresh inventory.")
 
         try:
             page_id = await self.controller.new_page()
@@ -453,14 +443,7 @@ class OperationsService:
         self.logger.info("Fetching listing statistics...")
 
         if not self.controller:
-            return {
-                "total": 0,
-                "active": 0,
-                "sold": 0,
-                "deleted": 0,
-                "total_views": 0,
-                "total_wants": 0
-            }
+            raise BrowserError("Browser controller is not initialized. Cannot fetch stats.")
 
         try:
             page_id = await self.controller.new_page()
@@ -482,27 +465,6 @@ class OperationsService:
         except Exception as e:
             self.logger.error(f"Failed to fetch stats: {e}")
             return {"error": str(e)}
-
-    def _mock_result(self, action: str, product_id: str) -> Dict[str, Any]:
-        """生成模拟结果"""
-        return {
-            "success": True,
-            "product_id": product_id,
-            "action": action,
-            "mock": True,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-    def _mock_batch_result(self, action: str, product_ids: List[str]) -> Dict[str, Any]:
-        """生成批量操作模拟结果"""
-        return {
-            "success": len(product_ids),
-            "failed": 0,
-            "total": len(product_ids),
-            "action": f"batch_{action}",
-            "details": [{"product_id": pid, "success": True} for pid in product_ids],
-            "mock": True
-        }
 
     def _error_result(self, action: str, product_id: Optional[str],
                      error: str) -> Dict[str, Any]:

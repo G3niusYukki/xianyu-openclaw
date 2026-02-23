@@ -664,16 +664,25 @@ class AnalyticsService:
         """
         metric = self._validate_metric(metric)
 
+        column_map = {
+            "views": "SUM(views)",
+            "wants": "SUM(wants)",
+            "sales": "SUM(sales)",
+            "inquiries": "SUM(inquiries)",
+        }
+        agg_expr = column_map[metric]
+
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
-            cursor = await db.execute(f"""
-                SELECT date(timestamp) as date, SUM({metric}) as value
+            query = f"""
+                SELECT date(timestamp) as date, {agg_expr} as value
                 FROM product_metrics
                 WHERE timestamp >= datetime('now', ?)
                 GROUP BY date(timestamp)
                 ORDER BY date ASC
-            """, (f"-{days} days",))
+            """
+            cursor = await db.execute(query, (f"-{days} days",))
 
             rows = await cursor.fetchall()
             return [{"date": row[0], "value": row[1]} for row in rows]

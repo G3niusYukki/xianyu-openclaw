@@ -1,11 +1,14 @@
 """Web服务API接口"""
 
-from typing import Dict, List, Any, Optional
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-import asyncio
+import os
 import time
+import asyncio
+from typing import Dict, List, Any, Optional
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from src.core.config import Config
 from src.core.logger import get_logger
@@ -20,14 +23,58 @@ logger = get_logger(__name__)
 
 app = FastAPI(title="闲鱼自动化工具API", version="1.0.0")
 
-# CORS配置
+ALLOWED_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:8501,http://localhost:3000,http://127.0.0.1:8501,http://127.0.0.1:3000"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in ALLOWED_ORIGINS],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+
+class RateLimiter:
+    """简易内存速率限制器，按客户端 IP 限制请求频率"""
+
+    def __init__(self, max_requests: int = 30, window_seconds: int = 60):
+        self._max = max_requests
+        self._window = window_seconds
+        self._requests: Dict[str, list] = {}
+
+    def is_allowed(self, client_ip: str) -> bool:
+        now = time.time()
+        timestamps = self._requests.get(client_ip, [])
+        timestamps = [t for t in timestamps if now - t < self._window]
+        if len(timestamps) >= self._max:
+            self._requests[client_ip] = timestamps
+            return False
+        timestamps.append(now)
+        self._requests[client_ip] = timestamps
+        return True
+
+
+_rate_limiter = RateLimiter(
+    max_requests=int(os.getenv("RATE_LIMIT_MAX", "30")),
+    window_seconds=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
+)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    if request.url.path in ("/api/health", "/"):
+        return await call_next(request)
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not _rate_limiter.is_allowed(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests. Please try again later."},
+        )
+    return await call_next(request)
 
 # 数据模型
 class ProductInfo(BaseModel):
@@ -77,7 +124,17 @@ async def root():
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": time.time()}
+    from src.core.startup_checks import run_all_checks
+    results = run_all_checks(skip_browser=True)
+    failed_critical = [r for r in results if not r.passed and r.critical]
+    warnings = [r for r in results if not r.passed and not r.critical]
+    return {
+        "status": "healthy" if not failed_critical else "degraded",
+        "timestamp": time.time(),
+        "checks": {r.name: {"ok": r.passed, "message": r.message} for r in results},
+        "warnings": len(warnings),
+        "errors": len(failed_critical),
+    }
 
 @app.get("/api/dashboard/stats")
 async def get_dashboard_stats():

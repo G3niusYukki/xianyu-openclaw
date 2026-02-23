@@ -13,60 +13,81 @@ from urllib.parse import urlparse
 
 from src.core.config import get_config
 from src.core.logger import get_logger
+from src.core.error_handler import BrowserError
 from src.modules.listing.models import Listing, PublishResult
 
 
 class XianyuSelectors:
-    """闲鱼页面元素选择器"""
+    """
+    闲鱼页面元素选择器
 
-    # 发布页面
-    PUBLISH_PAGE = "https://www.goofish.com/publish"
+    goofish.com 是 React SPA，class 名会随构建变化。
+    优先使用 Playwright 文本匹配、placeholder、role 和 input[type] 等稳定属性。
+    如果闲鱼改版导致选择器失效，只需要在这里集中更新。
+    """
 
-    # 图片上传
+    PUBLISH_PAGE = "https://www.goofish.com/sell"
+
+    # 图片上传 — file input 是最稳定的选择器
     IMAGE_UPLOAD = "input[type='file'][accept*='image']"
-    IMAGE_UPLOAD_AREA = ".sell-upload"
-    IMAGE_PREVIEW = ".sell-upload-item"
+    IMAGE_UPLOAD_AREA = "[class*='upload'], [class*='photo']"
+    IMAGE_PREVIEW = "[class*='preview'], [class*='thumb']"
 
-    # 标题输入
-    TITLE_INPUT = "textarea[placeholder*='标题'], input[placeholder*='标题']"
-    TITLE_AREA = ".pub-title"
+    # 标题 — 使用 placeholder 文本匹配
+    TITLE_INPUT = (
+        "textarea[placeholder*='标题'], "
+        "input[placeholder*='标题'], "
+        "textarea[placeholder*='宝贝名称'], "
+        "input[placeholder*='宝贝名称'], "
+        "[class*='title'] textarea, "
+        "[class*='title'] input"
+    )
 
-    # 描述输入
-    DESC_INPUT = "textarea[placeholder*='描述'], textarea[placeholder*='说明']"
-    DESC_AREA = ".pub-desc"
+    # 描述 — 使用 placeholder 文本匹配
+    DESC_INPUT = (
+        "textarea[placeholder*='描述'], "
+        "textarea[placeholder*='说明'], "
+        "textarea[placeholder*='详情'], "
+        "[class*='desc'] textarea, "
+        "[class*='detail'] textarea"
+    )
 
-    # 价格输入
-    PRICE_INPUT = "input[placeholder*='价格'], input[price]"
-    PRICE_AREA = ".pub-price"
+    # 价格 — 使用 placeholder / type=number
+    PRICE_INPUT = (
+        "input[placeholder*='价格'], "
+        "input[placeholder*='￥'], "
+        "input[placeholder*='¥'], "
+        "[class*='price'] input"
+    )
 
-    # 分类选择
-    CATEGORY_SELECT = ".pub-category"
-    CATEGORY_ITEM = ".pub-category-item"
+    # 分类
+    CATEGORY_SELECT = "[class*='category'], [class*='cate']"
+    CATEGORY_ITEM = "[class*='category'] [class*='item'], [class*='cate'] [class*='option']"
 
-    # 成色选择
-    CONDITION_SELECT = ".pub-condition"
-    CONDITION_ITEM = ".pub-condition-item"
+    # 成色
+    CONDITION_SELECT = "[class*='condition'], [class*='quality']"
+    CONDITION_ITEM = "[class*='condition'] [class*='item'], [class*='quality'] [class*='option']"
 
-    # 发布按钮
-    SUBMIT_BUTTON = "button:has-text('发布'), .pub-submit"
-    CONFIRM_BUTTON = "button:has-text('确认'), button:has-text('确定')"
+    # 发布/提交按钮 — 使用 Playwright text 匹配
+    SUBMIT_BUTTON = "button:has-text('发布'), button:has-text('提交'), [class*='submit'] button"
+    CONFIRM_BUTTON = "button:has-text('确认'), button:has-text('确定'), button:has-text('好的')"
 
-    # 成功页面
+    # 成功
     SUCCESS_URL = "/success"
-    SUCCESS_MSG = ".pub-success"
+    SUCCESS_MSG = "[class*='success'], [class*='result']"
 
-    # 我的发布页面
+    # 我的在售
     MY_SELLING = "https://www.goofish.com/my/selling"
 
-    # 擦亮按钮
-    POLISH_BUTTON = "button:has-text('擦亮')"
+    # 擦亮
+    POLISH_BUTTON = "button:has-text('擦亮'), [class*='polish'] button, a:has-text('擦亮')"
 
-    # 价格修改
-    EDIT_PRICE = "button:has-text('调价')"
-    PRICE_INPUT_MODAL = "input[placeholder*='价格']"
+    # 调价
+    EDIT_PRICE = "button:has-text('调价'), button:has-text('改价'), a:has-text('调价')"
+    PRICE_INPUT_MODAL = "input[placeholder*='价格'], [class*='modal'] input[type='number']"
 
     # 下架
-    DELIST_BUTTON = "button:has-text('下架')"
+    DELIST_BUTTON = "button:has-text('下架'), a:has-text('下架'), button:has-text('删除')"
 
 
 class ListingService:
@@ -117,11 +138,10 @@ class ListingService:
         self.logger.info(f"Creating listing: {listing.title}")
 
         try:
-            if self.controller and hasattr(self.controller, 'new_page'):
-                product_id, product_url = await self._execute_publish(listing)
-            else:
-                product_id = f"item_{random.randint(100000, 999999)}"
-                product_url = f"https://www.goofish.com/item/{product_id}"
+            if not self.controller:
+                raise BrowserError("Browser controller is not initialized. Cannot publish.")
+
+            product_id, product_url = await self._execute_publish(listing)
 
             result = PublishResult(
                 success=True,
@@ -296,17 +316,16 @@ class ListingService:
             page_id, "window.location.href"
         )
 
-        if self.selectors.SUCCESS_URL in current_url:
+        if current_url and self.selectors.SUCCESS_URL in str(current_url):
             product_id = self._extract_product_id(current_url)
             product_url = current_url
             self.logger.success(f"Publish successful! URL: {product_url}")
             return product_id, product_url
 
-        self.logger.warning("Could not verify success, generating mock URL...")
-        product_id = f"item_{random.randint(100000, 999999)}"
-        product_url = f"https://www.goofish.com/item/{product_id}"
-
-        return product_id, product_url
+        raise BrowserError(
+            "Could not verify publish success. "
+            f"Current URL: {current_url}"
+        )
 
     def _extract_product_id(self, url: str) -> str:
         """从URL提取商品ID"""
@@ -370,12 +389,7 @@ class ListingService:
         self.logger.info(f"Verifying listing: {product_id}")
 
         if not self.controller:
-            return {
-                "product_id": product_id,
-                "exists": True,
-                "status": "active",
-                "verified": True
-            }
+            raise BrowserError("Browser controller is not initialized. Cannot verify listing.")
 
         try:
             page_id = await self.controller.new_page()
@@ -415,7 +429,7 @@ class ListingService:
         self.logger.info(f"Updating listing: {product_id}")
 
         if not self.controller:
-            return True
+            raise BrowserError("Browser controller is not initialized. Cannot update listing.")
 
         try:
             page_id = await self.controller.new_page()
@@ -448,7 +462,7 @@ class ListingService:
         self.logger.info(f"Deleting listing: {product_id}")
 
         if not self.controller:
-            return True
+            raise BrowserError("Browser controller is not initialized. Cannot delete listing.")
 
         try:
             page_id = await self.controller.new_page()
@@ -479,7 +493,7 @@ class ListingService:
         self.logger.info(f"Fetching listings page {page}")
 
         if not self.controller:
-            return []
+            raise BrowserError("Browser controller is not initialized. Cannot fetch listings.")
 
         try:
             page_id = await self.controller.new_page()

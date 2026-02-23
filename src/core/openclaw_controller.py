@@ -1,26 +1,24 @@
 """
-OpenClaw浏览器控制器
-OpenClaw Browser Controller
+浏览器自动化控制器
+Browser Automation Controller
 
-提供与OpenClaw实例的连接和浏览器操作能力
+基于 Playwright 提供浏览器自动化能力，替代原始的 OpenClaw HTTP API 桩实现
 """
 
 import asyncio
-import json
-import time
 import random
-from typing import Any, Dict, List, Optional, Callable
+import time
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
-import httpx
 from src.core.config import get_config
 from src.core.logger import get_logger
-from src.core.error_handler import handle_controller_errors, handle_operation_errors
+from src.core.error_handler import handle_controller_errors, handle_operation_errors, BrowserError
 
 
 class BrowserState(Enum):
-    """浏览器状态"""
     DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
     CONNECTED = "connected"
@@ -29,697 +27,438 @@ class BrowserState(Enum):
 
 @dataclass
 class BrowserConfig:
-    """浏览器配置"""
-    host: str = "localhost"
-    port: int = 9222
-    timeout: int = 30
-    retry_times: int = 3
     headless: bool = True
+    timeout: int = 30000
+    retry_times: int = 3
     delay_min: float = 1.0
     delay_max: float = 3.0
+    viewport_width: int = 1280
+    viewport_height: int = 800
+    user_agent: str = ""
 
 
 class ElementInfo:
-    """元素信息"""
-    def __init__(self, object_id: str, node_type: str = "", tag_name: str = ""):
-        self.object_id = object_id
-        self.node_type = node_type
+    def __init__(self, locator, tag_name: str = ""):
+        self.locator = locator
         self.tag_name = tag_name
-
-    @classmethod
-    def from_response(cls, response: Dict) -> Optional['ElementInfo']:
-        if response and response.get('result'):
-            return cls(
-                object_id=response['result'].get('objectId', ''),
-                node_type=response['result'].get('nodeName', ''),
-                tag_name=response['result'].get('nodeName', '')
-            )
-        return None
 
 
 class OpenClawController:
     """
-    OpenClaw浏览器控制器
+    浏览器自动化控制器
 
-    负责与OpenClaw实例建立连接，提供浏览器操作API
+    基于 Playwright 提供页面操作能力，包括导航、元素交互、文件上传等
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """
-        初始化控制器
-
-        Args:
-            config: 配置字典，不指定则从配置文件加载
-        """
-        self.config = BrowserConfig()
+        self.browser_config = BrowserConfig()
         if config:
             self._apply_config(config)
         else:
-            cfg = get_config()
-            openclaw_cfg = cfg.openclaw
-            browser_cfg = cfg.browser
-            self._apply_config({
-                "host": openclaw_cfg.get("host", "localhost"),
-                "port": openclaw_cfg.get("port", 9222),
-                "timeout": openclaw_cfg.get("timeout", 30),
-                "retry_times": openclaw_cfg.get("retry_times", 3),
-                "headless": browser_cfg.get("headless", True),
-                "delay_min": browser_cfg.get("delay", {}).get("min", 1.0),
-                "delay_max": browser_cfg.get("delay", {}).get("max", 3.0),
-            })
+            try:
+                cfg = get_config()
+                browser_cfg = cfg.browser
+                openclaw_cfg = cfg.openclaw
+                self._apply_config({
+                    "headless": browser_cfg.get("headless", True),
+                    "timeout": openclaw_cfg.get("timeout", 30) * 1000,
+                    "retry_times": openclaw_cfg.get("retry_times", 3),
+                    "delay_min": browser_cfg.get("delay", {}).get("min", 1.0),
+                    "delay_max": browser_cfg.get("delay", {}).get("max", 3.0),
+                    "viewport_width": browser_cfg.get("viewport", {}).get("width", 1280),
+                    "viewport_height": browser_cfg.get("viewport", {}).get("height", 800),
+                    "user_agent": browser_cfg.get("user_agent", ""),
+                })
+            except Exception:
+                pass
 
         self.logger = get_logger()
         self.state = BrowserState.DISCONNECTED
-        self.client: Optional[httpx.AsyncClient] = None
-        self._base_url: str = ""
-        self.current_page_id: Optional[str] = None
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._pages: Dict[str, Any] = {}
+        self._page_counter = 0
 
     def _apply_config(self, config: Dict[str, Any]) -> None:
-        """应用配置"""
-        self.config.host = config.get("host", self.config.host)
-        self.config.port = config.get("port", self.config.port)
-        self.config.timeout = config.get("timeout", self.config.timeout)
-        self.config.retry_times = config.get("retry_times", self.config.retry_times)
-        self.config.headless = config.get("headless", self.config.headless)
-        self.config.delay_min = config.get("delay_min", self.config.delay_min)
-        self.config.delay_max = config.get("delay_max", self.config.delay_max)
-
-    @property
-    def base_url(self) -> str:
-        """获取基础URL"""
-        if not self._base_url:
-            self._base_url = f"http://{self.config.host}:{self.config.port}"
-        return self._base_url
+        self.browser_config.headless = config.get("headless", self.browser_config.headless)
+        self.browser_config.timeout = config.get("timeout", self.browser_config.timeout)
+        self.browser_config.retry_times = config.get("retry_times", self.browser_config.retry_times)
+        self.browser_config.delay_min = config.get("delay_min", self.browser_config.delay_min)
+        self.browser_config.delay_max = config.get("delay_max", self.browser_config.delay_max)
+        self.browser_config.viewport_width = config.get("viewport_width", self.browser_config.viewport_width)
+        self.browser_config.viewport_height = config.get("viewport_height", self.browser_config.viewport_height)
+        self.browser_config.user_agent = config.get("user_agent", self.browser_config.user_agent)
 
     def random_delay(self) -> float:
-        """生成随机延迟"""
-        return random.uniform(self.config.delay_min, self.config.delay_max)
+        return random.uniform(self.browser_config.delay_min, self.browser_config.delay_max)
 
     async def connect(self) -> bool:
-        """
-        连接到OpenClaw实例
-
-        Returns:
-            是否连接成功
-        """
+        """启动 Playwright 浏览器实例"""
         try:
             self.state = BrowserState.CONNECTING
-            self.logger.info(f"Connecting to OpenClaw at {self.base_url}...")
+            self.logger.info("Launching Playwright browser...")
 
-            self.client = httpx.AsyncClient(
-                timeout=self.config.timeout,
-                follow_redirects=True
+            from playwright.async_api import async_playwright
+            self._playwright = await async_playwright().start()
+
+            launch_args = {
+                "headless": self.browser_config.headless,
+            }
+
+            self._browser = await self._playwright.chromium.launch(**launch_args)
+
+            context_args = {
+                "viewport": {
+                    "width": self.browser_config.viewport_width,
+                    "height": self.browser_config.viewport_height,
+                },
+            }
+            if self.browser_config.user_agent:
+                context_args["user_agent"] = self.browser_config.user_agent
+
+            self._context = await self._browser.new_context(**context_args)
+            self._context.set_default_timeout(self.browser_config.timeout)
+
+            self.state = BrowserState.CONNECTED
+            self.logger.success(f"Browser launched (headless={self.browser_config.headless})")
+            return True
+
+        except ImportError:
+            self.state = BrowserState.ERROR
+            self.logger.error(
+                "Playwright is not installed. Run: pip install playwright && python -m playwright install chromium"
             )
-
-            response = await self.client.get(f"{self.base_url}/json/version")
-            if response.status_code == 200:
-                version_info = response.json()
-                self.state = BrowserState.CONNECTED
-                self.logger.success(f"Connected to OpenClaw: {version_info.get('Browser', 'Unknown')}")
-                return True
-            else:
-                self.state = BrowserState.ERROR
-                self.logger.error(f"Failed to connect: {response.status_code}")
-                return False
-
+            return False
         except Exception as e:
             self.state = BrowserState.ERROR
-            self.logger.error(f"Connection error: {e}")
+            self.logger.error(f"Browser launch failed: {e}")
             return False
 
     async def disconnect(self) -> None:
-        """断开连接"""
-        if self.current_page_id:
-            await self.close_page(self.current_page_id)
-        if self.client:
-            await self.client.aclose()
-            self.client = None
+        for page_id in list(self._pages.keys()):
+            await self.close_page(page_id)
+
+        if self._context:
+            await self._context.close()
+            self._context = None
+        if self._browser:
+            await self._browser.close()
+            self._browser = None
+        if self._playwright:
+            await self._playwright.stop()
+            self._playwright = None
+
         self.state = BrowserState.DISCONNECTED
-        self.logger.info("Disconnected from OpenClaw")
+        self.logger.info("Browser closed")
 
     @handle_controller_errors(default_return=False)
     async def is_connected(self) -> bool:
-        """检查连接状态"""
         if self.state != BrowserState.CONNECTED:
             return False
-        response = await self.client.get(f"{self.base_url}/json/version")
-        return response.status_code == 200
+        return self._browser is not None and self._browser.is_connected()
 
     async def ensure_connected(self) -> bool:
-        """确保已连接"""
         if not await self.is_connected():
             return await self.connect()
         return True
 
     async def new_page(self) -> str:
-        """创建新页面"""
         if not await self.ensure_connected():
-            raise ConnectionError("Not connected to OpenClaw")
+            raise BrowserError("Browser is not connected")
 
-        response = await self.client.post(f"{self.base_url}/json/prototype/Page")
-        if response.status_code == 200:
-            self.current_page_id = response.json().get("id")
-            self.logger.debug(f"Created new page: {self.current_page_id}")
-            return self.current_page_id
-        else:
-            raise Exception(f"Failed to create page: {response.text}")
+        page = await self._context.new_page()
+        self._page_counter += 1
+        page_id = f"page_{self._page_counter}"
+        self._pages[page_id] = page
+        self.logger.debug(f"Created new page: {page_id}")
+        return page_id
+
+    def _get_page(self, page_id: str):
+        page = self._pages.get(page_id)
+        if page is None:
+            raise BrowserError(f"Page not found: {page_id}")
+        return page
 
     @handle_operation_errors(default_return=False)
     async def close_page(self, page_id: str) -> bool:
-        """关闭页面"""
-        response = await self.client.send(
-            f"{self.base_url}/json/prototype/Page/{page_id}/close",
-            method="DELETE"
-        )
-        if page_id == self.current_page_id:
-            self.current_page_id = None
-        return response.status_code == 200
+        page = self._pages.pop(page_id, None)
+        if page:
+            await page.close()
+        return True
 
     async def navigate(self, page_id: str, url: str, wait_load: bool = True) -> bool:
-        """
-        导航到URL
-
-        Args:
-            page_id: 页面ID
-            url: 目标URL
-            wait_load: 是否等待页面加载完成
-
-        Returns:
-            是否成功
-        """
         self.logger.info(f"Navigating to {url}")
+        page = self._get_page(page_id)
 
-        for attempt in range(self.config.retry_times):
+        for attempt in range(self.browser_config.retry_times):
             try:
-                response = await self.client.post(
-                    f"{self.base_url}/json/prototype/Page/{page_id}/navigate",
-                    json={"url": url}
-                )
-
-                if response.status_code == 200:
-                    if wait_load:
-                        await asyncio.sleep(self.random_delay())
-                    self.logger.debug(f"Navigated to {url}")
-                    return True
-                else:
-                    self.logger.warning(f"Navigate failed (attempt {attempt + 1})")
-
+                wait_until = "domcontentloaded" if wait_load else "commit"
+                await page.goto(url, wait_until=wait_until)
+                if wait_load:
+                    await asyncio.sleep(self.random_delay())
+                self.logger.debug(f"Navigated to {url}")
+                return True
             except Exception as e:
-                self.logger.warning(f"Navigate error (attempt {attempt + 1}): {e}")
-
-            await asyncio.sleep(2 * (attempt + 1))
+                self.logger.warning(f"Navigate failed (attempt {attempt + 1}): {e}")
+                await asyncio.sleep(2 * (attempt + 1))
 
         return False
 
     async def find_element(self, page_id: str, selector: str) -> Optional[ElementInfo]:
-        """
-        查找单个元素
-
-        Args:
-            page_id: 页面ID
-            selector: CSS选择器
-
-        Returns:
-            元素信息，未找到返回None
-        """
+        page = self._get_page(page_id)
         try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/querySelector",
-                json={"selector": selector}
-            )
-
-            if response.status_code == 200:
-                return ElementInfo.from_response(response.json())
+            locator = page.locator(selector).first
+            if await locator.count() > 0:
+                tag = await locator.evaluate("el => el.tagName.toLowerCase()")
+                return ElementInfo(locator=locator, tag_name=tag)
             return None
         except Exception as e:
-            self.logger.debug(f"Find element error: {e}")
+            self.logger.debug(f"Find element error for '{selector}': {e}")
             return None
 
     async def find_elements(self, page_id: str, selector: str) -> List[ElementInfo]:
-        """
-        查找多个元素
-
-        Args:
-            page_id: 页面ID
-            selector: CSS选择器
-
-        Returns:
-            元素信息列表
-        """
+        page = self._get_page(page_id)
         try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/querySelectorAll",
-                json={"selector": selector}
-            )
-
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("result") and result["result"].get("nodeIds"):
-                    return [
-                        ElementInfo(object_id=oid)
-                        for oid in result["result"]["nodeIds"]
-                    ]
-            return []
+            locator = page.locator(selector)
+            count = await locator.count()
+            return [ElementInfo(locator=locator.nth(i)) for i in range(count)]
         except Exception as e:
-            self.logger.debug(f"Find elements error: {e}")
+            self.logger.debug(f"Find elements error for '{selector}': {e}")
             return []
 
     async def click(self, page_id: str, selector: str,
-                    timeout: int = 10, retry: bool = True) -> bool:
-        """
-        点击元素
-
-        Args:
-            page_id: 页面ID
-            selector: CSS选择器
-            timeout: 超时时间
-            retry: 是否重试
-
-        Returns:
-            是否成功
-        """
+                    timeout: int = 10000, retry: bool = True) -> bool:
         self.logger.debug(f"Clicking: {selector}")
+        page = self._get_page(page_id)
 
-        for attempt in range(self.config.retry_times) if retry else [0]:
-            element = await self.find_element(page_id, selector)
-            if element:
-                try:
-                    response = await self.client.post(
-                        f"{self.base_url}/json/prototype/Node/{element.object_id}/click",
-                        json={}
-                    )
-                    if response.status_code == 200:
-                        await asyncio.sleep(self.random_delay())
-                        return True
-                except Exception as e:
-                    self.logger.debug(f"Click error: {e}")
-
-            await asyncio.sleep(1)
+        attempts = self.browser_config.retry_times if retry else 1
+        for attempt in range(attempts):
+            try:
+                await page.locator(selector).first.click(timeout=timeout)
+                await asyncio.sleep(self.random_delay())
+                return True
+            except Exception as e:
+                self.logger.debug(f"Click error (attempt {attempt + 1}): {e}")
+                await asyncio.sleep(1)
 
         self.logger.warning(f"Failed to click: {selector}")
         return False
 
     @handle_operation_errors(default_return=False)
     async def double_click(self, page_id: str, selector: str) -> bool:
-        """双击元素"""
-        element = await self.find_element(page_id, selector)
-        if element:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Node/{element.object_id}/click",
-                json={"clickCount": 2}
-            )
-            return response.status_code == 200
-        return False
+        page = self._get_page(page_id)
+        await page.locator(selector).first.dblclick()
+        return True
 
     async def type_text(self, page_id: str, selector: str, text: str,
                         clear: bool = True) -> bool:
-        """
-        输入文本
-
-        Args:
-            page_id: 页面ID
-            selector: CSS选择器
-            text: 输入文本
-            clear: 是否先清空
-
-        Returns:
-            是否成功
-        """
         self.logger.debug(f"Typing into {selector}: {text[:50]}...")
-
-        element = await self.find_element(page_id, selector)
-        if not element:
-            self.logger.warning(f"Element not found: {selector}")
-            return False
+        page = self._get_page(page_id)
 
         try:
+            locator = page.locator(selector).first
             if clear:
-                await self.client.post(
-                    f"{self.base_url}/json/prototype/Node/{element.object_id}/setInputValue",
-                    json={"text": ""}
-                )
-                await asyncio.sleep(0.2)
-
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Node/{element.object_id}/setInputValue",
-                json={"text": text}
-            )
-
-            if response.status_code == 200:
-                await asyncio.sleep(self.random_delay())
-                return True
-
+                await locator.fill(text)
+            else:
+                await locator.type(text)
+            await asyncio.sleep(self.random_delay())
+            return True
         except Exception as e:
-            self.logger.debug(f"Type text error: {e}")
-
-        return False
+            self.logger.warning(f"Type text error for '{selector}': {e}")
+            return False
 
     @handle_operation_errors(default_return=None)
     async def get_text(self, page_id: str, selector: str) -> Optional[str]:
-        """获取元素文本"""
-        element = await self.find_element(page_id, selector)
-        if element:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Node/{element.object_id}/getProperties",
-                json={"name": "textContent"}
-            )
-            if response.status_code == 200:
-                return response.json().get("value", "")
-        return None
+        page = self._get_page(page_id)
+        return await page.locator(selector).first.inner_text()
 
     @handle_operation_errors(default_return=None)
     async def get_value(self, page_id: str, selector: str) -> Optional[str]:
-        """获取输入框值"""
-        element = await self.find_element(page_id, selector)
-        if element:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Node/{element.object_id}/getProperties",
-                json={"name": "value"}
-            )
-            if response.status_code == 200:
-                return response.json().get("value", "")
-        return None
+        page = self._get_page(page_id)
+        return await page.locator(selector).first.input_value()
 
     @handle_operation_errors(default_return=False)
     async def select_option(self, page_id: str, selector: str, value: str) -> bool:
-        """选择下拉选项"""
-        element = await self.find_element(page_id, selector)
-        if element:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Node/{element.object_id}/select",
-                json={"value": value}
-            )
-            return response.status_code == 200
-        return False
+        page = self._get_page(page_id)
+        await page.locator(selector).first.select_option(value)
+        return True
 
     @handle_operation_errors(default_return=False)
     async def check(self, page_id: str, selector: str, checked: bool = True) -> bool:
-        """勾选/取消勾选复选框"""
-        element = await self.find_element(page_id, selector)
-        if element:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Node/{element.object_id}/setProperty",
-                json={"name": "checked", "value": str(checked).lower()}
-            )
-            return response.status_code == 200
-        return False
+        page = self._get_page(page_id)
+        locator = page.locator(selector).first
+        if checked:
+            await locator.check()
+        else:
+            await locator.uncheck()
+        return True
 
     async def upload_file(self, page_id: str, selector: str, file_path: str) -> bool:
-        """
-        上传文件
-
-        Args:
-            page_id: 页面ID
-            selector: 文件输入框选择器
-            file_path: 文件路径
-
-        Returns:
-            是否成功
-        """
         self.logger.info(f"Uploading file: {file_path}")
-
         if not file_path:
             return False
 
-        element = await self.find_element(page_id, selector)
-        if not element:
-            self.logger.warning(f"Upload element not found: {selector}")
-            return False
-
+        page = self._get_page(page_id)
         try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Node/{element.object_id}/setInputFiles",
-                json={"files": [file_path]}
-            )
-
-            if response.status_code == 200:
-                self.logger.success(f"Uploaded: {file_path}")
-                await asyncio.sleep(self.random_delay() * 2)
-                return True
-
+            await page.locator(selector).first.set_input_files(file_path)
+            self.logger.success(f"Uploaded: {file_path}")
+            await asyncio.sleep(self.random_delay() * 2)
+            return True
         except Exception as e:
             self.logger.error(f"Upload error: {e}")
-
-        return False
+            return False
 
     async def upload_files(self, page_id: str, selector: str,
-                          file_paths: List[str]) -> bool:
-        """
-        批量上传文件
-
-        Args:
-            page_id: 页面ID
-            selector: 文件输入框选择器
-            file_paths: 文件路径列表
-
-        Returns:
-            是否成功
-        """
+                           file_paths: List[str]) -> bool:
         if not file_paths:
             return True
 
         self.logger.info(f"Uploading {len(file_paths)} files")
-
-        element = await self.find_element(page_id, selector)
-        if not element:
-            return False
-
+        page = self._get_page(page_id)
         try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Node/{element.object_id}/setInputFiles",
-                json={"files": file_paths}
-            )
-
-            if response.status_code == 200:
-                await asyncio.sleep(self.random_delay() * len(file_paths))
-                return True
-
+            await page.locator(selector).first.set_input_files(file_paths)
+            await asyncio.sleep(self.random_delay() * len(file_paths))
+            return True
         except Exception as e:
             self.logger.error(f"Batch upload error: {e}")
-
-        return False
+            return False
 
     async def wait_for_selector(self, page_id: str, selector: str,
-                                timeout: int = 10, visible: bool = True) -> bool:
-        """
-        等待元素出现
-
-        Args:
-            page_id: 页面ID
-            selector: CSS选择器
-            timeout: 超时时间（秒）
-            visible: 是否等待可见
-
-        Returns:
-            是否找到元素
-        """
+                                timeout: int = 10000, visible: bool = True) -> bool:
         self.logger.debug(f"Waiting for selector: {selector}")
-
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            element = await self.find_element(page_id, selector)
-            if element:
-                self.logger.debug(f"Found selector: {selector}")
-                return True
-            await asyncio.sleep(0.5)
-
-        self.logger.warning(f"Timeout waiting for selector: {selector}")
-        return False
+        page = self._get_page(page_id)
+        try:
+            state = "visible" if visible else "attached"
+            await page.locator(selector).first.wait_for(timeout=timeout, state=state)
+            self.logger.debug(f"Found selector: {selector}")
+            return True
+        except Exception:
+            self.logger.warning(f"Timeout waiting for selector: {selector}")
+            return False
 
     async def wait_for_url(self, page_id: str, pattern: str,
-                          timeout: int = 30) -> bool:
-        """
-        等待URL变化
-
-        Args:
-            page_id: 页面ID
-            pattern: URL匹配模式
-            timeout: 超时时间
-
-        Returns:
-            是否匹配成功
-        """
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                response = await self.client.get(
-                    f"{self.base_url}/json/prototype/Page/{page_id}/getURL"
-                )
-                if response.status_code == 200:
-                    url = response.json().get("result", "")
-                    if pattern in url:
-                        return True
-            except Exception as e:
-                self.logger.debug(f"Error checking URL: {e}")
-            await asyncio.sleep(0.5)
-        return False
+                           timeout: int = 30000) -> bool:
+        page = self._get_page(page_id)
+        try:
+            await page.wait_for_url(f"**{pattern}**", timeout=timeout)
+            return True
+        except Exception:
+            return False
 
     async def scroll_to_element(self, page_id: str, selector: str) -> bool:
-        """滚动到元素"""
-        script = f"""
-            const element = document.querySelector('{selector}');
-            if (element) {{
-                element.scrollIntoView({{behavior: 'smooth', block: 'center'}});
-                true;
-            }} else {{
-                false;
-            }}
-        """
-        return await self.execute_script(page_id, script) is True
+        page = self._get_page(page_id)
+        try:
+            await page.locator(selector).first.scroll_into_view_if_needed()
+            return True
+        except Exception:
+            return False
 
     async def scroll_to_top(self, page_id: str) -> bool:
-        """滚动到顶部"""
         return await self.execute_script(page_id, "window.scrollTo(0, 0); true;") is True
 
     async def scroll_to_bottom(self, page_id: str) -> bool:
-        """滚动到底部"""
         return await self.execute_script(page_id, "window.scrollTo(0, document.body.scrollHeight); true;") is True
 
     async def scroll_by(self, page_id: str, x: int, y: int) -> bool:
-        """滚动页面"""
         script = f"window.scrollBy({x}, {y}); true;"
         return await self.execute_script(page_id, script) is True
 
     async def execute_script(self, page_id: str, script: str) -> Any:
-        """
-        执行JavaScript脚本
-
-        Args:
-            page_id: 页面ID
-            script: JavaScript代码
-
-        Returns:
-            脚本执行结果
-        """
+        page = self._get_page(page_id)
         try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/evaluate",
-                json={"expression": script}
-            )
-
-            if response.status_code == 200:
-                return response.json().get("result")
-            return None
+            return await page.evaluate(script)
         except Exception as e:
             self.logger.debug(f"Script execution error: {e}")
             return None
 
     async def take_screenshot(self, page_id: str, path: str) -> bool:
-        """
-        截图
-
-        Args:
-            page_id: 页面ID
-            path: 保存路径
-
-        Returns:
-            是否成功
-        """
+        page = self._get_page(page_id)
         try:
-            response = await self.client.post(
-                f"{self.base_url}/json/prototype/Page/{page_id}/screenshot",
-                json={"path": path}
-            )
-            return response.status_code == 200
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            await page.screenshot(path=path)
+            return True
         except Exception as e:
             self.logger.error(f"Screenshot error: {e}")
             return False
 
     @handle_operation_errors(default_return=[])
     async def get_cookies(self, page_id: str) -> List[Dict[str, str]]:
-        """获取页面Cookie"""
-        response = await self.client.get(
-            f"{self.base_url}/json/prototype/Page/{page_id}/getCookies"
-        )
-        if response.status_code == 200:
-            return response.json().get("cookies", [])
-        return []
+        return await self._context.cookies()
 
     @handle_operation_errors(default_return=False)
     async def add_cookie(self, page_id: str, cookie: Dict[str, str]) -> bool:
-        """添加Cookie"""
-        response = await self.client.post(
-            f"{self.base_url}/json/prototype/Page/{page_id}/addCookie",
-            json={"cookie": cookie}
-        )
-        return response.status_code == 200
+        await self._context.add_cookies([cookie])
+        return True
 
     @handle_operation_errors(default_return=False)
     async def delete_cookies(self, page_id: str, name: Optional[str] = None) -> bool:
-        """删除Cookie"""
-        url = f"{self.base_url}/json/prototype/Page/{page_id}/clearCookies"
-        if name:
-            url += f"?name={name}"
-        response = await self.client.send(url, method="DELETE")
-        return response.status_code == 200
+        await self._context.clear_cookies()
+        return True
 
     @handle_operation_errors(default_return=False)
     async def reload(self, page_id: str) -> bool:
-        """刷新页面"""
-        response = await self.client.post(
-            f"{self.base_url}/json/prototype/Page/{page_id}/reload"
-        )
-        return response.status_code == 200
+        page = self._get_page(page_id)
+        await page.reload()
+        return True
 
     @handle_operation_errors(default_return=False)
     async def go_back(self, page_id: str) -> bool:
-        """返回上一页"""
-        response = await self.client.post(
-            f"{self.base_url}/json/prototype/Page/{page_id}/goBack"
-        )
-        return response.status_code == 200
+        page = self._get_page(page_id)
+        await page.go_back()
+        return True
 
     @handle_operation_errors(default_return=False)
     async def go_forward(self, page_id: str) -> bool:
-        """前进一页"""
-        response = await self.client.post(
-            f"{self.base_url}/json/prototype/Page/{page_id}/goForward"
-        )
-        return response.status_code == 200
+        page = self._get_page(page_id)
+        await page.go_forward()
+        return True
 
     @handle_operation_errors(default_return=None)
     async def get_page_source(self, page_id: str) -> Optional[str]:
-        """获取页面源码"""
-        response = await self.client.post(
-            f"{self.base_url}/json/prototype/Page/{page_id}/getContent"
-        )
-        if response.status_code == 200:
-            return response.json().get("result", "")
-        return None
+        page = self._get_page(page_id)
+        return await page.content()
 
     @handle_operation_errors(default_return=False)
     async def handle_dialog(self, page_id: str, accept: bool = True,
-                           text: str = "") -> bool:
-        """
-        处理对话框
+                            text: str = "") -> bool:
+        page = self._get_page(page_id)
 
-        Args:
-            page_id: 页面ID
-            accept: 是否接受（True=确定，False=取消）
-            text: 输入文本（prompt时使用）
+        async def _dialog_handler(dialog):
+            if accept:
+                await dialog.accept(text if text else None)
+            else:
+                await dialog.dismiss()
 
-        Returns:
-            是否成功
-        """
-        response = await self.client.post(
-            f"{self.base_url}/json/prototype/Page/{page_id}/handleDialog",
-            json={"accept": accept, "promptText": text}
-        )
-        return response.status_code == 200
+        page.on("dialog", _dialog_handler)
+        return True
+
+    async def set_cookies_for_domain(self, cookies_str: str, domain: str = ".goofish.com") -> None:
+        """从 cookie 字符串设置浏览器 cookie"""
+        if not self._context:
+            raise BrowserError("Browser context not initialized")
+
+        cookies = []
+        for item in cookies_str.split(";"):
+            item = item.strip()
+            if "=" in item:
+                name, value = item.split("=", 1)
+                cookies.append({
+                    "name": name.strip(),
+                    "value": value.strip(),
+                    "domain": domain,
+                    "path": "/",
+                })
+
+        if cookies:
+            await self._context.add_cookies(cookies)
+            self.logger.info(f"Set {len(cookies)} cookies for {domain}")
 
 
 async def create_controller(config: Optional[Dict[str, Any]] = None) -> OpenClawController:
-    """
-    创建并连接控制器
-
-    Args:
-        config: 配置字典
-
-    Returns:
-        OpenClawController实例
-    """
+    """创建并连接控制器"""
     controller = OpenClawController(config)
     connected = await controller.connect()
     if not connected:
-        raise ConnectionError(f"Failed to connect to OpenClaw at {controller.base_url}")
+        raise BrowserError("Failed to launch browser. Is Playwright installed?")
     return controller

@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.git/
+.gitignore
+*.md
+tests/
+web/frontend/node_modules/
+data/*.db
+logs/*.log
+data/.encryption_key

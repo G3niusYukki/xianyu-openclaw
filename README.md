@@ -1,8 +1,8 @@
 # 🦞 闲鱼自动化工具 (Xianyu OpenClaw)
 
-基于 [OpenClaw](https://github.com/openclaw/openclaw) 框架的闲鱼自动化运营工具。支持商品发布、智能做图、文案生成、一键擦亮、数据记录、多账号管理等全流程自动化功能。
+闲鱼自动化运营工具，基于 Playwright 浏览器自动化。支持商品发布、智能做图、文案生成、一键擦亮、数据记录、多账号管理等全流程自动化功能。
 
-**v2.1.0 最新更新**: 完成 1-6 阶段改造，Web端核心页面已接入真实 API，新增任务管理接口与上线清单。🎉
+**v3.0.0 最新更新**: 生产可用性大幅改造 — 浏览器自动化层从空壳 HTTP API 重写为 Playwright 真实实现，移除所有 mock 数据返回，修复安全漏洞，新增 Docker 部署、Cookie 加密存储、API 速率限制、启动健康检查。
 
 [![Release](https://img.shields.io/github/v/release/G3niusYukki/xianyu-openclaw?style=flat-square)](https://github.com/G3niusYukki/xianyu-openclaw/releases/latest)
 [![License](https://img.shields.io/github/license/G3niusYukki/xianyu-openclaw?style=flat-square)](LICENSE)
@@ -35,7 +35,7 @@
 
 闲鱼作为国内最大的二手交易平台，拥有庞大的用户群体。对于个人卖家和小型商家而言，闲鱼店铺的日常运营涉及大量重复性工作，包括商品上架、内容编辑、价格调整、信息擦亮等。这些工作耗时耗力且容易遗漏，严重制约了店铺的运营效率。
 
-本项目基于OpenClaw框架，通过AI技术和浏览器自动化手段，实现闲鱼店铺运营的全面智能化。OpenClaw作为一款强大的个人AI助手框架，提供了完善的工具系统、技能体系和浏览器控制能力，为本项目的实施奠定了坚实的技术基础。
+本项目通过 AI 技术和 Playwright 浏览器自动化，实现闲鱼店铺运营的全面智能化。
 
 ### 项目目标
 
@@ -114,7 +114,9 @@ xianyu-openclaw/
 │   ├── core/                     # 核心模块
 │   │   ├── config.py            # 配置管理
 │   │   ├── logger.py            # 日志系统
-│   │   └── openclaw_controller.py  # OpenClaw浏览器控制
+│   │   ├── openclaw_controller.py  # Playwright浏览器控制
+│   │   ├── crypto.py            # Cookie加密模块
+│   │   └── startup_checks.py   # 启动健康检查
 │   ├── modules/                 # 功能模块
 │   │   ├── listing/            # 商品发布模块
 │   │   │   ├── __init__.py
@@ -205,6 +207,8 @@ xianyu-openclaw/
 ├── logs/                     # 日志目录
 ├── docs/                     # 文档目录
 │   └── PROJECT_PLAN.md       # 项目计划书
+├── Dockerfile               # Docker构建文件
+├── docker-compose.yml       # Docker编排配置
 ├── requirements.txt          # Python依赖
 ├── install.sh               # macOS/Linux一键安装脚本
 ├── install.bat              # Windows一键安装脚本
@@ -259,7 +263,7 @@ http://localhost:8501
 - **Python**: 3.10+
 - **Node.js**: 18+（仅Web界面需要）
 - **操作系统**: macOS / Linux / Windows (WSL2)
-- **OpenClaw**: 用于浏览器自动化（可选）
+- **Playwright + Chromium**: 用于浏览器自动化
 - **依赖包**: 详见 requirements.txt
 
 ### 1. 安装Python依赖（命令行方式）
@@ -306,11 +310,10 @@ app:
   debug: false
   log_level: "INFO"
 
-# OpenClaw连接配置
+# 浏览器自动化配置 (基于 Playwright)
 openclaw:
-  host: "localhost"
-  port: 9222
   timeout: 30
+  retry_times: 3
 
 # AI服务配置
 ai:
@@ -355,9 +358,12 @@ OPENAI_API_KEY=sk-xxx
 XIANYU_COOKIE_1=your_cookie_here
 XIANYU_COOKIE_2=your_second_cookie_here
 
-# OpenClaw
-OPENCLAW_HOST=localhost
-OPENCLAW_PORT=9222
+# Cookie加密密钥（可选，不设置则自动生成）
+# ENCRYPTION_KEY=your_secret_passphrase
+
+# API速率限制
+RATE_LIMIT_MAX=30
+RATE_LIMIT_WINDOW=60
 ```
 
 ### 4. 获取闲鱼Cookie
@@ -369,14 +375,17 @@ OPENCLAW_PORT=9222
 5. 在Request Headers中复制Cookie值
 6. 将Cookie填入配置文件
 
-### 5. 启动OpenClaw
+### 5. Docker 部署（推荐生产使用）
 
 ```bash
-# 启动OpenClaw网关
-openclaw gateway --port 9222
+# 一键启动
+docker compose up -d
 
-# 或者使用默认端口
-openclaw gateway
+# 查看日志
+docker compose logs -f app
+
+# 停止
+docker compose down
 ```
 
 ### 6. 运行演示
@@ -416,13 +425,11 @@ python tests/test_skills.py
 | data_dir | 数据目录 | data |
 | logs_dir | 日志目录 | logs |
 
-#### OpenClaw配置 (openclaw)
+#### 浏览器自动化配置 (openclaw)
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| host | OpenClaw服务地址 | localhost |
-| port | OpenClaw服务端口 | 9222 |
-| timeout | 请求超时时间 | 30秒 |
+| timeout | 操作超时时间 | 30秒 |
 | retry_times | 重试次数 | 3 |
 
 #### AI服务配置 (ai)
@@ -1363,17 +1370,14 @@ is_valid = accounts_service.validate_cookie("account_1")
 
 ## 常见问题
 
-### Q1: 无法连接OpenClaw
+### Q1: 浏览器启动失败
 
 ```bash
-# 检查OpenClaw是否运行
-openclaw status
+# 确保 Playwright 和 Chromium 已安装
+pip install playwright
+python -m playwright install chromium
 
-# 启动OpenClaw
-openclaw gateway --port 9222
-
-# 检查端口
-lsof -i :9222
+# Docker 环境下已自动安装，无需手动操作
 ```
 
 ### Q2: Cookie过期
@@ -1416,6 +1420,46 @@ mkdir -p data/export
 ---
 
 ## 更新日志
+
+### v3.0.0 (2026-02-23) 🔧 生产可用性大幅改造
+
+**本次更新重点**: 修复所有阻断性生产问题，使项目从"演示级"提升为"可部署级"。
+
+#### 核心改造
+
+**🔌 浏览器自动化层重写**
+- 删除空壳文件 `src/core/openclaw.py`（所有方法均为 TODO 注释）
+- 重写 `openclaw_controller.py`：从虚假的 HTTP API 端点改为基于 **Playwright** 的真实浏览器控制
+- 所有操作（导航、点击、输入、上传、截图等）均调用 Playwright 真实 API
+
+**🚫 移除 Mock 数据返回**
+- `ListingService` / `OperationsService` 中所有无 controller 时的假数据返回改为抛出 `BrowserError`
+- 不再"假装"操作成功返回随机商品 ID
+
+**🎯 更新页面选择器**
+- 所有 CSS 选择器从猜测性 class 名改为使用 `placeholder`、`:has-text()`、`[class*='']` 等稳定策略
+- 发布页面 URL 从 `/publish` 修正为 `/sell`
+
+**🔒 安全加固**
+- CORS 从 `allow_origins=["*"]` 改为可配置白名单（`CORS_ORIGINS` 环境变量）
+- 新增 API 速率限制中间件（默认 30 次/分钟）
+- 新增 Cookie 加密存储模块（`src/core/crypto.py`），基于 Fernet 对称加密
+- 修复 `analytics/service.py` 中 f-string SQL 查询风险
+
+**🐳 Docker 容器化**
+- 新增 `Dockerfile`（Python 3.11 + Playwright + Chromium + 中文字体）
+- 新增 `docker-compose.yml`（含数据卷、健康检查、自动重启）
+
+**🏥 启动健康检查**
+- 新增 `src/core/startup_checks.py`：启动时检查 Python 版本、Playwright、数据库、Cookie 等
+- `/api/health` 端点增强，返回所有检查项详细状态
+- Cookie 过期检测（检查关键字段 `_tb_token_`、`cookie2` 等）
+
+#### 依赖变更
+- `playwright` 从注释改为正式依赖
+- 新增 `cryptography` 依赖（Cookie 加密）
+
+---
 
 ### v2.1.0 (2026-02-23) ✅ 核心链路打通与发布收口
 

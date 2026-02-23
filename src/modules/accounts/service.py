@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.core.config import get_config
 from src.core.logger import get_logger
+from src.core.crypto import ensure_encrypted, ensure_decrypted
 
 
 class AccountStatus:
@@ -61,10 +62,11 @@ class AccountsService:
 
         self.accounts = []
         for acc in accounts_config:
+            raw_cookie = self._resolve_env(acc.get("cookie", ""))
             account = {
                 "id": acc.get("id", ""),
                 "name": acc.get("name", acc.get("id", "")),
-                "cookie": self._resolve_env(acc.get("cookie", "")),
+                "cookie_encrypted": ensure_encrypted(raw_cookie),
                 "priority": acc.get("priority", 1),
                 "enabled": acc.get("enabled", True),
                 "status": AccountStatus.ACTIVE,
@@ -150,10 +152,11 @@ class AccountsService:
         for acc in self.accounts:
             if acc.get("id") == account_id:
                 account_dict = acc.copy()
-                if mask_sensitive and "cookie" in account_dict:
-                    account_dict["cookie"] = self._mask_sensitive_data(
-                        account_dict["cookie"]
-                    )
+                if mask_sensitive:
+                    cookie_val = ensure_decrypted(account_dict.pop("cookie_encrypted", ""))
+                    account_dict["cookie"] = self._mask_sensitive_data(cookie_val)
+                else:
+                    account_dict["cookie"] = ensure_decrypted(account_dict.pop("cookie_encrypted", ""))
                 return account_dict
         return None
 
@@ -193,7 +196,7 @@ class AccountsService:
 
     def get_cookie(self, account_id: Optional[str] = None) -> Optional[str]:
         """
-        获取账号Cookie（原始值，不脱敏）
+        获取账号Cookie（解密后的原始值）
 
         Args:
             account_id: 账号ID，不指定使用当前账号
@@ -204,7 +207,8 @@ class AccountsService:
         account_id = account_id or self.current_account_id
         for acc in self.accounts:
             if acc.get("id") == account_id:
-                return acc.get("cookie")
+                encrypted = acc.get("cookie_encrypted", "")
+                return ensure_decrypted(encrypted) if encrypted else None
         return None
 
     def add_account(self, account_id: str, cookie: str, name: Optional[str] = None,
@@ -325,7 +329,7 @@ class AccountsService:
             if name is not None:
                 account["name"] = name
             if cookie is not None:
-                account["cookie"] = cookie
+                account["cookie_encrypted"] = ensure_encrypted(cookie)
                 account["last_login"] = datetime.now().isoformat()
             if priority is not None:
                 account["priority"] = priority
@@ -445,7 +449,7 @@ class AccountsService:
         """
         for account in self.accounts:
             if account.get("id") == account_id:
-                account["cookie"] = new_cookie
+                account["cookie_encrypted"] = ensure_encrypted(new_cookie)
                 account["last_login"] = datetime.now().isoformat()
                 self.logger.info(f"Refreshed cookie for account: {account_id}")
                 return True

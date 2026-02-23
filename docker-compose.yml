@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    container_name: xianyu-openclaw
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    env_file:
+      - .env
+    environment:
+      - APP_DEBUG=false
+      - APP_LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

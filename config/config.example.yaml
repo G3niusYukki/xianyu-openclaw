@@ -10,11 +10,8 @@ app:
   data_dir: "data"
   logs_dir: "logs"
 
-# OpenClaw连接配置
+# 浏览器自动化配置 (基于 Playwright)
 openclaw:
-  host: "localhost"
-  port: 9222
-  executable_path: ""
   timeout: 30
   retry_times: 3
 

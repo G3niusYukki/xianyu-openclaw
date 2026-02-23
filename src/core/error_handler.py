@@ -9,7 +9,7 @@ import asyncio
 import functools
 import traceback
 from functools import wraps
-from typing import Callable, Any, Optional, List
+from typing import Callable, Any, Dict, Optional, List
 import httpx
 
 from src.core.logger import get_logger

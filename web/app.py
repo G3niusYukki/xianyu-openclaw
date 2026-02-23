@@ -4,7 +4,6 @@ import sys
 import os
 from pathlib import Path
 
-# 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -13,12 +12,19 @@ from datetime import datetime
 
 from src.core.config import Config
 from src.core.logger import get_logger
+from src.core.startup_checks import run_all_checks, print_startup_report
 from src.modules.listing.service import ListingService
 from src.modules.operations.service import OperationsService
 from src.modules.analytics.service import AnalyticsService
 from src.modules.accounts.service import AccountsService
 
 logger = get_logger(__name__)
+
+if 'startup_done' not in st.session_state:
+    results = run_all_checks(skip_browser=True)
+    st.session_state.startup_ok = print_startup_report(results)
+    st.session_state.startup_results = results
+    st.session_state.startup_done = True
 
 # 页面配置
 st.set_page_config(
