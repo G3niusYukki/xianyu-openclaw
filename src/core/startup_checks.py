@@ -6,10 +6,9 @@ Startup Health Checks
 """
 
 import os
-import sys
 import sqlite3
+import sys
 from pathlib import Path
-from typing import List, Dict, Any
 
 from src.core.logger import get_logger
 
@@ -37,6 +36,7 @@ def check_python_version() -> StartupCheckResult:
 def check_gateway_reachable() -> StartupCheckResult:
     try:
         import httpx
+
         host = os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
         port = int(os.getenv("OPENCLAW_GATEWAY_PORT", "18789"))
         browser_port = port + 2
@@ -57,6 +57,7 @@ def check_gateway_reachable() -> StartupCheckResult:
 
 def check_database_writable() -> StartupCheckResult:
     from src.core.config import get_config
+
     try:
         cfg = get_config()
         db_path = cfg.database.get("path", "data/agent.db")
@@ -117,9 +118,7 @@ def check_cookie_expiration() -> StartupCheckResult:
             critical=False,
         )
 
-    has_session_fields = any(
-        key in cookie_1 for key in ["_tb_token_", "cookie2", "sgcookie", "unb"]
-    )
+    has_session_fields = any(key in cookie_1 for key in ["_tb_token_", "cookie2", "sgcookie", "unb"])
     if not has_session_fields:
         return StartupCheckResult(
             "Cookie有效性",
@@ -131,7 +130,7 @@ def check_cookie_expiration() -> StartupCheckResult:
     return StartupCheckResult("Cookie有效性", True, "Cookie格式正常", critical=False)
 
 
-def run_all_checks(skip_browser: bool = False) -> List[StartupCheckResult]:
+def run_all_checks(skip_browser: bool = False) -> list[StartupCheckResult]:
     """运行所有启动检查"""
     results = [
         check_python_version(),
@@ -148,7 +147,7 @@ def run_all_checks(skip_browser: bool = False) -> List[StartupCheckResult]:
     return results
 
 
-def print_startup_report(results: List[StartupCheckResult]) -> bool:
+def print_startup_report(results: list[StartupCheckResult]) -> bool:
     """打印启动检查报告，返回是否所有关键检查通过"""
     logger.info("=" * 50)
     logger.info("闲鱼自动化工具 - 启动检查")

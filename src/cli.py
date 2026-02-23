@@ -31,8 +31,8 @@ def _json_out(data: Any) -> None:
 
 async def cmd_publish(args: argparse.Namespace) -> None:
     from src.core.browser_client import create_browser_client
-    from src.modules.listing.service import ListingService
     from src.modules.listing.models import Listing
+    from src.modules.listing.service import ListingService
 
     client = await create_browser_client()
     try:
@@ -47,12 +47,14 @@ async def cmd_publish(args: argparse.Namespace) -> None:
             tags=args.tags or [],
         )
         result = await service.create_listing(listing)
-        _json_out({
-            "success": result.success,
-            "product_id": result.product_id,
-            "product_url": result.product_url,
-            "error": result.error_message,
-        })
+        _json_out(
+            {
+                "success": result.success,
+                "product_id": result.product_id,
+                "product_url": result.product_url,
+                "error": result.error_message,
+            }
+        )
     finally:
         await client.disconnect()
 

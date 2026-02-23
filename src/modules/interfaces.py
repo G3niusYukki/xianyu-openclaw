@@ -6,16 +6,14 @@ Service Interface Layer
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+from typing import Any
 
 
 class IListingService(ABC):
     """商品上架服务接口"""
 
     @abstractmethod
-    async def create_listing(self, listing: Any,
-                           account_id: Optional[str] = None) -> Any:
+    async def create_listing(self, listing: Any, account_id: str | None = None) -> Any:
         """
         创建并发布单个商品
 
@@ -29,9 +27,9 @@ class IListingService(ABC):
         pass
 
     @abstractmethod
-    async def batch_create_listings(self, listings: List[Any],
-                                   account_id: Optional[str] = None,
-                                   delay_range: tuple = (5, 10)) -> List[Any]:
+    async def batch_create_listings(
+        self, listings: list[Any], account_id: str | None = None, delay_range: tuple = (5, 10)
+    ) -> list[Any]:
         """
         批量发布商品
 
@@ -46,8 +44,7 @@ class IListingService(ABC):
         pass
 
     @abstractmethod
-    async def update_listing(self, product_id: str,
-                           updates: Dict[str, Any]) -> bool:
+    async def update_listing(self, product_id: str, updates: dict[str, Any]) -> bool:
         """
         更新商品信息
 
@@ -74,7 +71,7 @@ class IListingService(ABC):
         pass
 
     @abstractmethod
-    async def get_my_listings(self, limit: int = 50) -> List[Dict[str, Any]]:
+    async def get_my_listings(self, limit: int = 50) -> list[dict[str, Any]]:
         """
         获取我的商品列表
 
@@ -91,8 +88,7 @@ class IContentService(ABC):
     """内容生成服务接口"""
 
     @abstractmethod
-    def generate_title(self, product_name: str, features: List[str],
-                     category: str = "General") -> str:
+    def generate_title(self, product_name: str, features: list[str], category: str = "General") -> str:
         """
         生成闲鱼商品标题
 
@@ -107,9 +103,9 @@ class IContentService(ABC):
         pass
 
     @abstractmethod
-    def generate_description(self, product_name: str, condition: str,
-                           reason: str, tags: List[str],
-                           extra_info: Optional[str] = None) -> str:
+    def generate_description(
+        self, product_name: str, condition: str, reason: str, tags: list[str], extra_info: str | None = None
+    ) -> str:
         """
         生成闲鱼商品描述文案
 
@@ -126,7 +122,7 @@ class IContentService(ABC):
         pass
 
     @abstractmethod
-    def generate_listing_content(self, product_info: Dict[str, Any]) -> Dict[str, str]:
+    def generate_listing_content(self, product_info: dict[str, Any]) -> dict[str, str]:
         """
         生成完整商品发布内容
 
@@ -157,8 +153,7 @@ class IMediaService(ABC):
     """媒体处理服务接口"""
 
     @abstractmethod
-    def resize_image_for_xianyu(self, image_path: str,
-                               output_path: Optional[str] = None) -> str:
+    def resize_image_for_xianyu(self, image_path: str, output_path: str | None = None) -> str:
         """
         调整图片尺寸以符合闲鱼规范
 
@@ -172,9 +167,9 @@ class IMediaService(ABC):
         pass
 
     @abstractmethod
-    def add_watermark(self, image_path: str, output_path: Optional[str] = None,
-                     text: Optional[str] = None,
-                     position: str = "bottom-right") -> str:
+    def add_watermark(
+        self, image_path: str, output_path: str | None = None, text: str | None = None, position: str = "bottom-right"
+    ) -> str:
         """
         添加文字水印
 
@@ -190,9 +185,9 @@ class IMediaService(ABC):
         pass
 
     @abstractmethod
-    def batch_process_images(self, image_paths: List[str],
-                           output_dir: Optional[str] = None,
-                           add_watermark: bool = True) -> List[str]:
+    def batch_process_images(
+        self, image_paths: list[str], output_dir: str | None = None, add_watermark: bool = True
+    ) -> list[str]:
         """
         批量处理图片
 
@@ -207,8 +202,7 @@ class IMediaService(ABC):
         pass
 
     @abstractmethod
-    def compress_image(self, image_path: str, output_path: Optional[str] = None,
-                      quality: int = 85) -> str:
+    def compress_image(self, image_path: str, output_path: str | None = None, quality: int = 85) -> str:
         """
         压缩图片
 
@@ -240,7 +234,7 @@ class IOperationsService(ABC):
     """运营操作服务接口"""
 
     @abstractmethod
-    async def batch_polish(self, max_items: int = 50) -> Dict[str, Any]:
+    async def batch_polish(self, max_items: int = 50) -> dict[str, Any]:
         """
         批量擦亮商品
 
@@ -253,7 +247,7 @@ class IOperationsService(ABC):
         pass
 
     @abstractmethod
-    async def batch_update_price(self, updates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def batch_update_price(self, updates: list[dict[str, Any]]) -> dict[str, Any]:
         """
         批量更新价格
 
@@ -266,8 +260,7 @@ class IOperationsService(ABC):
         pass
 
     @abstractmethod
-    async def batch_delist(self, product_ids: List[str],
-                          reason: str = "") -> Dict[str, Any]:
+    async def batch_delist(self, product_ids: list[str], reason: str = "") -> dict[str, Any]:
         """
         批量下架商品
 
@@ -281,7 +274,7 @@ class IOperationsService(ABC):
         pass
 
     @abstractmethod
-    async def get_product_stats(self, product_id: str) -> Dict[str, Any]:
+    async def get_product_stats(self, product_id: str) -> dict[str, Any]:
         """
         获取商品统计数据
 
@@ -298,12 +291,15 @@ class IAnalyticsService(ABC):
     """数据分析服务接口"""
 
     @abstractmethod
-    async def log_operation(self, operation_type: str,
-                           product_id: Optional[str] = None,
-                           account_id: Optional[str] = None,
-                           details: Optional[Dict] = None,
-                           status: str = "success",
-                           error_message: Optional[str] = None) -> int:
+    async def log_operation(
+        self,
+        operation_type: str,
+        product_id: str | None = None,
+        account_id: str | None = None,
+        details: dict | None = None,
+        status: str = "success",
+        error_message: str | None = None,
+    ) -> int:
         """
         记录操作日志
 
@@ -321,7 +317,7 @@ class IAnalyticsService(ABC):
         pass
 
     @abstractmethod
-    async def get_dashboard_stats(self) -> Dict[str, Any]:
+    async def get_dashboard_stats(self) -> dict[str, Any]:
         """
         获取仪表盘统计
 
@@ -331,7 +327,7 @@ class IAnalyticsService(ABC):
         pass
 
     @abstractmethod
-    async def get_trend_data(self, metric: str = "views", days: int = 30) -> List[Dict[str, Any]]:
+    async def get_trend_data(self, metric: str = "views", days: int = 30) -> list[dict[str, Any]]:
         """
         获取趋势数据
 
@@ -345,9 +341,7 @@ class IAnalyticsService(ABC):
         pass
 
     @abstractmethod
-    async def export_data(self, data_type: str = "products",
-                         format: str = "csv",
-                         filepath: str = None) -> str:
+    async def export_data(self, data_type: str = "products", format: str = "csv", filepath: str | None = None) -> str:
         """
         导出数据
 
@@ -366,8 +360,7 @@ class IAccountsService(ABC):
     """账号管理服务接口"""
 
     @abstractmethod
-    def get_accounts(self, enabled_only: bool = True,
-                    mask_sensitive: bool = True) -> List[Dict[str, Any]]:
+    def get_accounts(self, enabled_only: bool = True, mask_sensitive: bool = True) -> list[dict[str, Any]]:
         """
         获取账号列表
 
@@ -381,7 +374,7 @@ class IAccountsService(ABC):
         pass
 
     @abstractmethod
-    def get_account(self, account_id: str, mask_sensitive: bool = True) -> Optional[Dict[str, Any]]:
+    def get_account(self, account_id: str, mask_sensitive: bool = True) -> dict[str, Any] | None:
         """
         获取指定账号
 
@@ -395,7 +388,7 @@ class IAccountsService(ABC):
         pass
 
     @abstractmethod
-    def get_cookie(self, account_id: Optional[str] = None) -> Optional[str]:
+    def get_cookie(self, account_id: str | None = None) -> str | None:
         """
         获取账号Cookie
 
@@ -421,7 +414,7 @@ class IAccountsService(ABC):
         pass
 
     @abstractmethod
-    def get_current_account(self) -> Optional[Dict[str, Any]]:
+    def get_current_account(self) -> dict[str, Any] | None:
         """
         获取当前账号
 
@@ -431,8 +424,7 @@ class IAccountsService(ABC):
         pass
 
     @abstractmethod
-    def update_account_stats(self, account_id: str, operation: str,
-                            success: bool = True) -> None:
+    def update_account_stats(self, account_id: str, operation: str, success: bool = True) -> None:
         """
         更新账号统计
 
@@ -444,7 +436,7 @@ class IAccountsService(ABC):
         pass
 
     @abstractmethod
-    def get_account_health(self, account_id: str) -> Dict[str, Any]:
+    def get_account_health(self, account_id: str) -> dict[str, Any]:
         """
         获取账号健康度
 
@@ -461,10 +453,14 @@ class ISchedulerService(ABC):
     """调度器服务接口"""
 
     @abstractmethod
-    def create_task(self, task_type: str, name: str = None,
-                   cron_expression: str = None,
-                   interval: int = None,
-                   params: Dict = None) -> Any:
+    def create_task(
+        self,
+        task_type: str,
+        name: str | None = None,
+        cron_expression: str | None = None,
+        interval: int | None = None,
+        params: dict | None = None,
+    ) -> Any:
         """
         创建定时任务
 
@@ -481,7 +477,7 @@ class ISchedulerService(ABC):
         pass
 
     @abstractmethod
-    async def execute_task(self, task: Any) -> Dict[str, Any]:
+    async def execute_task(self, task: Any) -> dict[str, Any]:
         """
         执行任务
 
@@ -504,7 +500,7 @@ class ISchedulerService(ABC):
         pass
 
     @abstractmethod
-    def get_scheduler_status(self) -> Dict[str, Any]:
+    def get_scheduler_status(self) -> dict[str, Any]:
         """
         获取调度器状态
 
@@ -518,9 +514,15 @@ class IMonitorService(ABC):
     """监控服务接口"""
 
     @abstractmethod
-    async def raise_alert(self, alert_type: str, title: str, message: str,
-                         source: str = "", details: Dict = None,
-                         auto_resolve: bool = False) -> Any:
+    async def raise_alert(
+        self,
+        alert_type: str,
+        title: str,
+        message: str,
+        source: str = "",
+        details: dict | None = None,
+        auto_resolve: bool = False,
+    ) -> Any:
         """
         触发告警
 
@@ -551,7 +553,7 @@ class IMonitorService(ABC):
         pass
 
     @abstractmethod
-    async def get_active_alerts(self, level: str = None) -> List[Any]:
+    async def get_active_alerts(self, level: str | None = None) -> list[Any]:
         """
         获取活跃告警
 
@@ -564,7 +566,7 @@ class IMonitorService(ABC):
         pass
 
     @abstractmethod
-    async def get_alert_summary(self) -> Dict[str, Any]:
+    async def get_alert_summary(self) -> dict[str, Any]:
         """
         获取告警摘要
 

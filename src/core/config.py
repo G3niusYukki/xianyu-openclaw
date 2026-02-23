@@ -7,17 +7,16 @@ Configuration Management Module
 
 import os
 import threading
-from pathlib import Path
-from typing import Any, Dict, Optional
 from functools import lru_cache
+from typing import Any, Optional
 
 import yaml
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
 from src.core.config_models import ConfigModel
-from src.core.logger import get_logger
 from src.core.error_handler import ConfigError
+from src.core.logger import get_logger
 
 
 class Config:
@@ -29,10 +28,10 @@ class Config:
 
     _instance: Optional["Config"] = None
     _lock = threading.Lock()
-    _config: Dict[str, Any] = {}
-    _config_path: Optional[str] = None
+    _config: dict[str, Any] = {}
+    _config_path: str | None = None
 
-    def __new__(cls, config_path: Optional[str] = None):
+    def __new__(cls, config_path: str | None = None):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -40,9 +39,9 @@ class Config:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         default_path = self._find_config_file()
-        if not hasattr(self, '_initialized') or not self._initialized:
+        if not hasattr(self, "_initialized") or not self._initialized:
             self.logger = get_logger()
             self._load_config(config_path)
             self._initialized = True
@@ -51,10 +50,10 @@ class Config:
         elif config_path is None and self._config_path != default_path:
             self.reload(default_path)
 
-    def _load_config(self, config_path: Optional[str] = None) -> None:
+    def _load_config(self, config_path: str | None = None) -> None:
         """
         加载配置文件
-        
+
         Args:
             config_path: 配置文件路径，不指定则使用默认路径
         """
@@ -71,10 +70,10 @@ class Config:
         else:
             self._set_defaults()
 
-    def _find_config_file(self) -> Optional[str]:
+    def _find_config_file(self) -> str | None:
         """
         查找配置文件
-        
+
         优先级: config/config.yaml > config/config.example.yaml
         """
         possible_paths = [
@@ -91,7 +90,7 @@ class Config:
         加载YAML配置文件
         """
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 config_data = yaml.safe_load(f) or {}
 
             if config_data:
@@ -101,14 +100,14 @@ class Config:
                     self.logger.debug(f"Config validation passed: {config_path}")
                 except ValidationError as e:
                     self.logger.error(f"Config validation failed: {e}")
-                    raise ConfigError(f"Invalid configuration: {e}")
+                    raise ConfigError(f"Invalid configuration: {e}") from e
 
         except FileNotFoundError:
             self.logger.warning(f"Config file not found: {config_path}")
             self._config = {}
         except yaml.YAMLError as e:
             self.logger.error(f"Invalid YAML in config file: {e}")
-            raise ConfigError(f"Invalid YAML: {e}")
+            raise ConfigError(f"Invalid YAML: {e}") from e
         except Exception as e:
             self.logger.error(f"Failed to load config file: {e}")
             self._config = {}
@@ -204,26 +203,26 @@ class Config:
     def get(self, key: str, default: Any = None) -> Any:
         """
         获取配置值
-        
+
         Args:
             key: 配置键，支持点号分隔的路径，如 "openclaw.host"
             default: 默认值
-            
+
         Returns:
             配置值
         """
         keys = key.split(".")
         value = self._config
-        
+
         for k in keys:
             if isinstance(value, dict) and k in value:
                 value = value[k]
             else:
                 return default
-        
+
         return value
 
-    def get_section(self, section: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def get_section(self, section: str, default: dict[str, Any] | None = None) -> dict[str, Any]:
         """
         获取配置段落
 
@@ -237,22 +236,22 @@ class Config:
         return self._config.get(section, default or {})
 
     @property
-    def app(self) -> Dict[str, Any]:
+    def app(self) -> dict[str, Any]:
         """应用配置"""
         return self.get_section("app")
 
     @property
-    def openclaw(self) -> Dict[str, Any]:
+    def openclaw(self) -> dict[str, Any]:
         """OpenClaw配置"""
         return self.get_section("openclaw")
 
     @property
-    def ai(self) -> Dict[str, Any]:
+    def ai(self) -> dict[str, Any]:
         """AI服务配置"""
         return self.get_section("ai")
 
     @property
-    def database(self) -> Dict[str, Any]:
+    def database(self) -> dict[str, Any]:
         """数据库配置"""
         return self.get_section("database")
 
@@ -262,24 +261,24 @@ class Config:
         return self.get_section("accounts", [])
 
     @property
-    def media(self) -> Dict[str, Any]:
+    def media(self) -> dict[str, Any]:
         """媒体处理配置"""
         return self.get_section("media", {})
 
     @property
-    def content(self) -> Dict[str, Any]:
+    def content(self) -> dict[str, Any]:
         """内容生成配置"""
         return self.get_section("content", {})
 
     @property
-    def browser(self) -> Dict[str, Any]:
+    def browser(self) -> dict[str, Any]:
         """浏览器配置"""
         return self.get_section("browser", {})
 
-    def reload(self, config_path: Optional[str] = None) -> None:
+    def reload(self, config_path: str | None = None) -> None:
         """
         重新加载配置
-        
+
         Args:
             config_path: 新的配置文件路径
         """
@@ -288,7 +287,7 @@ class Config:
 
 
 @lru_cache(maxsize=1)
-def get_config(config_path: Optional[str] = None) -> Config:
+def get_config(config_path: str | None = None) -> Config:
     """
     获取配置单例
 

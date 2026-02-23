@@ -6,10 +6,9 @@ Sensitive Data Encryption
 密钥来自环境变量 ENCRYPTION_KEY，首次运行时自动生成。
 """
 
-import os
 import base64
 import hashlib
-from typing import Optional
+import os
 from pathlib import Path
 
 from src.core.logger import get_logger
@@ -38,6 +37,7 @@ def _get_or_create_key() -> bytes:
 
     try:
         from cryptography.fernet import Fernet
+
         key = Fernet.generate_key()
     except ImportError:
         key = base64.urlsafe_b64encode(os.urandom(32))
@@ -52,13 +52,11 @@ def encrypt_value(plaintext: str) -> str:
     """加密字符串，返回 base64 编码的密文"""
     try:
         from cryptography.fernet import Fernet
+
         f = Fernet(_get_or_create_key())
         return f.encrypt(plaintext.encode("utf-8")).decode("utf-8")
     except ImportError:
-        logger.warning(
-            "cryptography package not installed. "
-            "Run: pip install cryptography. Storing value as-is."
-        )
+        logger.warning("cryptography package not installed. Run: pip install cryptography. Storing value as-is.")
         return plaintext
 
 
@@ -66,6 +64,7 @@ def decrypt_value(ciphertext: str) -> str:
     """解密 base64 编码的密文，返回明文"""
     try:
         from cryptography.fernet import Fernet
+
         f = Fernet(_get_or_create_key())
         return f.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
     except ImportError:

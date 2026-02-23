@@ -8,11 +8,11 @@ Operations Service
 import asyncio
 import random
 import time
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from src.core.config import get_config
-from src.core.logger import get_logger
 from src.core.error_handler import BrowserError
+from src.core.logger import get_logger
 from src.modules.analytics.service import AnalyticsService
 
 
@@ -62,8 +62,7 @@ class OperationsService:
     封装店铺日常运营操作，包括擦亮、降价、下架等
     """
 
-    def __init__(self, controller=None, config: Optional[dict] = None,
-                 analytics: Optional[AnalyticsService] = None):
+    def __init__(self, controller=None, config: dict | None = None, analytics: AnalyticsService | None = None):
         """
         初始化运营服务
 
@@ -80,7 +79,7 @@ class OperationsService:
         browser_config = get_config().browser
         self.delay_range = (
             browser_config.get("delay", {}).get("min", 1),
-            browser_config.get("delay", {}).get("max", 3)
+            browser_config.get("delay", {}).get("max", 3),
         )
 
         self.selectors = OperationsSelectors()
@@ -91,7 +90,7 @@ class OperationsService:
         max_delay = self.delay_range[1] * max_factor
         return random.uniform(min_delay, max_delay)
 
-    async def polish_listing(self, product_id: str) -> Dict[str, Any]:
+    async def polish_listing(self, product_id: str) -> dict[str, Any]:
         """
         擦亮单个商品
 
@@ -125,7 +124,7 @@ class OperationsService:
                 "success": success,
                 "product_id": product_id,
                 "action": "polish",
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
 
             if self.analytics:
@@ -137,8 +136,7 @@ class OperationsService:
             self.logger.error(f"Polish failed: {e}")
             return self._error_result("polish", product_id, str(e))
 
-    async def batch_polish(self, product_ids: List[str] = None,
-                          max_items: int = 50) -> Dict[str, Any]:
+    async def batch_polish(self, product_ids: list[str] | None = None, max_items: int = 50) -> dict[str, Any]:
         """
         批量擦亮商品
 
@@ -164,7 +162,7 @@ class OperationsService:
 
             if not product_ids:
                 items = await self.controller.find_elements(page_id, self.selectors.SELLING_ITEM)
-                for i, item in enumerate(items[:max_items]):
+                for i, _item in enumerate(items[:max_items]):
                     if i >= max_items:
                         break
 
@@ -177,11 +175,7 @@ class OperationsService:
 
                         if confirm:
                             product_id = f"item_{random.randint(100000, 999999)}"
-                            results.append({
-                                "success": True,
-                                "product_id": product_id,
-                                "action": "polish"
-                            })
+                            results.append({"success": True, "product_id": product_id, "action": "polish"})
                             polished.add(product_id)
 
                         await asyncio.sleep(self._random_delay(2, 4))
@@ -191,7 +185,7 @@ class OperationsService:
                 "failed": len(polished) - len(results) if len(polished) > len(results) else 0,
                 "total": len(results),
                 "action": "batch_polish",
-                "details": results
+                "details": results,
             }
 
             if self.analytics:
@@ -206,8 +200,9 @@ class OperationsService:
             self.logger.error(f"Batch polish failed: {e}")
             return self._error_result("batch_polish", None, str(e))
 
-    async def update_price(self, product_id: str, new_price: float,
-                          original_price: Optional[float] = None) -> Dict[str, Any]:
+    async def update_price(
+        self, product_id: str, new_price: float, original_price: float | None = None
+    ) -> dict[str, Any]:
         """
         更新商品价格
 
@@ -248,7 +243,7 @@ class OperationsService:
                 "action": "price_update",
                 "old_price": original_price,
                 "new_price": new_price,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
 
             if self.analytics:
@@ -260,8 +255,7 @@ class OperationsService:
             self.logger.error(f"Price update failed: {e}")
             return self._error_result("price_update", product_id, str(e))
 
-    async def batch_update_price(self, updates: List[Dict[str, Any]],
-                                 delay_range: tuple = (3, 6)) -> Dict[str, Any]:
+    async def batch_update_price(self, updates: list[dict[str, Any]], delay_range: tuple = (3, 6)) -> dict[str, Any]:
         """
         批量更新价格
 
@@ -296,7 +290,7 @@ class OperationsService:
             "failed": sum(1 for r in results if not r.get("success")),
             "total": len(results),
             "action": "batch_price_update",
-            "details": results
+            "details": results,
         }
 
         if self.analytics:
@@ -305,8 +299,7 @@ class OperationsService:
         self.logger.success(f"Batch price update complete: {summary['success']}/{summary['total']}")
         return summary
 
-    async def delist(self, product_id: str, reason: str = "不卖了",
-                     confirm: bool = True) -> Dict[str, Any]:
+    async def delist(self, product_id: str, reason: str = "不卖了", confirm: bool = True) -> dict[str, Any]:
         """
         下架商品
 
@@ -344,7 +337,7 @@ class OperationsService:
                 "product_id": product_id,
                 "action": "delist",
                 "reason": reason,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
 
             if self.analytics:
@@ -356,7 +349,7 @@ class OperationsService:
             self.logger.error(f"Delist failed: {e}")
             return self._error_result("delist", product_id, str(e))
 
-    async def relist(self, product_id: str) -> Dict[str, Any]:
+    async def relist(self, product_id: str) -> dict[str, Any]:
         """
         重新上架商品
 
@@ -389,7 +382,7 @@ class OperationsService:
                 "success": success,
                 "product_id": product_id,
                 "action": "relist",
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
 
             if self.analytics:
@@ -401,7 +394,7 @@ class OperationsService:
             self.logger.error(f"Relist failed: {e}")
             return self._error_result("relist", product_id, str(e))
 
-    async def refresh_inventory(self) -> Dict[str, Any]:
+    async def refresh_inventory(self) -> dict[str, Any]:
         """
         刷新库存信息
 
@@ -426,14 +419,14 @@ class OperationsService:
                 "success": True,
                 "action": "inventory_refresh",
                 "total_items": len(items),
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
 
         except Exception as e:
             self.logger.error(f"Inventory refresh failed: {e}")
             return {"success": False, "action": "inventory_refresh", "error": str(e)}
 
-    async def get_listing_stats(self) -> Dict[str, Any]:
+    async def get_listing_stats(self) -> dict[str, Any]:
         """
         获取商品统计数据
 
@@ -450,14 +443,7 @@ class OperationsService:
             await self.controller.navigate(page_id, self.selectors.MY_SELLING)
             await asyncio.sleep(self._random_delay())
 
-            stats = {
-                "total": 0,
-                "active": 0,
-                "sold": 0,
-                "deleted": 0,
-                "total_views": 0,
-                "total_wants": 0
-            }
+            stats = {"total": 0, "active": 0, "sold": 0, "deleted": 0, "total_views": 0, "total_wants": 0}
 
             await self.controller.close_page(page_id)
             return stats
@@ -466,13 +452,12 @@ class OperationsService:
             self.logger.error(f"Failed to fetch stats: {e}")
             return {"error": str(e)}
 
-    def _error_result(self, action: str, product_id: Optional[str],
-                     error: str) -> Dict[str, Any]:
+    def _error_result(self, action: str, product_id: str | None, error: str) -> dict[str, Any]:
         """生成错误结果"""
         return {
             "success": False,
             "product_id": product_id,
             "action": action,
             "error": error,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }

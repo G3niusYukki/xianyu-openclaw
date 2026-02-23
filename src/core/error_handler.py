@@ -6,17 +6,16 @@ Unified Error Handling
 """
 
 import asyncio
-import functools
-import traceback
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, Any, Dict, Optional, List
+from typing import Any
+
 import httpx
 
 from src.core.logger import get_logger
 
 
-def handle_controller_errors(default_return: Any = None, 
-                             raise_on_error: bool = False):
+def handle_controller_errors(default_return: Any = None, raise_on_error: bool = False):
     """
     控制器操作异常处理装饰器
 
@@ -24,6 +23,7 @@ def handle_controller_errors(default_return: Any = None,
         default_return: 发生异常时返回的默认值
         raise_on_error: 是否在异常时重新抛出
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def async_wrapper(self, *args, **kwargs):
@@ -59,11 +59,11 @@ def handle_controller_errors(default_return: Any = None,
                 return default_return
 
         return async_wrapper
+
     return decorator
 
 
-def handle_operation_errors(default_return: Any = False,
-                          raise_on_error: bool = False):
+def handle_operation_errors(default_return: Any = False, raise_on_error: bool = False):
     """
     操作异常处理装饰器（用于返回bool的操作）
 
@@ -71,6 +71,7 @@ def handle_operation_errors(default_return: Any = False,
         default_return: 发生异常时返回的默认值
         raise_on_error: 是否在异常时重新抛出
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def async_wrapper(self, *args, **kwargs):
@@ -103,11 +104,11 @@ def handle_operation_errors(default_return: Any = False,
                 return default_return
 
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+
     return decorator
 
 
-def safe_execute(logger=None, default_return: Any = None,
-                 raise_on_error: bool = False):
+def safe_execute(logger=None, default_return: Any = None, raise_on_error: bool = False):
     """
     安全执行装饰器（用于可能失败的操作，静默失败）
 
@@ -141,16 +142,16 @@ def safe_execute(logger=None, default_return: Any = None,
                 return default_return
 
         import asyncio
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper
+
     return decorator
 
 
-def retry(max_attempts: int = 3, delay: float = 1.0,
-         backoff_factor: float = 2.0,
-         exceptions: tuple = (Exception,)):
+def retry(max_attempts: int = 3, delay: float = 1.0, backoff_factor: float = 2.0, exceptions: tuple = (Exception,)):
     """
     重试装饰器
 
@@ -160,6 +161,7 @@ def retry(max_attempts: int = 3, delay: float = 1.0,
         backoff_factor: 退避因子
         exceptions: 需要重试的异常类型
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -173,10 +175,9 @@ def retry(max_attempts: int = 3, delay: float = 1.0,
                         logger.error(f"Final attempt failed for {func.__name__}: {e}")
                         raise
 
-                    wait_time = delay * (backoff_factor ** attempt)
+                    wait_time = delay * (backoff_factor**attempt)
                     logger.warning(
-                        f"Attempt {attempt + 1} failed for {func.__name__}: {e}. "
-                        f"Retrying in {wait_time:.1f}s..."
+                        f"Attempt {attempt + 1} failed for {func.__name__}: {e}. Retrying in {wait_time:.1f}s..."
                     )
                     await asyncio.sleep(wait_time)
 
@@ -192,15 +193,16 @@ def retry(max_attempts: int = 3, delay: float = 1.0,
                         logger.error(f"Final attempt failed for {func.__name__}: {e}")
                         raise
 
-                    wait_time = delay * (backoff_factor ** attempt)
+                    wait_time = delay * (backoff_factor**attempt)
                     logger.warning(
-                        f"Attempt {attempt + 1} failed for {func.__name__}: {e}. "
-                        f"Retrying in {wait_time:.1f}s..."
+                        f"Attempt {attempt + 1} failed for {func.__name__}: {e}. Retrying in {wait_time:.1f}s..."
                     )
                     import time
+
                     time.sleep(wait_time)
 
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+
     return decorator
 
 
@@ -218,6 +220,7 @@ def log_execution_time(logger=None):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
             import time
+
             start_time = time.time()
 
             try:
@@ -227,15 +230,13 @@ def log_execution_time(logger=None):
                 return result
             except Exception as e:
                 elapsed = time.time() - start_time
-                logger.error(
-                    f"{func.__name__} failed after {elapsed:.2f}s: {e}",
-                    exc_info=True
-                )
+                logger.error(f"{func.__name__} failed after {elapsed:.2f}s: {e}", exc_info=True)
                 raise
 
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
             import time
+
             start_time = time.time()
 
             try:
@@ -245,71 +246,71 @@ def log_execution_time(logger=None):
                 return result
             except Exception as e:
                 elapsed = time.time() - start_time
-                logger.error(
-                    f"{func.__name__} failed after {elapsed:.2f}s: {e}",
-                    exc_info=True
-                )
+                logger.error(f"{func.__name__} failed after {elapsed:.2f}s: {e}", exc_info=True)
                 raise
 
         import asyncio
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper
+
     return decorator
 
 
 class XianyuError(Exception):
     """基础异常类"""
 
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         self.message = message
         self.details = details or {}
         super().__init__(self.message)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
-        return {
-            "type": self.__class__.__name__,
-            "message": self.message,
-            "details": self.details
-        }
+        return {"type": self.__class__.__name__, "message": self.message, "details": self.details}
 
 
 class ConfigError(XianyuError):
     """配置错误"""
+
     pass
 
 
 class BrowserError(XianyuError):
     """浏览器操作错误"""
+
     pass
 
 
 class AIError(XianyuError):
     """AI服务错误"""
+
     pass
 
 
 class MediaError(XianyuError):
     """媒体处理错误"""
+
     pass
 
 
 class AccountError(XianyuError):
     """账号错误"""
+
     pass
 
 
 class DatabaseError(XianyuError):
     """数据库错误"""
+
     pass
 
 
-def handle_errors(exceptions: Optional[tuple] = None,
-                    default_return: Any = None,
-                    logger=None,
-                    raise_on_error: bool = False):
+def handle_errors(
+    exceptions: tuple | None = None, default_return: Any = None, logger=None, raise_on_error: bool = False
+):
     """
     通用异常处理装饰器
 
@@ -331,10 +332,7 @@ def handle_errors(exceptions: Optional[tuple] = None,
             try:
                 return await func(*args, **kwargs)
             except exceptions as e:
-                logger.error(
-                    f"Error in {func.__name__}: {e}",
-                    exc_info=True
-                )
+                logger.error(f"Error in {func.__name__}: {e}", exc_info=True)
                 if raise_on_error:
                     raise
                 return default_return
@@ -344,17 +342,16 @@ def handle_errors(exceptions: Optional[tuple] = None,
             try:
                 return func(*args, **kwargs)
             except exceptions as e:
-                logger.error(
-                    f"Error in {func.__name__}: {e}",
-                    exc_info=True
-                )
+                logger.error(f"Error in {func.__name__}: {e}", exc_info=True)
                 if raise_on_error:
                     raise
                 return default_return
 
         import asyncio
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper
+
     return decorator

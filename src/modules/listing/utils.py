@@ -1,15 +1,16 @@
 import pandas as pd
-from typing import List
+
 from .models import Listing, ListingImage
 
-def load_listings_from_csv(file_path: str) -> List[Listing]:
+
+def load_listings_from_csv(file_path: str) -> list[Listing]:
     """
     Load listings from a CSV file.
     Expected columns: title, description, price, category, images (comma separated paths)
     """
     df = pd.read_csv(file_path)
     listings = []
-    
+
     for _, row in df.iterrows():
         try:
             images = []
@@ -24,10 +25,10 @@ def load_listings_from_csv(file_path: str) -> List[Listing]:
                 price=float(row.get("price", 0.0)),
                 category=row.get("category", "General"),
                 images=images,
-                tags=str(row.get("tags", "")).split(",") if pd.notna(row.get("tags")) else []
+                tags=str(row.get("tags", "")).split(",") if pd.notna(row.get("tags")) else [],
             )
             listings.append(listing)
         except Exception as e:
             print(f"Error parsing row: {row}. Error: {e}")
-            
+
     return listings

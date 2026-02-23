@@ -6,18 +6,18 @@ Task Scheduler
 """
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
 from pathlib import Path
-import json
+from typing import Any
 
-from src.core.config import get_config
 from src.core.logger import get_logger
 
 
 class TaskStatus:
     """任务状态"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -27,6 +27,7 @@ class TaskStatus:
 
 class TaskType:
     """任务类型"""
+
     POLISH = "polish"
     PUBLISH = "publish"
     METRICS = "metrics"
@@ -40,10 +41,16 @@ class Task:
     封装任务的基本信息和执行逻辑
     """
 
-    def __init__(self, task_id: str = None, task_type: str = None,
-                 cron_expression: str = None, interval: int = None,
-                 enabled: bool = True, params: Dict = None,
-                 name: str = None):
+    def __init__(
+        self,
+        task_id: str | None = None,
+        task_type: str | None = None,
+        cron_expression: str | None = None,
+        interval: int | None = None,
+        enabled: bool = True,
+        params: dict | None = None,
+        name: str | None = None,
+    ):
         self.task_id = task_id or str(uuid.uuid4())[:8]
         self.task_type = task_type
         self.name = name or f"Task-{self.task_id}"
@@ -52,12 +59,12 @@ class Task:
         self.enabled = enabled
         self.params = params or {}
         self.status = TaskStatus.PENDING
-        self.last_run: Optional[datetime] = None
-        self.last_result: Optional[Dict] = None
+        self.last_run: datetime | None = None
+        self.last_result: dict | None = None
         self.created_at = datetime.now().isoformat()
         self.run_count = 0
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """转换为字典"""
         return {
             "task_id": self.task_id,
@@ -75,7 +82,7 @@ class Task:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'Task':
+    def from_dict(cls, data: dict) -> "Task":
         """从字典创建"""
         task = cls(
             task_id=data.get("task_id"),
@@ -104,17 +111,17 @@ class Scheduler:
 
     def __init__(self):
         self.logger = get_logger()
-        self.tasks: Dict[str, Task] = {}
-        self.running_tasks: Dict[str, asyncio.Task] = {}
+        self.tasks: dict[str, Task] = {}
+        self.running_tasks: dict[str, asyncio.Task] = {}
         self.task_file = Path("data/scheduler_tasks.json")
         self._load_tasks()
-        self._scheduler_task: Optional[asyncio.Task] = None
+        self._scheduler_task: asyncio.Task | None = None
 
     def _load_tasks(self) -> None:
         """加载任务配置"""
         if self.task_file.exists():
             try:
-                with open(self.task_file, 'r', encoding='utf-8') as f:
+                with open(self.task_file, encoding="utf-8") as f:
                     data = json.load(f)
                     for task_data in data:
                         task = Task.from_dict(task_data)
@@ -126,12 +133,17 @@ class Scheduler:
     def _save_tasks(self) -> None:
         """保存任务配置"""
         self.task_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.task_file, 'w', encoding='utf-8') as f:
+        with open(self.task_file, "w", encoding="utf-8") as f:
             json.dump([t.to_dict() for t in self.tasks.values()], f, ensure_ascii=False, indent=2)
 
-    def create_task(self, task_type: str, name: str = None,
-                   cron_expression: str = None, interval: int = None,
-                   params: Dict = None) -> Task:
+    def create_task(
+        self,
+        task_type: str,
+        name: str | None = None,
+        cron_expression: str | None = None,
+        interval: int | None = None,
+        params: dict | None = None,
+    ) -> Task:
         """
         创建定时任务
 
@@ -161,8 +173,7 @@ class Scheduler:
 
         return task
 
-    def create_polish_task(self, cron_expression: str = "0 9 * * *",
-                          max_items: int = 50) -> Task:
+    def create_polish_task(self, cron_expression: str = "0 9 * * *", max_items: int = 50) -> Task:
         """
         创建擦亮任务
 
@@ -177,11 +188,10 @@ class Scheduler:
             task_type=TaskType.POLISH,
             name="Auto Polish",
             cron_expression=cron_expression,
-            params={"max_items": max_items}
+            params={"max_items": max_items},
         )
 
-    def create_metrics_task(self, cron_expression: str = "0 */4 * * *",
-                           metrics_types: List[str] = None) -> Task:
+    def create_metrics_task(self, cron_expression: str = "0 */4 * * *", metrics_types: list[str] | None = None) -> Task:
         """
         创建数据采集任务
 
@@ -196,10 +206,10 @@ class Scheduler:
             task_type=TaskType.METRICS,
             name="Metrics Collection",
             cron_expression=cron_expression,
-            params={"metrics_types": metrics_types or ["views", "wants"]}
+            params={"metrics_types": metrics_types or ["views", "wants"]},
         )
 
-    def get_task(self, task_id: str) -> Optional[Task]:
+    def get_task(self, task_id: str) -> Task | None:
         """
         获取任务
 
@@ -211,7 +221,7 @@ class Scheduler:
         """
         return self.tasks.get(task_id)
 
-    def list_tasks(self, enabled_only: bool = False) -> List[Task]:
+    def list_tasks(self, enabled_only: bool = False) -> list[Task]:
         """
         列出所有任务
 
@@ -263,7 +273,7 @@ class Scheduler:
             return True
         return False
 
-    async def execute_task(self, task: Task) -> Dict[str, Any]:
+    async def execute_task(self, task: Task) -> dict[str, Any]:
         """
         执行任务
 
@@ -312,7 +322,7 @@ class Scheduler:
 
         return result
 
-    async def _execute_polish(self, params: Dict) -> Dict[str, Any]:
+    async def _execute_polish(self, params: dict) -> dict[str, Any]:
         """执行擦亮任务"""
         try:
             from src.modules.operations.service import OperationsService
@@ -321,28 +331,22 @@ class Scheduler:
             max_items = params.get("max_items", 50)
             result = await service.batch_polish(max_items=max_items)
 
-            return {
-                "success": True,
-                "message": f"Polished {result.get('success', 0)} items",
-                "details": result
-            }
+            return {"success": True, "message": f"Polished {result.get('success', 0)} items", "details": result}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    async def _execute_publish(self, params: Dict) -> Dict[str, Any]:
+    async def _execute_publish(self, params: dict) -> dict[str, Any]:
         """执行发布任务"""
         try:
-            from src.modules.listing.service import ListingService
             from src.modules.listing.models import Listing
+            from src.modules.listing.service import ListingService
 
             listings_data = params.get("listings", [])
             if not listings_data:
                 return {"success": False, "message": "No listings to publish"}
 
             service = ListingService()
-            listings = [
-                Listing(**listing) for listing in listings_data
-            ]
+            listings = [Listing(**listing) for listing in listings_data]
             results = await service.batch_create_listings(listings)
 
             success_count = sum(1 for r in results if r.success)
@@ -350,27 +354,23 @@ class Scheduler:
             return {
                 "success": True,
                 "message": f"Published {success_count}/{len(results)} items",
-                "details": [{"id": r.product_id, "success": r.success} for r in results]
+                "details": [{"id": r.product_id, "success": r.success} for r in results],
             }
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    async def _execute_metrics(self, params: Dict) -> Dict[str, Any]:
+    async def _execute_metrics(self, params: dict) -> dict[str, Any]:
         """执行数据采集任务"""
         try:
             from src.modules.analytics.service import AnalyticsService
 
             service = AnalyticsService()
 
-            return {
-                "success": True,
-                "message": "Metrics collected",
-                "stats": await service.get_dashboard_stats()
-            }
+            return {"success": True, "message": "Metrics collected", "stats": await service.get_dashboard_stats()}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    async def run_task_now(self, task_id: str) -> Dict[str, Any]:
+    async def run_task_now(self, task_id: str) -> dict[str, Any]:
         """
         立即运行任务
 
@@ -388,7 +388,7 @@ class Scheduler:
             return {"success": False, "message": "Task is already running"}
 
         async def wrapper():
-            result = await self.execute_task(task)
+            await self.execute_task(task)
             self.running_tasks.pop(task_id, None)
 
         self.running_tasks[task_id] = asyncio.create_task(wrapper())
@@ -426,7 +426,7 @@ class Scheduler:
             if len(parts) != 5:
                 raise ValueError("Invalid cron expression")
 
-            minute, hour, day, month, weekday = parts
+            _minute, _hour, _day, _month, _weekday = parts
             next_time = last_run + timedelta(hours=1)
 
             return next_time
@@ -474,7 +474,7 @@ class Scheduler:
                 self.logger.error(f"Scheduler loop error: {e}")
                 await asyncio.sleep(60)
 
-    def get_scheduler_status(self) -> Dict[str, Any]:
+    def get_scheduler_status(self) -> dict[str, Any]:
         """
         获取调度器状态
 

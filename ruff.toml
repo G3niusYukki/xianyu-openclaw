@@ -1,0 +1,19 @@
+target-version = "py310"
+line-length = 120
+
+[lint]
+select = ["E", "F", "W", "UP", "B", "I", "RUF"]
+ignore = [
+    "RUF001",  # ambiguous unicode chars in strings (Chinese punctuation)
+    "RUF002",  # ambiguous unicode chars in docstrings
+    "RUF003",  # ambiguous unicode chars in comments
+    "RUF006",  # asyncio dangling task (fire-and-forget by design)
+    "RUF012",  # mutable class variable without ClassVar
+]
+
+[lint.per-file-ignores]
+"examples/*" = ["F401", "E402"]
+"tests/*" = ["F401", "E402"]
+
+[format]
+quote-style = "double"

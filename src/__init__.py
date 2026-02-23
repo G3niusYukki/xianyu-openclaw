@@ -8,13 +8,13 @@ Xianyu Automation Tool
 __version__ = "4.0.0"
 __author__ = "Project Team"
 
+from .core.browser_client import BrowserClient
 from .core.config import Config
 from .core.logger import Logger
-from .core.browser_client import BrowserClient
 
 __all__ = [
+    "BrowserClient",
     "Config",
     "Logger",
-    "BrowserClient",
     "__version__",
 ]

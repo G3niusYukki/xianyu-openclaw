@@ -7,7 +7,6 @@ Xianyu Automation Tool - Main Entry Point
 
 import asyncio
 import sys
-import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -24,12 +23,12 @@ async def main():
     logger.info(f"Starting {config.app.get('name', 'xianyu-openclaw')} v{config.app.get('version', '1.0.0')}")
 
     try:
-        from src.modules.listing.service import ListingService
-        from src.modules.media.service import MediaService
-        from src.modules.content.service import ContentService
-        from src.modules.operations.service import OperationsService
-        from src.modules.analytics.service import AnalyticsService
-        from src.modules.accounts.service import AccountsService
+        from src.modules.accounts.service import AccountsService  # noqa: F401
+        from src.modules.analytics.service import AnalyticsService  # noqa: F401
+        from src.modules.content.service import ContentService  # noqa: F401
+        from src.modules.listing.service import ListingService  # noqa: F401
+        from src.modules.media.service import MediaService  # noqa: F401
+        from src.modules.operations.service import OperationsService  # noqa: F401
 
         logger.success("All modules loaded successfully")
         logger.info("Tool is ready for use")

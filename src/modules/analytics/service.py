@@ -6,13 +6,13 @@ Analytics Service
 """
 
 import asyncio
-import json
 import csv
+import json
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, asdict
+from typing import Any
 
 import aiosqlite
 
@@ -23,10 +23,11 @@ from src.core.logger import get_logger
 @dataclass
 class DateRange:
     """日期范围"""
+
     start_date: datetime
     end_date: datetime
 
-    def __init__(self, start_date: datetime, end_date: datetime = None):
+    def __init__(self, start_date: datetime, end_date: datetime | None = None):
         self.start_date = start_date
         self.end_date = end_date or datetime.now()
 
@@ -38,7 +39,7 @@ class AnalyticsService:
     负责运营数据的采集、存储、分析和报表生成
     """
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: dict | None = None):
         """
         初始化分析服务
 
@@ -211,9 +212,15 @@ class AnalyticsService:
             db.commit()
         self.logger.success("Analytics database initialized")
 
-    async def log_operation(self, operation_type: str, product_id: Optional[str] = None,
-                            account_id: Optional[str] = None, details: Optional[Dict] = None,
-                            status: str = "success", error_message: Optional[str] = None) -> int:
+    async def log_operation(
+        self,
+        operation_type: str,
+        product_id: str | None = None,
+        account_id: str | None = None,
+        details: dict | None = None,
+        status: str = "success",
+        error_message: str | None = None,
+    ) -> int:
         """
         记录操作日志
 
@@ -230,24 +237,33 @@ class AnalyticsService:
         """
         async with self._write_lock:
             async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
-                cursor = await db.execute("""
+                cursor = await db.execute(
+                    """
                     INSERT INTO operation_logs
                     (operation_type, product_id, account_id, details, status, error_message)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    operation_type,
-                    product_id,
-                    account_id,
-                    json.dumps(details, ensure_ascii=False) if details else None,
-                    status,
-                    error_message
-                ))
+                """,
+                    (
+                        operation_type,
+                        product_id,
+                        account_id,
+                        json.dumps(details, ensure_ascii=False) if details else None,
+                        status,
+                        error_message,
+                    ),
+                )
                 await db.commit()
                 return cursor.lastrowid
 
-    async def record_metrics(self, product_id: str, product_title: Optional[str] = None,
-                             views: int = 0, wants: int = 0, inquiries: int = 0,
-                             sales: int = 0) -> int:
+    async def record_metrics(
+        self,
+        product_id: str,
+        product_title: str | None = None,
+        views: int = 0,
+        wants: int = 0,
+        inquiries: int = 0,
+        sales: int = 0,
+    ) -> int:
         """
         记录商品指标
 
@@ -264,16 +280,20 @@ class AnalyticsService:
         """
         async with self._write_lock:
             async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
-                cursor = await db.execute("""
+                cursor = await db.execute(
+                    """
                     INSERT INTO product_metrics
                     (product_id, product_title, views, wants, inquiries, sales)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (product_id, product_title, views, wants, inquiries, sales))
+                """,
+                    (product_id, product_title, views, wants, inquiries, sales),
+                )
                 await db.commit()
                 return cursor.lastrowid
 
-    async def add_product(self, product_id: str, title: str, price: float,
-                          category: str = None, account_id: str = None) -> int:
+    async def add_product(
+        self, product_id: str, title: str, price: float, category: str | None = None, account_id: str | None = None
+    ) -> int:
         """
         添加商品
 
@@ -289,11 +309,14 @@ class AnalyticsService:
         """
         async with self._write_lock:
             async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
-                cursor = await db.execute("""
+                cursor = await db.execute(
+                    """
                     INSERT OR REPLACE INTO products
                     (product_id, title, price, category, account_id, status, created_at)
                     VALUES (?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)
-                """, (product_id, title, price, category, account_id))
+                """,
+                    (product_id, title, price, category, account_id),
+                )
                 await db.commit()
                 return cursor.lastrowid
 
@@ -311,20 +334,29 @@ class AnalyticsService:
         async with self._write_lock:
             async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
                 if status == "sold":
-                    await db.execute("""
+                    await db.execute(
+                        """
                         UPDATE products SET status = ?, sold_at = CURRENT_TIMESTAMP WHERE product_id = ?
-                    """, (status, product_id))
+                    """,
+                        (status, product_id),
+                    )
                 else:
-                    await db.execute("""
+                    await db.execute(
+                        """
                         UPDATE products SET status = ? WHERE product_id = ?
-                    """, (status, product_id))
+                    """,
+                        (status, product_id),
+                    )
                 await db.commit()
                 return True
 
-    async def get_operation_logs(self, limit: int = 100,
-                                 operation_type: Optional[str] = None,
-                                 start_date: Optional[datetime] = None,
-                                 end_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    async def get_operation_logs(
+        self,
+        limit: int = 100,
+        operation_type: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> list[dict[str, Any]]:
         """
         查询操作日志
 
@@ -363,8 +395,7 @@ class AnalyticsService:
 
             return [dict(row) for row in rows]
 
-    async def get_product_metrics(self, product_id: str,
-                                 days: int = 7) -> List[Dict[str, Any]]:
+    async def get_product_metrics(self, product_id: str, days: int = 7) -> list[dict[str, Any]]:
         """
         获取商品指标历史
 
@@ -378,17 +409,20 @@ class AnalyticsService:
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
-            cursor = await db.execute("""
+            cursor = await db.execute(
+                """
                 SELECT * FROM product_metrics
                 WHERE product_id = ?
                 AND timestamp >= datetime('now', ?)
                 ORDER BY timestamp ASC
-            """, (product_id, f"-{days} days"))
+            """,
+                (product_id, f"-{days} days"),
+            )
 
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
-    async def get_dashboard_stats(self) -> Dict[str, Any]:
+    async def get_dashboard_stats(self) -> dict[str, Any]:
         """
         获取仪表盘统计数据
 
@@ -398,37 +432,33 @@ class AnalyticsService:
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
-            total_operations = await db.execute_fetchone(
-                "SELECT COUNT(*) as count FROM operation_logs"
-            )
+            total_operations = await db.execute_fetchone("SELECT COUNT(*) as count FROM operation_logs")
 
             today = datetime.now().strftime("%Y-%m-%d")
             today_operations = await db.execute_fetchone(
-                "SELECT COUNT(*) as count FROM operation_logs WHERE date(timestamp) = ?",
-                (today,)
+                "SELECT COUNT(*) as count FROM operation_logs WHERE date(timestamp) = ?", (today,)
             )
 
-            total_products = await db.execute_fetchone(
-                "SELECT COUNT(*) as count FROM products"
-            )
+            total_products = await db.execute_fetchone("SELECT COUNT(*) as count FROM products")
 
             active_products = await db.execute_fetchone(
                 "SELECT COUNT(*) as count FROM products WHERE status = 'active'"
             )
 
-            sold_products = await db.execute_fetchone(
-                "SELECT COUNT(*) as count FROM products WHERE status = 'sold'"
-            )
+            sold_products = await db.execute_fetchone("SELECT COUNT(*) as count FROM products WHERE status = 'sold'")
 
             total_revenue = await db.execute_fetchone(
                 "SELECT COALESCE(SUM(price), 0) as total FROM products WHERE status = 'sold'"
             )
 
             today_start = f"{today} 00:00:00"
-            today_metrics = await db.execute_fetchone("""
+            today_metrics = await db.execute_fetchone(
+                """
                 SELECT COALESCE(SUM(views), 0) as views, COALESCE(SUM(wants), 0) as wants
                 FROM product_metrics WHERE timestamp >= ?
-            """, (today_start,))
+            """,
+                (today_start,),
+            )
 
             return {
                 "total_operations": total_operations[0] or 0,
@@ -441,7 +471,7 @@ class AnalyticsService:
                 "today_wants": today_metrics[1] or 0,
             }
 
-    async def get_daily_report(self, date: datetime = None) -> Dict[str, Any]:
+    async def get_daily_report(self, date: datetime | None = None) -> dict[str, Any]:
         """
         获取日报数据
 
@@ -460,25 +490,31 @@ class AnalyticsService:
             day_start = f"{date_str} 00:00:00"
             day_end = f"{date_str} 23:59:59"
 
-            operations = await db.execute_fetchall("""
+            operations = await db.execute_fetchall(
+                """
                 SELECT operation_type, COUNT(*) as count
                 FROM operation_logs
                 WHERE timestamp BETWEEN ? AND ?
                 GROUP BY operation_type
-            """, (day_start, day_end))
+            """,
+                (day_start, day_end),
+            )
 
             new_listings = sum(1 for op in operations if op[0] == "PUBLISH")
             polished = sum(op[1] for op in operations if "POLISH" in op[0])
             price_updates = sum(op[1] for op in operations if "PRICE" in op[0])
             delisted = sum(op[1] for op in operations if op[0] == "DELIST")
 
-            metrics = await db.execute_fetchone("""
+            metrics = await db.execute_fetchone(
+                """
                 SELECT COALESCE(SUM(views), 0) as views,
                        COALESCE(SUM(wants), 0) as wants,
                        COALESCE(SUM(sales), 0) as sales
                 FROM product_metrics
                 WHERE timestamp BETWEEN ? AND ?
-            """, (day_start, day_end))
+            """,
+                (day_start, day_end),
+            )
 
             return {
                 "date": date_str,
@@ -491,7 +527,7 @@ class AnalyticsService:
                 "total_sales": metrics[2] or 0,
             }
 
-    async def get_weekly_report(self, end_date: datetime = None) -> Dict[str, Any]:
+    async def get_weekly_report(self, end_date: datetime | None = None) -> dict[str, Any]:
         """
         获取周报数据
 
@@ -510,38 +546,43 @@ class AnalyticsService:
             week_start = start.strftime("%Y-%m-%d 00:00:00")
             week_end = end.strftime("%Y-%m-%d 23:59:59")
 
-            operations = await db.execute_fetchall("""
+            operations = await db.execute_fetchall(
+                """
                 SELECT operation_type, COUNT(*) as count
                 FROM operation_logs
                 WHERE timestamp BETWEEN ? AND ?
                 GROUP BY operation_type
-            """, (week_start, week_end))
+            """,
+                (week_start, week_end),
+            )
 
             new_listings = sum(1 for op in operations if op[0] == "PUBLISH")
             polished = sum(op[1] for op in operations if "POLISH" in op[0])
             price_updates = sum(op[1] for op in operations if "PRICE" in op[0])
 
-            metrics = await db.execute_fetchone("""
+            metrics = await db.execute_fetchone(
+                """
                 SELECT COALESCE(SUM(views), 0) as views,
                        COALESCE(SUM(wants), 0) as wants,
                        COALESCE(SUM(sales), 0) as sales
                 FROM product_metrics
                 WHERE timestamp BETWEEN ? AND ?
-            """, (week_start, week_end))
+            """,
+                (week_start, week_end),
+            )
 
-            daily_stats = await db.execute_fetchall("""
+            daily_stats = await db.execute_fetchall(
+                """
                 SELECT date, new_listings, total_views, total_wants
                 FROM daily_stats
                 WHERE date BETWEEN ? AND ?
                 ORDER BY date ASC
-            """, (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")))
+            """,
+                (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")),
+            )
 
             return {
-                "period": {
-                    "start": start.strftime("%Y-%m-%d"),
-                    "end": end.strftime("%Y-%m-%d"),
-                    "days": 7
-                },
+                "period": {"start": start.strftime("%Y-%m-%d"), "end": end.strftime("%Y-%m-%d"), "days": 7},
                 "summary": {
                     "new_listings": new_listings,
                     "polished_count": polished,
@@ -550,10 +591,10 @@ class AnalyticsService:
                     "total_wants": metrics[1] or 0,
                     "total_sales": metrics[2] or 0,
                 },
-                "daily_breakdown": [dict(row) for row in daily_stats]
+                "daily_breakdown": [dict(row) for row in daily_stats],
             }
 
-    async def get_monthly_report(self, year: int = None, month: int = None) -> Dict[str, Any]:
+    async def get_monthly_report(self, year: int | None = None, month: int | None = None) -> dict[str, Any]:
         """
         获取月报数据
 
@@ -572,6 +613,7 @@ class AnalyticsService:
             target_year -= 1
 
         import calendar
+
         days_in_month = calendar.monthrange(target_year, target_month)[1]
 
         start_date = f"{target_year}-{target_month:02d}-01"
@@ -580,37 +622,42 @@ class AnalyticsService:
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
-            operations = await db.execute_fetchall("""
+            operations = await db.execute_fetchall(
+                """
                 SELECT operation_type, COUNT(*) as count
                 FROM operation_logs
                 WHERE date(timestamp) BETWEEN ? AND ?
                 GROUP BY operation_type
-            """, (start_date, end_date))
+            """,
+                (start_date, end_date),
+            )
 
             new_listings = sum(1 for op in operations if op[0] == "PUBLISH")
 
-            sold_products = await db.execute_fetchall("""
+            sold_products = await db.execute_fetchall(
+                """
                 SELECT price FROM products
                 WHERE status = 'sold' AND date(sold_at) BETWEEN ? AND ?
-            """, (start_date, end_date))
+            """,
+                (start_date, end_date),
+            )
 
             revenue = sum(p[0] for p in sold_products)
 
             avg_sell_time = 0
 
-            category_stats = await db.execute_fetchall("""
+            category_stats = await db.execute_fetchall(
+                """
                 SELECT category, COUNT(*) as count, AVG(price) as avg_price
                 FROM products
                 WHERE status = 'sold' AND date(sold_at) BETWEEN ? AND ?
                 GROUP BY category
-            """, (start_date, end_date))
+            """,
+                (start_date, end_date),
+            )
 
             return {
-                "period": {
-                    "year": target_year,
-                    "month": target_month,
-                    "days": days_in_month
-                },
+                "period": {"year": target_year, "month": target_month, "days": days_in_month},
                 "summary": {
                     "total_listings": new_listings,
                     "total_sold": len(sold_products),
@@ -618,12 +665,11 @@ class AnalyticsService:
                     "avg_sell_time_days": avg_sell_time,
                 },
                 "top_categories": [
-                    {"category": c[0], "count": c[1], "avg_price": round(c[2] or 0, 2)}
-                    for c in category_stats
-                ]
+                    {"category": c[0], "count": c[1], "avg_price": round(c[2] or 0, 2)} for c in category_stats
+                ],
             }
 
-    async def get_product_performance(self, days: int = 30) -> List[Dict[str, Any]]:
+    async def get_product_performance(self, days: int = 30) -> list[dict[str, Any]]:
         """
         获取商品表现排名
 
@@ -636,7 +682,8 @@ class AnalyticsService:
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
-            cursor = await db.execute("""
+            cursor = await db.execute(
+                """
                 SELECT p.*,
                        COALESCE(SUM(m.views), 0) as total_views,
                        COALESCE(SUM(m.wants), 0) as total_wants
@@ -646,12 +693,14 @@ class AnalyticsService:
                 GROUP BY p.product_id
                 ORDER BY total_wants DESC, total_views DESC
                 LIMIT 50
-            """, (f"-{days} days",))
+            """,
+                (f"-{days} days",),
+            )
 
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
-    async def get_trend_data(self, metric: str = "views", days: int = 30) -> List[Dict[str, Any]]:
+    async def get_trend_data(self, metric: str = "views", days: int = 30) -> list[dict[str, Any]]:
         """
         获取趋势数据
 
@@ -687,9 +736,7 @@ class AnalyticsService:
             rows = await cursor.fetchall()
             return [{"date": row[0], "value": row[1]} for row in rows]
 
-    async def export_data(self, data_type: str = "products",
-                         format: str = "csv",
-                         filepath: str = None) -> str:
+    async def export_data(self, data_type: str = "products", format: str = "csv", filepath: str | None = None) -> str:
         """
         导出数据
 
@@ -727,18 +774,18 @@ class AnalyticsService:
         else:
             return await self._write_json(filepath, data)
 
-    async def _export_products(self) -> List[Dict[str, Any]]:
+    async def _export_products(self) -> list[dict[str, Any]]:
         """导出商品数据"""
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM products ORDER BY created_at DESC")
             return [dict(row) for row in await cursor.fetchall()]
 
-    async def _export_logs(self) -> List[Dict[str, Any]]:
+    async def _export_logs(self) -> list[dict[str, Any]]:
         """导出日志数据"""
         return await self.get_operation_logs(limit=10000)
 
-    async def _export_metrics(self) -> List[Dict[str, Any]]:
+    async def _export_metrics(self) -> list[dict[str, Any]]:
         """导出指标数据"""
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
@@ -748,12 +795,12 @@ class AnalyticsService:
             """)
             return [dict(row) for row in await cursor.fetchall()]
 
-    async def _write_csv(self, filepath: str, data: List[Dict]) -> str:
+    async def _write_csv(self, filepath: str, data: list[dict]) -> str:
         """写入CSV文件"""
         if not data:
             return filepath
 
-        with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
+        with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=data[0].keys())
             writer.writeheader()
             writer.writerows(data)
@@ -761,15 +808,15 @@ class AnalyticsService:
         self.logger.success(f"Exported to {filepath}")
         return filepath
 
-    async def _write_json(self, filepath: str, data: List[Dict]) -> str:
+    async def _write_json(self, filepath: str, data: list[dict]) -> str:
         """写入JSON文件"""
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
         self.logger.success(f"Exported to {filepath}")
         return filepath
 
-    async def cleanup_old_data(self, days: int = 90) -> Dict[str, int]:
+    async def cleanup_old_data(self, days: int = 90) -> dict[str, int]:
         """
         清理旧数据
 
@@ -781,21 +828,24 @@ class AnalyticsService:
         """
         async with self._write_lock:
             async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
-                cursor = await db.execute("""
+                cursor = await db.execute(
+                    """
                     DELETE FROM operation_logs
                     WHERE timestamp < datetime('now', ?)
-                """, (f"-{days} days",))
+                """,
+                    (f"-{days} days",),
+                )
                 logs_deleted = cursor.rowcount
 
-                cursor = await db.execute("""
+                cursor = await db.execute(
+                    """
                     DELETE FROM product_metrics
                     WHERE timestamp < datetime('now', ?)
-                """, (f"-{days} days",))
+                """,
+                    (f"-{days} days",),
+                )
                 metrics_deleted = cursor.rowcount
 
                 await db.commit()
 
-                return {
-                    "logs_deleted": logs_deleted,
-                    "metrics_deleted": metrics_deleted
-                }
+                return {"logs_deleted": logs_deleted, "metrics_deleted": metrics_deleted}

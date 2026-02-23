@@ -6,47 +6,44 @@ Listing Models
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
 from datetime import datetime
 
 
 @dataclass
 class ListingImage:
     """商品图片"""
+
     local_path: str
     order: int = 0
-    processed_path: Optional[str] = None
+    processed_path: str | None = None
 
     def __post_init__(self):
         if self.processed_path is None:
             self.processed_path = self.local_path
 
     def to_dict(self):
-        return {
-            "local_path": self.local_path,
-            "processed_path": self.processed_path,
-            "order": self.order
-        }
+        return {"local_path": self.local_path, "processed_path": self.processed_path, "order": self.order}
 
 
 @dataclass
 class Listing:
     """商品信息"""
+
     title: str
     description: str
     price: float
-    original_price: Optional[float] = None
+    original_price: float | None = None
     category: str = "General"
-    images: List[str] = field(default_factory=list)
-    features: List[str] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
-    location: Optional[str] = None
-    brand: Optional[str] = None
+    images: list[str] = field(default_factory=list)
+    features: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    location: str | None = None
+    brand: str | None = None
     specifications: dict = field(default_factory=dict)
     status: str = "draft"
-    product_id: Optional[str] = None
-    product_url: Optional[str] = None
-    account_id: Optional[str] = None
+    product_id: str | None = None
+    product_url: str | None = None
+    account_id: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -77,16 +74,18 @@ class Listing:
 @dataclass
 class PublishResult:
     """发布结果"""
+
     success: bool
-    product_id: Optional[str] = None
-    product_url: Optional[str] = None
-    error_message: Optional[str] = None
+    product_id: str | None = None
+    product_url: str | None = None
+    error_message: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
 class ProductMetrics:
     """商品指标"""
+
     product_id: str
     views: int = 0
     wants: int = 0

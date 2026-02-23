@@ -6,9 +6,8 @@ Media Processing Service
 """
 
 import os
-import random
 from pathlib import Path
-from typing import List, Optional, Tuple
+
 from PIL import Image, ImageDraw, ImageFont
 
 from src.core.config import get_config
@@ -22,7 +21,7 @@ class MediaService:
     负责商品图片的尺寸调整、压缩、水印添加等处理
     """
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: dict | None = None):
         """
         初始化媒体处理服务
 
@@ -39,7 +38,7 @@ class MediaService:
         self.output_dir = "data/processed_images"
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def resize_image_for_xianyu(self, image_path: str, output_path: Optional[str] = None) -> str:
+    def resize_image_for_xianyu(self, image_path: str, output_path: str | None = None) -> str:
         """
         调整图片尺寸以符合闲鱼规范
 
@@ -62,12 +61,7 @@ class MediaService:
                 ext = Path(output_path).suffix.lower()[1:] or original_format.lower()
                 save_format = self._get_save_format(ext)
 
-                img.save(
-                    output_path,
-                    format=save_format,
-                    quality=self.output_quality,
-                    optimize=True
-                )
+                img.save(output_path, format=save_format, quality=self.output_quality, optimize=True)
 
                 self.logger.debug(f"Resized image: {image_path}")
                 return output_path
@@ -112,8 +106,9 @@ class MediaService:
         }
         return format_map.get(ext.upper(), "JPEG")
 
-    def add_watermark(self, image_path: str, output_path: Optional[str] = None,
-                      text: Optional[str] = None, position: str = "bottom-right") -> str:
+    def add_watermark(
+        self, image_path: str, output_path: str | None = None, text: str | None = None, position: str = "bottom-right"
+    ) -> str:
         """
         添加文字水印
 
@@ -144,7 +139,7 @@ class MediaService:
 
                 try:
                     font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
-                except (IOError, OSError) as e:
+                except OSError as e:
                     self.logger.debug(f"Failed to load custom font: {e}")
                     font = ImageFont.load_default()
 
@@ -177,13 +172,14 @@ class MediaService:
             self.logger.error(f"Failed to add watermark: {e}")
             return image_path
 
-    def _hex_to_rgb(self, hex_color: str) -> Tuple[int, int, int]:
+    def _hex_to_rgb(self, hex_color: str) -> tuple[int, int, int]:
         """Hex颜色转RGB"""
         hex_color = hex_color.lstrip("#")
-        return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+        return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
 
-    def batch_process_images(self, image_paths: List[str], output_dir: Optional[str] = None,
-                             add_watermark: bool = True) -> List[str]:
+    def batch_process_images(
+        self, image_paths: list[str], output_dir: str | None = None, add_watermark: bool = True
+    ) -> list[str]:
         """
         批量处理图片
 
@@ -224,8 +220,7 @@ class MediaService:
 
         return processed_paths
 
-    def compress_image(self, image_path: str, output_path: Optional[str] = None,
-                       quality: int = 85) -> str:
+    def compress_image(self, image_path: str, output_path: str | None = None, quality: int = 85) -> str:
         """
         压缩图片
 
@@ -248,7 +243,7 @@ class MediaService:
             self.logger.error(f"Failed to compress image {image_path}: {e}")
             return image_path
 
-    def validate_image(self, image_path: str) -> Tuple[bool, str]:
+    def validate_image(self, image_path: str) -> tuple[bool, str]:
         """
         验证图片格式和大小
 

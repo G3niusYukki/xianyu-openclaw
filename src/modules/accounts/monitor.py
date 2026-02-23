@@ -7,11 +7,11 @@ Monitoring and Alert System
 
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional
-from pathlib import Path
-from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
 from src.core.config import get_config
 from src.core.logger import get_logger
@@ -19,6 +19,7 @@ from src.core.logger import get_logger
 
 class AlertLevel(Enum):
     """告警级别"""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -27,6 +28,7 @@ class AlertLevel(Enum):
 
 class AlertChannel(Enum):
     """告警渠道"""
+
     LOG = "log"
     FILE = "file"
     WEBHOOK = "webhook"
@@ -37,9 +39,16 @@ class Alert:
     告警信息
     """
 
-    def __init__(self, alert_id: str = None, level: str = AlertLevel.INFO.value,
-                 title: str = "", message: str = "", source: str = "",
-                 details: Dict = None, auto_resolve: bool = False):
+    def __init__(
+        self,
+        alert_id: str | None = None,
+        level: str = AlertLevel.INFO.value,
+        title: str = "",
+        message: str = "",
+        source: str = "",
+        details: dict | None = None,
+        auto_resolve: bool = False,
+    ):
         self.alert_id = alert_id or f"alert_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         self.level = level
         self.title = title
@@ -49,9 +58,9 @@ class Alert:
         self.auto_resolve = auto_resolve
         self.status = "active"
         self.created_at = datetime.now().isoformat()
-        self.resolved_at: Optional[str] = None
+        self.resolved_at: str | None = None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """转换为字典"""
         return {
             "alert_id": self.alert_id,
@@ -74,7 +83,7 @@ class Monitor:
     负责异常监控、告警管理和自动恢复
     """
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: dict | None = None):
         """
         初始化监控器
 
@@ -84,8 +93,8 @@ class Monitor:
         self.config = config or get_config()
         self.logger = get_logger()
 
-        self._alerts: List[Alert] = []
-        self._alert_callbacks: List[Callable] = []
+        self._alerts: list[Alert] = []
+        self._alert_callbacks: list[Callable] = []
         self.alert_file = Path("data/alerts.json")
 
         self._alerts_lock = asyncio.Lock()
@@ -96,7 +105,7 @@ class Monitor:
         self.monitoring_rules = self._default_rules()
         self.auto_recovery_actions = self._default_recovery_actions()
 
-    def _default_rules(self) -> Dict[str, Any]:
+    def _default_rules(self) -> dict[str, Any]:
         """默认监控规则"""
         return {
             "browser_connection": {
@@ -121,7 +130,7 @@ class Monitor:
             },
         }
 
-    def _default_recovery_actions(self) -> Dict[str, List[Callable]]:
+    def _default_recovery_actions(self) -> dict[str, list[Callable]]:
         """默认恢复动作"""
         return {
             "browser_connection": [
@@ -139,7 +148,7 @@ class Monitor:
         """加载历史告警"""
         if self.alert_file.exists():
             try:
-                with open(self.alert_file, 'r', encoding='utf-8') as f:
+                with open(self.alert_file, encoding="utf-8") as f:
                     data = json.load(f)
                     self._alerts = [Alert(**a) for a in data]
                 self.logger.info(f"Loaded {len(self._alerts)} alerts")
@@ -151,13 +160,13 @@ class Monitor:
         """保存告警（异步版本，使用锁）"""
         async with self._file_lock:
             self.alert_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.alert_file, 'w', encoding='utf-8') as f:
+            with open(self.alert_file, "w", encoding="utf-8") as f:
                 json.dump([a.to_dict() for a in self._alerts], f, ensure_ascii=False, indent=2)
 
     def _save_alerts_sync(self) -> None:
         """保存告警（同步版本，不使用锁，用于__init__）"""
         self.alert_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.alert_file, 'w', encoding='utf-8') as f:
+        with open(self.alert_file, "w", encoding="utf-8") as f:
             json.dump([a.to_dict() for a in self._alerts], f, ensure_ascii=False, indent=2)
 
     def register_callback(self, callback: Callable[[Alert], None]) -> None:
@@ -180,9 +189,15 @@ class Monitor:
             except Exception as e:
                 self.logger.error(f"Alert callback error: {e}")
 
-    async def raise_alert(self, alert_type: str, title: str, message: str,
-                    source: str = "", details: Dict = None,
-                    auto_resolve: bool = False) -> Alert:
+    async def raise_alert(
+        self,
+        alert_type: str,
+        title: str,
+        message: str,
+        source: str = "",
+        details: dict | None = None,
+        auto_resolve: bool = False,
+    ) -> Alert:
         """
         触发告警
 
@@ -217,10 +232,10 @@ class Monitor:
 
         self.logger.warning(f"[{alert.level.upper()}] {title}: {message}")
 
-        asyncio.create_task(self._trigger_callbacks(alert))
+        _task_cb = asyncio.create_task(self._trigger_callbacks(alert))
 
         if alert.auto_resolve:
-            asyncio.create_task(self._auto_resolve_alert(alert))
+            _task_resolve = asyncio.create_task(self._auto_resolve_alert(alert))
 
         return alert
 
@@ -240,8 +255,7 @@ class Monitor:
 
         self.logger.info(f"Auto-resolved alert: {alert.alert_id}")
 
-    async def check_condition(self, condition_type: str, check_func: Callable,
-                            context: Dict = None) -> None:
+    async def check_condition(self, condition_type: str, check_func: Callable, context: dict | None = None) -> None:
         """
         检查条件并触发告警
 
@@ -270,9 +284,9 @@ class Monitor:
                             "condition_type": condition_type,
                             "failure_count": recent_failures,
                             "window_minutes": rule.get("window_minutes"),
-                            **(context or {})
+                            **(context or {}),
                         },
-                        auto_resolve=True
+                        auto_resolve=True,
                     )
 
         except Exception as e:
@@ -281,12 +295,15 @@ class Monitor:
     def _count_recent_failures(self, condition_type: str, window_minutes: int) -> int:
         """计算近期失败次数"""
         window_start = datetime.now() - timedelta(minutes=window_minutes)
-        return len([
-            a for a in self._alerts
-            if a.source == condition_type
-            and a.status == "active"
-            and datetime.fromisoformat(a.created_at) >= window_start
-        ])
+        return len(
+            [
+                a
+                for a in self._alerts
+                if a.source == condition_type
+                and a.status == "active"
+                and datetime.fromisoformat(a.created_at) >= window_start
+            ]
+        )
 
     async def _action_reconnect_browser(self, alert: Alert) -> None:
         """重新连接浏览器"""
@@ -334,7 +351,7 @@ class Monitor:
                     return True
         return False
 
-    async def get_active_alerts(self, level: str = None) -> List[Alert]:
+    async def get_active_alerts(self, level: str | None = None) -> list[Alert]:
         """
         获取活跃告警
 
@@ -350,7 +367,7 @@ class Monitor:
             alerts = [a for a in alerts if a.level == level]
         return alerts
 
-    async def get_alert_summary(self) -> Dict[str, Any]:
+    async def get_alert_summary(self) -> dict[str, Any]:
         """
         获取告警摘要
 
@@ -389,8 +406,7 @@ class Monitor:
         async with self._alerts_lock:
             old_count = len(self._alerts)
             self._alerts = [
-                a for a in self._alerts
-                if a.status == "active" or datetime.fromisoformat(a.created_at) >= cutoff
+                a for a in self._alerts if a.status == "active" or datetime.fromisoformat(a.created_at) >= cutoff
             ]
             old_count = old_count - len(self._alerts)
 
@@ -408,7 +424,7 @@ class HealthChecker:
     def __init__(self):
         self.logger = get_logger()
         self.monitor = Monitor()
-        self.last_check: Optional[datetime] = None
+        self.last_check: datetime | None = None
         self.check_interval = 300
 
     async def check_browser_connection(self) -> bool:
@@ -438,7 +454,7 @@ class HealthChecker:
             )
             return False
 
-    async def check_account_status(self) -> List[Dict]:
+    async def check_account_status(self) -> list[dict]:
         """检查账号状态"""
         try:
             from src.modules.accounts.service import AccountsService
@@ -449,11 +465,7 @@ class HealthChecker:
             issues = []
             for acc in accounts:
                 if not service.validate_cookie(acc["id"]):
-                    issues.append({
-                        "account_id": acc["id"],
-                        "issue": "Invalid cookie",
-                        "severity": "high"
-                    })
+                    issues.append({"account_id": acc["id"], "issue": "Invalid cookie", "severity": "high"})
 
             if issues:
                 self.monitor.raise_alert(
@@ -470,7 +482,7 @@ class HealthChecker:
             self.logger.error(f"Account check error: {e}")
             return []
 
-    async def run_health_check(self) -> Dict[str, Any]:
+    async def run_health_check(self) -> dict[str, Any]:
         """
         运行健康检查
 

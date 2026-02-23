@@ -6,9 +6,9 @@ Content Generation Service
 """
 
 import os
-from typing import List, Optional, Dict, Any
+from typing import Any
 
-from openai import OpenAI, AsyncOpenAI, APIError, APITimeoutError
+from openai import APIError, APITimeoutError, AsyncOpenAI, OpenAI
 
 from src.core.config import get_config
 from src.core.logger import get_logger
@@ -21,7 +21,7 @@ class ContentService:
     集成大语言模型，生成高质量的商品标题和描述文案
     """
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: dict | None = None):
         """
         初始化内容生成服务
 
@@ -40,8 +40,8 @@ class ContentService:
         self.fallback_enabled = self.config.get("fallback_enabled", True)
         self.fallback_model = self.config.get("fallback_model", "gpt-3.5-turbo")
 
-        self.client: Optional[OpenAI] = None
-        self.async_client: Optional[AsyncOpenAI] = None
+        self.client: OpenAI | None = None
+        self.async_client: AsyncOpenAI | None = None
 
         self._init_client()
 
@@ -58,7 +58,7 @@ class ContentService:
         else:
             self.logger.warning("AI API Key not found. Content generation will use templates.")
 
-    def _call_ai(self, prompt: str, max_tokens: Optional[int] = None) -> Optional[str]:
+    def _call_ai(self, prompt: str, max_tokens: int | None = None) -> str | None:
         """
         调用AI生成内容
 
@@ -91,8 +91,7 @@ class ContentService:
             self.logger.error(f"Unexpected AI call error: {e}")
             return None
 
-    def generate_title(self, product_name: str, features: List[str],
-                       category: str = "General") -> str:
+    def generate_title(self, product_name: str, features: list[str], category: str = "General") -> str:
         """
         生成闲鱼商品标题
 
@@ -112,9 +111,9 @@ class ContentService:
         请为闲鱼（二手交易平台）商品生成一个吸引人的标题。
 
         商品名称: {product_name}
-        商品特点: {', '.join(features)}
+        商品特点: {", ".join(features)}
         商品分类: {category}
-        推荐关键词: {', '.join(keywords[:5])}
+        推荐关键词: {", ".join(keywords[:5])}
 
         要求:
         1. 15-25字以内
@@ -130,12 +129,12 @@ class ContentService:
 
         return self._default_title(product_name, features)
 
-    def _default_title(self, product_name: str, features: List[str]) -> str:
+    def _default_title(self, product_name: str, features: list[str]) -> str:
         """生成默认标题"""
-        feature_str = ' '.join(features[:2]) if features else ''
+        feature_str = " ".join(features[:2]) if features else ""
         return f"【转卖】{product_name} {feature_str}".strip()[:25]
 
-    def _get_category_keywords(self, category: str) -> List[str]:
+    def _get_category_keywords(self, category: str) -> list[str]:
         """获取分类热搜关键词"""
         keywords = {
             "数码手机": ["自用", "闲置", "正品", "国行", "原装", "95新", "便宜出"],
@@ -148,13 +147,13 @@ class ContentService:
         }
         return keywords.get(category, keywords["General"])
 
-    def _get_sample_keywords(self, category: str) -> List[str]:
+    def _get_sample_keywords(self, category: str) -> list[str]:
         """兼容旧接口：返回分类关键词样本"""
         return self._get_category_keywords(category)
 
-    def generate_description(self, product_name: str, condition: str,
-                            reason: str, tags: List[str],
-                            extra_info: Optional[str] = None) -> str:
+    def generate_description(
+        self, product_name: str, condition: str, reason: str, tags: list[str], extra_info: str | None = None
+    ) -> str:
         """
         生成闲鱼商品描述文案
 
@@ -177,8 +176,8 @@ class ContentService:
         商品名称: {product_name}
         商品成色: {condition}
         转手原因: {reason}
-        标签: {', '.join(tags)}
-        额外信息: {extra_info or '无'}
+        标签: {", ".join(tags)}
+        额外信息: {extra_info or "无"}
 
         要求:
         1. 语气亲切自然，营造真实个人卖家感
@@ -195,8 +194,7 @@ class ContentService:
 
         return self._default_description(product_name, condition, reason, tags)
 
-    def _default_description(self, product_name: str, condition: str,
-                             reason: str, tags: List[str]) -> str:
+    def _default_description(self, product_name: str, condition: str, reason: str, tags: list[str]) -> str:
         """生成默认描述"""
         return f"""出闲置 {product_name}，成色{condition}。
 
@@ -206,7 +204,7 @@ class ContentService:
 - 成色：{condition}
 - 交易说明：走闲鱼，诚心要的私聊"""
 
-    def generate_listing_content(self, product_info: Dict[str, Any]) -> Dict[str, str]:
+    def generate_listing_content(self, product_info: dict[str, Any]) -> dict[str, str]:
         """
         生成完整商品发布内容
 
@@ -225,14 +223,9 @@ class ContentService:
         extra_info = product_info.get("extra_info")
 
         title = self.generate_title(product_name, features, category)
-        description = self.generate_description(
-            product_name, condition, reason, tags, extra_info
-        )
+        description = self.generate_description(product_name, condition, reason, tags, extra_info)
 
-        return {
-            "title": title,
-            "description": description
-        }
+        return {"title": title, "description": description}
 
     def optimize_title(self, current_title: str, category: str = "General") -> str:
         """
@@ -252,7 +245,7 @@ class ContentService:
 
         当前标题: {current_title}
         分类: {category}
-        推荐关键词: {', '.join(keywords)}
+        推荐关键词: {", ".join(keywords)}
 
         要求:
         1. 保持标题核心信息不变
@@ -270,7 +263,7 @@ class ContentService:
 
         return current_title
 
-    def generate_seo_keywords(self, product_name: str, category: str) -> List[str]:
+    def generate_seo_keywords(self, product_name: str, category: str) -> list[str]:
         """
         生成SEO优化关键词
 
@@ -294,7 +287,7 @@ class ContentService:
         result = self._call_ai(prompt, max_tokens=100)
 
         if result:
-            keywords = [k.strip() for k in result.split(',')]
+            keywords = [k.strip() for k in result.split(",")]
             return [k for k in keywords if k][:8]
 
         return self._get_category_keywords(category)

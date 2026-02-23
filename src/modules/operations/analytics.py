@@ -1,7 +1,8 @@
-import sqlite3
-import datetime
 import os
+import sqlite3
+
 from loguru import logger
+
 
 class AnalyticsService:
     def __init__(self, config):
@@ -16,9 +17,9 @@ class AnalyticsService:
         os.makedirs("data", exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Create operations log table
-        cursor.execute('''
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS operation_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -26,10 +27,10 @@ class AnalyticsService:
                 details TEXT,
                 status TEXT
             )
-        ''')
-        
+        """)
+
         # Create metrics table (e.g., views, wants)
-        cursor.execute('''
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS product_metrics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -38,8 +39,8 @@ class AnalyticsService:
                 wants INTEGER,
                 cconsultations INTEGER
             )
-        ''')
-        
+        """)
+
         conn.commit()
         conn.close()
 
@@ -52,7 +53,7 @@ class AnalyticsService:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO operation_logs (operation_type, details, status) VALUES (?, ?, ?)",
-                (op_type, details, status)
+                (op_type, details, status),
             )
             conn.commit()
             conn.close()
@@ -68,7 +69,7 @@ class AnalyticsService:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO product_metrics (product_title, views, wants, cconsultations) VALUES (?, ?, ?, ?)",
-                (title, views, wants, consultations)
+                (title, views, wants, consultations),
             )
             conn.commit()
             conn.close()

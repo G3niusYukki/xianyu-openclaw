@@ -12,15 +12,15 @@ import asyncio
 import os
 import random
 import time
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import httpx
 
-from src.core.logger import get_logger
 from src.core.error_handler import BrowserError
+from src.core.logger import get_logger
 
 
 class BrowserState(Enum):
@@ -62,7 +62,7 @@ class BrowserClient:
     保持与旧 OpenClawController 近似的方法签名，降低服务层改动量。
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = GatewayConfig()
         self._apply_env()
         if config:
@@ -70,8 +70,8 @@ class BrowserClient:
 
         self.logger = get_logger()
         self.state = BrowserState.DISCONNECTED
-        self._client: Optional[httpx.AsyncClient] = None
-        self._tabs: Dict[str, str] = {}
+        self._client: httpx.AsyncClient | None = None
+        self._tabs: dict[str, str] = {}
 
     def _apply_env(self) -> None:
         if v := os.environ.get("OPENCLAW_GATEWAY_HOST"):
@@ -83,19 +83,18 @@ class BrowserClient:
         if v := os.environ.get("OPENCLAW_BROWSER_PROFILE"):
             self.config.profile = v
 
-    def _apply_config(self, config: Dict[str, Any]) -> None:
-        for key in ("host", "gateway_port", "token", "profile", "timeout",
-                     "retry_times", "delay_min", "delay_max"):
+    def _apply_config(self, config: dict[str, Any]) -> None:
+        for key in ("host", "gateway_port", "token", "profile", "timeout", "retry_times", "delay_min", "delay_max"):
             if key in config:
                 setattr(self.config, key, config[key])
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
         if self.config.token:
             h["Authorization"] = f"Bearer {self.config.token}"
         return h
 
-    def _profile_params(self) -> Dict[str, str]:
+    def _profile_params(self) -> dict[str, str]:
         return {"profile": self.config.profile}
 
     def random_delay(self) -> float:
@@ -136,8 +135,7 @@ class BrowserClient:
         except httpx.ConnectError:
             self.state = BrowserState.ERROR
             self.logger.error(
-                f"Cannot reach OpenClaw Gateway at {self.config.browser_base_url}. "
-                "Is the Gateway running?"
+                f"Cannot reach OpenClaw Gateway at {self.config.browser_base_url}. Is the Gateway running?"
             )
             return False
         except Exception as e:
@@ -198,7 +196,7 @@ class BrowserClient:
 
     async def _focus_tab(self, page_id: str) -> None:
         await self._client.post(
-            f"/tabs/focus",
+            "/tabs/focus",
             params={**self._profile_params(), "targetId": page_id},
         )
 
@@ -227,7 +225,7 @@ class BrowserClient:
 
     # ── actions via POST /act ──
 
-    async def _act(self, action: str, **kwargs) -> Dict[str, Any]:
+    async def _act(self, action: str, **kwargs) -> dict[str, Any]:
         payload = {"action": action, **kwargs}
         resp = await self._client.post(
             "/act",
@@ -238,8 +236,7 @@ class BrowserClient:
             return resp.json()
         raise BrowserError(f"Act '{action}' failed (HTTP {resp.status_code}): {resp.text}")
 
-    async def click(self, page_id: str, selector: str,
-                    timeout: int = 10000, retry: bool = True) -> bool:
+    async def click(self, page_id: str, selector: str, timeout: int = 10000, retry: bool = True) -> bool:
         self.logger.debug(f"Clicking: {selector}")
         await self._focus_tab(page_id)
 
@@ -256,8 +253,7 @@ class BrowserClient:
         self.logger.warning(f"Failed to click: {selector}")
         return False
 
-    async def type_text(self, page_id: str, selector: str, text: str,
-                        clear: bool = True) -> bool:
+    async def type_text(self, page_id: str, selector: str, text: str, clear: bool = True) -> bool:
         self.logger.debug(f"Typing into {selector}: {text[:50]}...")
         await self._focus_tab(page_id)
         try:
@@ -296,7 +292,7 @@ class BrowserClient:
 
     # ── element queries via snapshot ──
 
-    async def get_snapshot(self, page_id: str) -> Optional[str]:
+    async def get_snapshot(self, page_id: str) -> str | None:
         await self._focus_tab(page_id)
         try:
             resp = await self._client.get("/snapshot", params=self._profile_params())
@@ -321,7 +317,7 @@ class BrowserClient:
         elements = await self.find_elements(page_id, selector)
         return elements[0] if elements else None
 
-    async def get_text(self, page_id: str, selector: str) -> Optional[str]:
+    async def get_text(self, page_id: str, selector: str) -> str | None:
         await self._focus_tab(page_id)
         try:
             result = await self._act("getText", selector=selector)
@@ -329,7 +325,7 @@ class BrowserClient:
         except Exception:
             return None
 
-    async def get_value(self, page_id: str, selector: str) -> Optional[str]:
+    async def get_value(self, page_id: str, selector: str) -> str | None:
         await self._focus_tab(page_id)
         try:
             result = await self._act("getValue", selector=selector)
@@ -337,8 +333,7 @@ class BrowserClient:
         except Exception:
             return None
 
-    async def wait_for_selector(self, page_id: str, selector: str,
-                                timeout: int = 10000, visible: bool = True) -> bool:
+    async def wait_for_selector(self, page_id: str, selector: str, timeout: int = 10000, visible: bool = True) -> bool:
         self.logger.debug(f"Waiting for selector: {selector}")
         await self._focus_tab(page_id)
         deadline = time.time() + timeout / 1000
@@ -381,8 +376,7 @@ class BrowserClient:
             self.logger.error(f"Upload error: {e}")
             return False
 
-    async def upload_files(self, page_id: str, selector: str,
-                           file_paths: List[str]) -> bool:
+    async def upload_files(self, page_id: str, selector: str, file_paths: list[str]) -> bool:
         if not file_paths:
             return True
         self.logger.info(f"Uploading {len(file_paths)} files")
@@ -459,7 +453,7 @@ class BrowserClient:
 
     # ── cookies ──
 
-    async def get_cookies(self, page_id: str = "") -> List[Dict[str, str]]:
+    async def get_cookies(self, page_id: str = "") -> list[dict[str, str]]:
         try:
             resp = await self._client.get("/cookies", params=self._profile_params())
             if resp.status_code == 200:
@@ -468,7 +462,7 @@ class BrowserClient:
         except Exception:
             return []
 
-    async def add_cookie(self, page_id: str, cookie: Dict[str, str]) -> bool:
+    async def add_cookie(self, page_id: str, cookie: dict[str, str]) -> bool:
         try:
             await self._client.post(
                 "/cookies/set",
@@ -479,7 +473,7 @@ class BrowserClient:
         except Exception:
             return False
 
-    async def delete_cookies(self, page_id: str = "", name: Optional[str] = None) -> bool:
+    async def delete_cookies(self, page_id: str = "", name: str | None = None) -> bool:
         try:
             await self._client.post("/cookies/clear", params=self._profile_params())
             return True
@@ -492,12 +486,14 @@ class BrowserClient:
             item = item.strip()
             if "=" in item:
                 name, value = item.split("=", 1)
-                cookies.append({
-                    "name": name.strip(),
-                    "value": value.strip(),
-                    "domain": domain,
-                    "path": "/",
-                })
+                cookies.append(
+                    {
+                        "name": name.strip(),
+                        "value": value.strip(),
+                        "domain": domain,
+                        "path": "/",
+                    }
+                )
         if cookies:
             await self._client.post(
                 "/cookies/set",
@@ -525,7 +521,7 @@ class BrowserClient:
         except Exception:
             return False
 
-    async def get_page_source(self, page_id: str) -> Optional[str]:
+    async def get_page_source(self, page_id: str) -> str | None:
         return await self.get_snapshot(page_id)
 
     async def handle_dialog(self, page_id: str, accept: bool = True, text: str = "") -> bool:
@@ -541,7 +537,7 @@ class BrowserClient:
 
     # ── internal helpers ──
 
-    async def _list_tabs(self) -> List[Dict[str, Any]]:
+    async def _list_tabs(self) -> list[dict[str, Any]]:
         try:
             resp = await self._client.get("/tabs", params=self._profile_params())
             if resp.status_code == 200:
@@ -551,13 +547,10 @@ class BrowserClient:
             return []
 
 
-async def create_browser_client(config: Optional[Dict[str, Any]] = None) -> "BrowserClient":
+async def create_browser_client(config: dict[str, Any] | None = None) -> "BrowserClient":
     """创建并连接浏览器客户端"""
     client = BrowserClient(config)
     connected = await client.connect()
     if not connected:
-        raise BrowserError(
-            "Failed to connect to OpenClaw Gateway. "
-            "Is the Gateway running? Check: docker compose ps"
-        )
+        raise BrowserError("Failed to connect to OpenClaw Gateway. Is the Gateway running? Check: docker compose ps")
     return client

@@ -7,13 +7,12 @@ Listing Service
 
 import asyncio
 import random
-import time
-from typing import List, Optional, Dict, Any
+from typing import Any
 from urllib.parse import urlparse
 
 from src.core.config import get_config
-from src.core.logger import get_logger
 from src.core.error_handler import BrowserError
+from src.core.logger import get_logger
 from src.modules.listing.models import Listing, PublishResult
 
 
@@ -54,10 +53,7 @@ class XianyuSelectors:
 
     # 价格 — 使用 placeholder / type=number
     PRICE_INPUT = (
-        "input[placeholder*='价格'], "
-        "input[placeholder*='￥'], "
-        "input[placeholder*='¥'], "
-        "[class*='price'] input"
+        "input[placeholder*='价格'], input[placeholder*='￥'], input[placeholder*='¥'], [class*='price'] input"
     )
 
     # 分类
@@ -97,7 +93,7 @@ class ListingService:
     负责商品的发布、批量发布等核心功能
     """
 
-    def __init__(self, controller=None, config: Optional[dict] = None):
+    def __init__(self, controller=None, config: dict | None = None):
         """
         初始化上架服务
 
@@ -112,7 +108,7 @@ class ListingService:
         browser_config = get_config().browser
         self.delay_range = (
             browser_config.get("delay", {}).get("min", 1),
-            browser_config.get("delay", {}).get("max", 3)
+            browser_config.get("delay", {}).get("max", 3),
         )
 
         self.selectors = XianyuSelectors()
@@ -123,8 +119,7 @@ class ListingService:
         max_delay = self.delay_range[1] * max_factor
         return random.uniform(min_delay, max_delay)
 
-    async def create_listing(self, listing: Listing,
-                             account_id: Optional[str] = None) -> PublishResult:
+    async def create_listing(self, listing: Listing, account_id: str | None = None) -> PublishResult:
         """
         发布单个商品
 
@@ -143,21 +138,14 @@ class ListingService:
 
             product_id, product_url = await self._execute_publish(listing)
 
-            result = PublishResult(
-                success=True,
-                product_id=product_id,
-                product_url=product_url
-            )
+            result = PublishResult(success=True, product_id=product_id, product_url=product_url)
 
             self.logger.success(f"Listing created: {product_url}")
             return result
 
         except Exception as e:
             self.logger.error(f"Failed to create listing: {e}")
-            return PublishResult(
-                success=False,
-                error_message=str(e)
-            )
+            return PublishResult(success=False, error_message=str(e))
 
     async def _execute_publish(self, listing: Listing) -> tuple:
         """
@@ -196,7 +184,7 @@ class ListingService:
         await asyncio.sleep(self._random_delay(1.5, 2.5))
         self.logger.success("Navigated to publish page")
 
-    async def _step_upload_images(self, page_id: str, images: List[str]) -> None:
+    async def _step_upload_images(self, page_id: str, images: list[str]) -> None:
         """上传图片"""
         self.logger.info(f"Step 2: Uploading {len(images)} images...")
 
@@ -262,17 +250,17 @@ class ListingService:
             "服饰鞋包": "服饰",
             "美妆护肤": "美妆",
             "家居": "家居",
-            "General": "其他闲置"
+            "General": "其他闲置",
         }
 
-        target_category = category_map.get(category, category)
+        category_map.get(category, category)
 
         await self.controller.click(page_id, self.selectors.CATEGORY_SELECT)
         await asyncio.sleep(self._random_delay())
 
         await asyncio.sleep(self._random_delay())
 
-    async def _step_select_condition(self, page_id: str, tags: List[str]) -> None:
+    async def _step_select_condition(self, page_id: str, tags: list[str]) -> None:
         """选择成色/标签"""
         self.logger.info("Step 7: Selecting condition...")
 
@@ -282,7 +270,7 @@ class ListingService:
             "95新": ["95新", "轻微使用痕迹"],
             "9成新": ["9成新"],
             "8成新": ["8成新"],
-            "其他": ["其他"]
+            "其他": ["其他"],
         }
 
         for tag in tags:
@@ -312,9 +300,7 @@ class ListingService:
         """验证发布成功"""
         self.logger.info("Step 9: Verifying publish success...")
 
-        current_url = await self.controller.execute_script(
-            page_id, "window.location.href"
-        )
+        current_url = await self.controller.execute_script(page_id, "window.location.href")
 
         if current_url and self.selectors.SUCCESS_URL in str(current_url):
             product_id = self._extract_product_id(current_url)
@@ -322,24 +308,21 @@ class ListingService:
             self.logger.success(f"Publish successful! URL: {product_url}")
             return product_id, product_url
 
-        raise BrowserError(
-            "Could not verify publish success. "
-            f"Current URL: {current_url}"
-        )
+        raise BrowserError(f"Could not verify publish success. Current URL: {current_url}")
 
     def _extract_product_id(self, url: str) -> str:
         """从URL提取商品ID"""
         try:
             parsed = urlparse(url)
-            path_parts = parsed.path.split('/')
+            path_parts = parsed.path.split("/")
             return path_parts[-1] if path_parts else ""
         except (ValueError, IndexError, AttributeError) as e:
             self.logger.debug(f"Failed to extract product ID from URL: {e}")
             return ""
 
-    async def batch_create_listings(self, listings: List[Listing],
-                                     account_id: Optional[str] = None,
-                                     delay_range: tuple = (5, 10)) -> List[PublishResult]:
+    async def batch_create_listings(
+        self, listings: list[Listing], account_id: str | None = None, delay_range: tuple = (5, 10)
+    ) -> list[PublishResult]:
         """
         批量发布商品
 
@@ -361,10 +344,7 @@ class ListingService:
                 results.append(result)
             except Exception as e:
                 self.logger.error(f"Failed to process listing: {e}")
-                results.append(PublishResult(
-                    success=False,
-                    error_message=str(e)
-                ))
+                results.append(PublishResult(success=False, error_message=str(e)))
 
             if i < len(listings) - 1:
                 delay = random.uniform(*delay_range)
@@ -376,7 +356,7 @@ class ListingService:
 
         return results
 
-    async def verify_listing(self, product_id: str) -> Dict[str, Any]:
+    async def verify_listing(self, product_id: str) -> dict[str, Any]:
         """
         验证商品发布状态
 
@@ -403,19 +383,13 @@ class ListingService:
                 "exists": bool(title),
                 "status": "active" if title else "unknown",
                 "title": title,
-                "verified": True
+                "verified": True,
             }
         except Exception as e:
             self.logger.error(f"Verification failed: {e}")
-            return {
-                "product_id": product_id,
-                "exists": False,
-                "status": "unknown",
-                "error": str(e),
-                "verified": False
-            }
+            return {"product_id": product_id, "exists": False, "status": "unknown", "error": str(e), "verified": False}
 
-    async def update_listing(self, product_id: str, updates: Dict[str, Any]) -> bool:
+    async def update_listing(self, product_id: str, updates: dict[str, Any]) -> bool:
         """
         更新商品信息
 
@@ -480,7 +454,7 @@ class ListingService:
             self.logger.error(f"Delete failed: {e}")
             return False
 
-    async def get_my_listings(self, page: int = 1) -> List[Dict[str, Any]]:
+    async def get_my_listings(self, page: int = 1) -> list[dict[str, Any]]:
         """
         获取我的商品列表
 
@@ -504,15 +478,8 @@ class ListingService:
             items = []
             item_elements = await self.controller.find_elements(page_id, ".selling-item")
 
-            for element in item_elements:
-                item_info = {
-                    "product_id": "",
-                    "title": "",
-                    "price": 0,
-                    "status": "",
-                    "views": 0,
-                    "wants": 0
-                }
+            for _element in item_elements:
+                item_info = {"product_id": "", "title": "", "price": 0, "status": "", "views": 0, "wants": 0}
                 items.append(item_info)
 
             self.logger.info(f"Found {len(items)} listings")

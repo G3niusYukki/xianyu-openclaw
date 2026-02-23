@@ -11,6 +11,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
 from loguru import logger
 
 
@@ -34,7 +35,7 @@ class Logger:
         return cls._instance
 
     def __init__(self):
-        if not hasattr(self, '_initialized') or not self._initialized:
+        if not hasattr(self, "_initialized") or not self._initialized:
             self._setup_logger()
             Logger._initialized = True
 
@@ -55,16 +56,10 @@ class Logger:
         logger.remove()
 
         console_format = (
-            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-            "<level>{level: <8}</level> | "
-            "<cyan>{message}</cyan>"
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>"
         )
 
-        file_format = (
-            "{time:YYYY-MM-DD HH:mm:ss} | "
-            "{level: <8} | "
-            "{message}"
-        )
+        file_format = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}"
 
         logger.add(
             sys.stdout,
@@ -116,7 +111,7 @@ class Logger:
 def get_logger(*_args, **_kwargs) -> Logger:
     """
     获取日志单例
-    
+
     Returns:
         Logger实例
     """

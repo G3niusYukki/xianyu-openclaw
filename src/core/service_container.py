@@ -6,16 +6,10 @@ Service Container
 """
 
 import threading
-from typing import Any, Dict, Optional, Type, TypeVar
 from functools import wraps
+from typing import Any, Optional, TypeVar
 
-from src.modules.interfaces import (
-    IListingService, IContentService, IMediaService,
-    IOperationsService, IAnalyticsService, IAccountsService,
-    ISchedulerService, IMonitorService
-)
-
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class ServiceContainer:
@@ -25,7 +19,7 @@ class ServiceContainer:
     管理服务的注册、创建和生命周期
     """
 
-    _instance: Optional['ServiceContainer'] = None
+    _instance: Optional["ServiceContainer"] = None
     _lock = threading.Lock()
 
     def __new__(cls):
@@ -36,14 +30,15 @@ class ServiceContainer:
         return cls._instance
 
     def __init__(self):
-        if not hasattr(self, '_initialized'):
-            self._services: Dict[str, Any] = {}
-            self._factories: Dict[str, callable] = {}
-            self._singletons: Dict[str, Any] = {}
+        if not hasattr(self, "_initialized"):
+            self._services: dict[str, Any] = {}
+            self._factories: dict[str, callable] = {}
+            self._singletons: dict[str, Any] = {}
             self._initialized = True
 
-    def register(self, service_type: Type[T], instance: Optional[T] = None,
-               factory: Optional[callable] = None, singleton: bool = True) -> None:
+    def register(
+        self, service_type: type[T], instance: T | None = None, factory: callable | None = None, singleton: bool = True
+    ) -> None:
         """
         注册服务
 
@@ -65,7 +60,7 @@ class ServiceContainer:
         if singleton:
             self._singletons.add(service_key)
 
-    def get(self, service_type: Type[T]) -> Optional[T]:
+    def get(self, service_type: type[T]) -> T | None:
         """
         获取服务实例
 
@@ -91,7 +86,7 @@ class ServiceContainer:
 
         return None
 
-    def set(self, service_type: Type[T], instance: T) -> None:
+    def set(self, service_type: type[T], instance: T) -> None:
         """
         设置服务实例
 
@@ -102,7 +97,7 @@ class ServiceContainer:
         service_key = self._get_service_key(service_type)
         self._services[service_key] = instance
 
-    def has(self, service_type: Type[T]) -> bool:
+    def has(self, service_type: type[T]) -> bool:
         """
         检查服务是否存在
 
@@ -120,11 +115,11 @@ class ServiceContainer:
         self._services.clear()
         self._factories.clear()
 
-    def _get_service_key(self, service_type: Type) -> str:
+    def _get_service_key(self, service_type: type) -> str:
         """获取服务键"""
         return service_type.__name__
 
-    def inject(self, *service_types: Type[T]):
+    def inject(self, *service_types: type[T]):
         """
         依赖注入装饰器
 
@@ -134,6 +129,7 @@ class ServiceContainer:
         Returns:
             装饰器函数
         """
+
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
@@ -145,7 +141,9 @@ class ServiceContainer:
                     injected.append(service)
 
                 return func(*args, *injected, **kwargs)
+
             return wrapper
+
         return decorator
 
 
@@ -156,10 +154,10 @@ class LazyService:
     延迟服务实例化，直到首次使用
     """
 
-    def __init__(self, service_type: Type[T], container: ServiceContainer):
+    def __init__(self, service_type: type[T], container: ServiceContainer):
         self._service_type = service_type
         self._container = container
-        self._instance: Optional[T] = None
+        self._instance: T | None = None
 
     def __call__(self) -> T:
         if self._instance is None:
@@ -177,7 +175,7 @@ def get_container() -> ServiceContainer:
     return ServiceContainer()
 
 
-def inject_service(service_type: Type[T]):
+def inject_service(service_type: type[T]):
     """
     依赖注入装饰器（简化版）
 
@@ -187,6 +185,7 @@ def inject_service(service_type: Type[T]):
     Returns:
         装饰器函数
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -195,5 +194,7 @@ def inject_service(service_type: Type[T]):
             if service is None:
                 raise ValueError(f"Service {service_type.__name__} not registered")
             return func(service, *args, **kwargs)
+
         return wrapper
+
     return decorator

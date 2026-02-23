@@ -5,12 +5,11 @@ Data Visualization
 提供数据图表生成功能
 """
 
-import asyncio
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from pathlib import Path
 
-from src.modules.analytics.service import AnalyticsService
 from src.core.logger import get_logger
+from src.modules.analytics.service import AnalyticsService
 
 
 class DataVisualizer:
@@ -24,9 +23,9 @@ class DataVisualizer:
         self.logger = get_logger()
         self.analytics = AnalyticsService()
 
-    def generate_bar_chart(self, data: List[Dict], label_key: str,
-                          value_key: str, title: str = "",
-                          max_width: int = 50) -> str:
+    def generate_bar_chart(
+        self, data: list[dict], label_key: str, value_key: str, title: str = "", max_width: int = 50
+    ) -> str:
         """
         生成柱状图（ASCII）
 
@@ -62,8 +61,7 @@ class DataVisualizer:
 
         return "\n".join(lines)
 
-    def generate_line_chart(self, data: List[Dict], label_key: str,
-                           value_key: str, title: str = "") -> str:
+    def generate_line_chart(self, data: list[dict], label_key: str, value_key: str, title: str = "") -> str:
         """
         生成折线图（ASCII）
 
@@ -93,7 +91,7 @@ class DataVisualizer:
             lines.append("-" * len(title))
 
         height = 10
-        for i, (item, value) in enumerate(zip(data, values)):
+        for _i, (item, value) in enumerate(zip(data, values, strict=False)):
             label = str(item.get(label_key, ""))[:10]
             normalized = (value - min_val) / (max_val - min_val)
             pos = int(normalized * height)
@@ -121,7 +119,7 @@ class DataVisualizer:
 
         return "\n".join(lines)
 
-    async def _fill_dashboard(self, lines: List[str]):
+    async def _fill_dashboard(self, lines: list[str]):
         """填充仪表盘内容"""
         stats = await self.analytics.get_dashboard_stats()
 
@@ -166,7 +164,7 @@ class DataVisualizer:
         lines = ["📈 Views Trend (Last 30 days)"]
         lines.append("-" * 40)
 
-        for d, v in zip(trend_data[-14:], values[-14:]):
+        for d, v in zip(trend_data[-14:], values[-14:], strict=False):
             date = d.get("date", "")[5:]
             bar_len = int(v / max_val * 20)
             bar = "▓" * bar_len
@@ -183,8 +181,7 @@ class ChartExporter:
     """
 
     @staticmethod
-    async def export_report(report: Dict, format: str = "markdown",
-                             filepath: str = None) -> str:
+    async def export_report(report: dict, format: str = "markdown", filepath: str | None = None) -> str:
         """
         导出报表
 
@@ -207,6 +204,7 @@ class ChartExporter:
             filepath += ".md"
         elif format == "json":
             import json
+
             content = json.dumps(report, ensure_ascii=False, indent=2)
             filepath += ".json"
         else:
@@ -214,7 +212,7 @@ class ChartExporter:
             filepath += ".txt"
 
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         return filepath
@@ -235,6 +233,7 @@ class ChartExporter:
 
         if format == "slack":
             from src.modules.analytics.report_generator import ReportFormatter
+
             return ReportFormatter.to_slack({"summary": stats, "period": {"date": datetime.now().strftime("%Y-%m-%d")}})
 
         lines = ["📊 每日运营摘要"]

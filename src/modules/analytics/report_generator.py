@@ -5,13 +5,11 @@ Report Generator
 生成运营报表（日报、周报、月报）
 """
 
-import asyncio
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
-from pathlib import Path
+from typing import Any
 
-from src.modules.analytics.service import AnalyticsService
 from src.core.logger import get_logger
+from src.modules.analytics.service import AnalyticsService
 
 
 class ReportGenerator:
@@ -25,7 +23,7 @@ class ReportGenerator:
         self.logger = get_logger()
         self.analytics = AnalyticsService()
 
-    async def generate_daily_report(self, date: datetime = None) -> Dict[str, Any]:
+    async def generate_daily_report(self, date: datetime | None = None) -> dict[str, Any]:
         """
         生成日报
 
@@ -62,7 +60,7 @@ class ReportGenerator:
 
         return report
 
-    async def generate_weekly_report(self, end_date: datetime = None) -> Dict[str, Any]:
+    async def generate_weekly_report(self, end_date: datetime | None = None) -> dict[str, Any]:
         """
         生成周报
 
@@ -90,7 +88,7 @@ class ReportGenerator:
 
         return report
 
-    async def generate_monthly_report(self, year: int = None, month: int = None) -> Dict[str, Any]:
+    async def generate_monthly_report(self, year: int | None = None, month: int | None = None) -> dict[str, Any]:
         """
         生成月报
 
@@ -101,7 +99,6 @@ class ReportGenerator:
         Returns:
             月报数据
         """
-        import calendar
 
         now = datetime.now()
         target_year = year or now.year
@@ -125,7 +122,7 @@ class ReportGenerator:
 
         return report
 
-    async def generate_product_report(self, product_id: str, days: int = 30) -> Dict[str, Any]:
+    async def generate_product_report(self, product_id: str, days: int = 30) -> dict[str, Any]:
         """
         生成商品表现报告
 
@@ -141,7 +138,7 @@ class ReportGenerator:
         metrics = await self.analytics.get_product_metrics(product_id, days)
         performance = await self.analytics.get_product_performance(days)
 
-        product_data = next((p for p in performance if p.get("product_id") == product_id), None)
+        next((p for p in performance if p.get("product_id") == product_id), None)
 
         trend_data = await self.analytics.get_trend_data("views", days)
 
@@ -161,8 +158,7 @@ class ReportGenerator:
 
         return report
 
-    async def generate_comparison_report(self, product_ids: List[str],
-                                         days: int = 30) -> Dict[str, Any]:
+    async def generate_comparison_report(self, product_ids: list[str], days: int = 30) -> dict[str, Any]:
         """
         生成商品对比报告
 
@@ -181,14 +177,16 @@ class ReportGenerator:
         for pid in product_ids:
             product = next((p for p in performance if p.get("product_id") == pid), None)
             if product:
-                comparison.append({
-                    "product_id": pid,
-                    "title": product.get("title", ""),
-                    "price": product.get("price", 0),
-                    "views": product.get("total_views", 0),
-                    "wants": product.get("total_wants", 0),
-                    "status": product.get("status", ""),
-                })
+                comparison.append(
+                    {
+                        "product_id": pid,
+                        "title": product.get("title", ""),
+                        "price": product.get("price", 0),
+                        "views": product.get("total_views", 0),
+                        "wants": product.get("total_wants", 0),
+                        "status": product.get("status", ""),
+                    }
+                )
 
         report = {
             "report_type": "comparison",
@@ -199,7 +197,7 @@ class ReportGenerator:
 
         return report
 
-    def _generate_summary(self, data: Dict) -> str:
+    def _generate_summary(self, data: dict) -> str:
         """生成摘要文本"""
         lines = []
 
@@ -220,7 +218,7 @@ class ReportGenerator:
 
         return "；".join(lines) if lines else "暂无运营数据"
 
-    def _generate_weekly_insights(self, data: Dict) -> Dict[str, Any]:
+    def _generate_weekly_insights(self, data: dict) -> dict[str, Any]:
         """生成周报洞察"""
         summary = data.get("summary", {})
 
@@ -240,7 +238,7 @@ class ReportGenerator:
 
         return insights
 
-    def _generate_monthly_insights(self, data: Dict) -> Dict[str, Any]:
+    def _generate_monthly_insights(self, data: dict) -> dict[str, Any]:
         """生成月报洞察"""
         summary = data.get("summary", {})
 
@@ -265,7 +263,7 @@ class ReportGenerator:
 
         return insights
 
-    def _calculate_ranking(self, product_id: str, performance: List[Dict]) -> Dict:
+    def _calculate_ranking(self, product_id: str, performance: list[dict]) -> dict:
         """计算商品排名"""
         sorted_products = sorted(performance, key=lambda x: x.get("total_wants", 0), reverse=True)
 
@@ -274,7 +272,7 @@ class ReportGenerator:
                 return {
                     "rank": i + 1,
                     "total": len(sorted_products),
-                    "percentile": round((1 - i / len(sorted_products)) * 100, 1)
+                    "percentile": round((1 - i / len(sorted_products)) * 100, 1),
                 }
 
         return {"rank": None, "total": len(sorted_products)}
@@ -288,7 +286,7 @@ class ReportFormatter:
     """
 
     @staticmethod
-    def to_markdown(report: Dict) -> str:
+    def to_markdown(report: dict) -> str:
         """转换为Markdown格式"""
         lines = [f"# {report['report_type'].title()} Report"]
 
@@ -316,7 +314,7 @@ class ReportFormatter:
         return "\n".join(lines)
 
     @staticmethod
-    def to_slack(report: Dict) -> str:
+    def to_slack(report: dict) -> str:
         """转换为Slack格式"""
         lines = [f"📊 *{report['report_type'].title()} Report*"]
 

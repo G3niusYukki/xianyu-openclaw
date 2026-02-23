@@ -5,20 +5,19 @@ Accounts Management Service
 提供多闲鱼账号的统一管理功能
 """
 
-import asyncio
-import time
 import json
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
 from pathlib import Path
+from typing import Any
 
 from src.core.config import get_config
+from src.core.crypto import ensure_decrypted, ensure_encrypted
 from src.core.logger import get_logger
-from src.core.crypto import ensure_encrypted, ensure_decrypted
 
 
 class AccountStatus:
     """账号状态"""
+
     ACTIVE = "active"
     INACTIVE = "inactive"
     ERROR = "error"
@@ -27,6 +26,7 @@ class AccountStatus:
 
 class AccountHealth:
     """账号健康度"""
+
     GOOD = "good"
     WARNING = "warning"
     BAD = "bad"
@@ -39,7 +39,7 @@ class AccountsService:
     负责多账号的配置管理、状态监控、健康检查
     """
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: dict | None = None):
         """
         初始化账号服务
 
@@ -49,9 +49,9 @@ class AccountsService:
         self.config = config or get_config()
         self.logger = get_logger()
 
-        self.accounts: List[Dict[str, Any]] = []
-        self.account_stats: Dict[str, Dict] = {}
-        self.current_account_id: Optional[str] = None
+        self.accounts: list[dict[str, Any]] = []
+        self.account_stats: dict[str, dict] = {}
+        self.current_account_id: str | None = None
 
         self._load_accounts()
         self._load_account_stats()
@@ -83,6 +83,7 @@ class AccountsService:
         if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
             env_key = value[2:-1]
             import os
+
             return os.getenv(env_key, value)
         return value
 
@@ -106,7 +107,7 @@ class AccountsService:
         stats_file = Path("data/account_stats.json")
         if stats_file.exists():
             try:
-                with open(stats_file, 'r', encoding='utf-8') as f:
+                with open(stats_file, encoding="utf-8") as f:
                     self.account_stats = json.load(f)
             except Exception as e:
                 self.logger.warning(f"Failed to load account stats: {e}")
@@ -116,10 +117,10 @@ class AccountsService:
         """保存账号统计"""
         stats_file = Path("data/account_stats.json")
         stats_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(stats_file, 'w', encoding='utf-8') as f:
+        with open(stats_file, "w", encoding="utf-8") as f:
             json.dump(self.account_stats, f, ensure_ascii=False, indent=2)
 
-    def get_accounts(self, enabled_only: bool = True, mask_sensitive: bool = True) -> List[Dict[str, Any]]:
+    def get_accounts(self, enabled_only: bool = True, mask_sensitive: bool = True) -> list[dict[str, Any]]:
         """
         获取账号列表
 
@@ -132,13 +133,10 @@ class AccountsService:
         """
         accounts = [acc for acc in self.accounts if not enabled_only or acc.get("enabled", True)]
         if mask_sensitive:
-            accounts = [
-                {**acc, "cookie": self._mask_sensitive_data(acc.get("cookie", ""))}
-                for acc in accounts
-            ]
+            accounts = [{**acc, "cookie": self._mask_sensitive_data(acc.get("cookie", ""))} for acc in accounts]
         return accounts
 
-    def get_account(self, account_id: str, mask_sensitive: bool = True) -> Optional[Dict[str, Any]]:
+    def get_account(self, account_id: str, mask_sensitive: bool = True) -> dict[str, Any] | None:
         """
         获取指定账号
 
@@ -177,7 +175,7 @@ class AccountsService:
             return True
         return False
 
-    def get_current_account(self) -> Optional[Dict[str, Any]]:
+    def get_current_account(self) -> dict[str, Any] | None:
         """
         获取当前账号
 
@@ -194,7 +192,7 @@ class AccountsService:
             return account
         return None
 
-    def get_cookie(self, account_id: Optional[str] = None) -> Optional[str]:
+    def get_cookie(self, account_id: str | None = None) -> str | None:
         """
         获取账号Cookie（解密后的原始值）
 
@@ -211,8 +209,7 @@ class AccountsService:
                 return ensure_decrypted(encrypted) if encrypted else None
         return None
 
-    def add_account(self, account_id: str, cookie: str, name: Optional[str] = None,
-                    priority: int = 1) -> bool:
+    def add_account(self, account_id: str, cookie: str, name: str | None = None, priority: int = 1) -> bool:
         """
         添加账号
 
@@ -230,15 +227,17 @@ class AccountsService:
                 self.logger.warning(f"Account {account_id} already exists")
                 return False
 
-        self.accounts.append({
-            "id": account_id,
-            "name": name or account_id,
-            "cookie": cookie,
-            "priority": priority,
-            "enabled": True,
-            "status": AccountStatus.ACTIVE,
-            "created_at": datetime.now().isoformat(),
-        })
+        self.accounts.append(
+            {
+                "id": account_id,
+                "name": name or account_id,
+                "cookie": cookie,
+                "priority": priority,
+                "enabled": True,
+                "status": AccountStatus.ACTIVE,
+                "created_at": datetime.now().isoformat(),
+            }
+        )
 
         self.account_stats[account_id] = {
             "total_published": 0,
@@ -307,9 +306,14 @@ class AccountsService:
                 return True
         return False
 
-    def update_account(self, account_id: str, name: Optional[str] = None,
-                       cookie: Optional[str] = None, priority: Optional[int] = None,
-                       enabled: Optional[bool] = None) -> bool:
+    def update_account(
+        self,
+        account_id: str,
+        name: str | None = None,
+        cookie: str | None = None,
+        priority: int | None = None,
+        enabled: bool | None = None,
+    ) -> bool:
         """
         更新账号信息
 
@@ -339,7 +343,7 @@ class AccountsService:
             return True
         return False
 
-    def get_next_account(self) -> Optional[Dict[str, Any]]:
+    def get_next_account(self) -> dict[str, Any] | None:
         """
         获取下一个账号（按优先级轮询）
 
@@ -363,8 +367,7 @@ class AccountsService:
         self.current_account_id = next_account.get("id")
         return next_account
 
-    def update_account_stats(self, account_id: str, operation: str,
-                           success: bool = True) -> None:
+    def update_account_stats(self, account_id: str, operation: str, success: bool = True) -> None:
         """
         更新账号统计
 
@@ -397,7 +400,7 @@ class AccountsService:
 
         self._save_account_stats()
 
-    def get_account_health(self, account_id: str) -> Dict[str, Any]:
+    def get_account_health(self, account_id: str) -> dict[str, Any]:
         """
         获取账号健康度
 
@@ -427,7 +430,7 @@ class AccountsService:
             "last_operation": stats.get("last_operation"),
         }
 
-    def get_all_accounts_health(self) -> List[Dict[str, Any]]:
+    def get_all_accounts_health(self) -> list[dict[str, Any]]:
         """
         获取所有账号健康度
 
@@ -483,7 +486,7 @@ class AccountsService:
 
         return True
 
-    def get_unified_dashboard(self) -> Dict[str, Any]:
+    def get_unified_dashboard(self) -> dict[str, Any]:
         """
         获取统一仪表盘
 
@@ -493,7 +496,6 @@ class AccountsService:
         accounts = self.get_accounts()
 
         total_products = 0
-        active_products = 0
         total_views = 0
         total_wants = 0
 
@@ -512,7 +514,7 @@ class AccountsService:
             "accounts_health": self.get_all_accounts_health(),
         }
 
-    def distribute_publish(self, count: int = 1) -> List[Dict[str, Any]]:
+    def distribute_publish(self, count: int = 1) -> list[dict[str, Any]]:
         """
         分配发布任务到多个账号
 
@@ -533,9 +535,8 @@ class AccountsService:
             remaining = count - sum(d.get("count", 0) for d in distribution)
             if remaining <= 0:
                 break
-            distribution.append({
-                "account": acc,
-                "count": min(per_account + (1 if i < remaining % len(accounts) else 0), remaining)
-            })
+            distribution.append(
+                {"account": acc, "count": min(per_account + (1 if i < remaining % len(accounts) else 0), remaining)}
+            )
 
         return distribution
