@@ -1,0 +1,15 @@
+{
+  "browser": {
+    "enabled": true,
+    "defaultProfile": "openclaw",
+    "headless": true,
+    "noSandbox": true
+  },
+  "skills": {
+    "xianyu-publish": { "enabled": true },
+    "xianyu-manage": { "enabled": true },
+    "xianyu-content": { "enabled": true },
+    "xianyu-metrics": { "enabled": true },
+    "xianyu-accounts": { "enabled": true }
+  }
+}

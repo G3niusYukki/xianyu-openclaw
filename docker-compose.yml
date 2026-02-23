@@ -1,22 +1,32 @@
 services:
-  app:
-    build: .
+  openclaw-gateway:
+    image: coollabsio/openclaw:latest
     container_name: xianyu-openclaw
     ports:
-      - "8501:8501"
+      - "${OPENCLAW_WEB_PORT:-8080}:8080"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./config:/app/config
+      - ./skills:/home/node/.openclaw/workspace/skills
+      - ./src:/home/node/.openclaw/workspace/src
+      - ./config:/home/node/.openclaw/workspace/config
+      - ./data:/home/node/.openclaw/workspace/data
+      - ./requirements.txt:/home/node/.openclaw/workspace/requirements.txt
+      - ./scripts/init.sh:/app/config/init.sh
+      - openclaw-state:/home/node/.openclaw
     env_file:
       - .env
     environment:
-      - APP_DEBUG=false
-      - APP_LOG_LEVEL=INFO
+      - HOME=/home/node
+      - TERM=xterm-256color
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
+      - OPENCLAW_CUSTOM_INIT=/app/config/init.sh
+    init: true
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/api/health"]
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 30s
+
+volumes:
+  openclaw-state:

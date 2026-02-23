@@ -7,6 +7,6 @@ Core Module
 
 from .config import Config
 from .logger import Logger
-from .openclaw_controller import OpenClawController
+from .browser_client import BrowserClient
 
-__all__ = ["Config", "Logger", "OpenClawController"]
+__all__ = ["Config", "Logger", "BrowserClient"]

@@ -1,41 +1,43 @@
 ---
-name: xianyu-content
-description: Generate AI-powered titles and descriptions for Xianyu listings
-usage: |
-  User: "帮我生成iPhone 15的标题"
-  User: "写一段闲置电脑的描述"
-  User: "给这个商品生成一些关键词"
+name: xianyu_content
+description: 为闲鱼商品生成吸引人的标题、描述和关键词
 ---
 
-# Xianyu Content Skill
+# 闲鱼内容生成
 
-AI-powered content generation for Xianyu marketplace listings.
+当用户需要为闲鱼商品生成标题、描述或关键词时，使用此技能。
 
-## Capabilities
+这个技能不需要调用外部工具，直接用你的 AI 能力生成即可。
 
-- **Title Generation**: Generate catchy, searchable titles
-- **Description Writing**: Create persuasive product descriptions
-- **Keyword Optimization**: Suggest relevant tags and keywords
-- **Content Optimization**: Improve existing titles and descriptions
+## 生成标题的原则
 
-## Usage Examples
+- 控制在 25 字以内
+- 使用【】标注卖点，如【自用出】【全新未拆】
+- 突出品牌、型号、关键参数
+- 包含成色信息（全新/99新/95新等）
 
-### Generate Title
-```
-User: 帮我生成iPhone 15的标题
-Action: generate_title, product_name="iPhone 15", features=["256GB", "蓝色"]
-Result: "iPhone 15 256G 蓝色 国行 99新"
-```
+示例：
+- 【自用出】iPhone 15 Pro 256G 原色钛金属 95新
+- 【全新未拆】AirPods Pro 2 国行正品 带发票
+- 【急出】MacBook Pro M3 16G/512G 充电仅50次
 
-### Generate Description
-```
-User: 写一段闲置电脑的描述
-Action: generate_description, product_name="MacBook Pro", condition="95新", reason="换新电脑"
-Result: "出闲置 MacBook Pro，95新..."
-```
+## 生成描述的原则
 
-## Best Practices
+- 第一段：简述出售原因和亮点
+- 第二段：详细参数和成色描述
+- 第三段：配件清单和售后说明
+- 语气真诚自然，像朋友间对话
+- 不要用过度营销的语言
 
-1. Provide as much product detail as possible
-2. Include condition, brand, and key features
-3. Specify if there are any defects or accessories
+## 生成关键词/标签的原则
+
+- 包含品牌名、型号名
+- 包含成色词（全新、95新等）
+- 包含热门搜索词
+- 5-8 个标签为佳
+
+## 使用流程
+
+1. 用户提供商品信息（品牌、型号、成色、出售原因等）
+2. 直接用 AI 能力生成标题和描述
+3. 如果用户满意，使用 xianyu_publish 技能发布

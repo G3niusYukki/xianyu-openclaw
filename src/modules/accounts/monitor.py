@@ -292,13 +292,13 @@ class Monitor:
         """重新连接浏览器"""
         self.logger.info("Attempting to reconnect browser...")
         try:
-            from src.core.openclaw_controller import OpenClawController
+            from src.core.browser_client import BrowserClient
 
-            controller = OpenClawController()
-            connected = await controller.connect()
+            client = BrowserClient()
+            connected = await client.connect()
 
             if connected:
-                self.logger.success("Browser reconnected successfully")
+                self.logger.info("Browser reconnected successfully")
             else:
                 self.logger.error("Failed to reconnect browser")
 
@@ -414,10 +414,10 @@ class HealthChecker:
     async def check_browser_connection(self) -> bool:
         """检查浏览器连接"""
         try:
-            from src.core.openclaw_controller import OpenClawController
+            from src.core.browser_client import BrowserClient
 
-            controller = OpenClawController()
-            connected = await controller.connect()
+            client = BrowserClient()
+            connected = await client.connect()
 
             if not connected:
                 self.monitor.raise_alert(

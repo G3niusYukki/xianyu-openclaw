@@ -5,7 +5,9 @@ loguru>=0.7.2,<0.8.0
 pydantic>=2.5.0,<3.0.0
 dataclasses-json>=0.6.3,<1.0.0
 python-dateutil>=2.8.2,<3.0.0
-httpx>=0.25.0,<0.30.0
+
+# HTTP client (for OpenClaw Gateway API)
+httpx>=0.25.0,<1.0.0
 
 # Image Processing
 Pillow>=10.2.0,<11.0.0
@@ -18,20 +20,3 @@ cryptography>=42.0.0,<44.0.0
 
 # AI / LLM
 openai>=1.12.0,<2.0.0
-
-# Web Framework
-streamlit>=1.29.0,<2.0.0
-fastapi>=0.109.0,<1.0.0
-uvicorn>=0.27.0,<1.0.0
-pydantic-settings>=2.1.0,<3.0.0
-
-# Development (optional)
-pytest>=7.4.0,<8.0.0
-pytest-cov>=4.1.0,<5.0.0
-pytest-asyncio>=0.21.0,<1.0.0
-black>=23.12.0,<24.0.0
-mypy>=1.8.0,<2.0.0
-ruff>=0.1.0,<1.0.0
-
-# Browser Automation
-playwright>=1.41.0,<2.0.0

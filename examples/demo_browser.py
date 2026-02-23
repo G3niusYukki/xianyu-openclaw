@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.logger import get_logger
-from src.core.openclaw_controller import OpenClawController
+from src.core.browser_client import BrowserClient as OpenClawController
 from src.modules.listing.service import ListingService
 from src.modules.listing.models import Listing
 from src.modules.operations.service import OperationsService

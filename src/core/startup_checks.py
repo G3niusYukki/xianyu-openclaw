@@ -34,31 +34,25 @@ def check_python_version() -> StartupCheckResult:
     )
 
 
-def check_playwright_installed() -> StartupCheckResult:
+def check_gateway_reachable() -> StartupCheckResult:
     try:
-        import playwright
-        return StartupCheckResult("Playwright", True, "已安装")
-    except ImportError:
+        import httpx
+        host = os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
+        port = int(os.getenv("OPENCLAW_GATEWAY_PORT", "18789"))
+        browser_port = port + 2
+        url = f"http://{host}:{browser_port}/"
+        resp = httpx.get(url, timeout=5)
+        if resp.status_code == 200:
+            return StartupCheckResult("OpenClaw Gateway", True, f"可连接 ({host}:{browser_port})")
+        return StartupCheckResult("OpenClaw Gateway", False, f"响应异常 (HTTP {resp.status_code})")
+    except httpx.ConnectError:
         return StartupCheckResult(
-            "Playwright",
+            "OpenClaw Gateway",
             False,
-            "未安装。请运行: pip install playwright && python -m playwright install chromium",
+            "无法连接。请确认 OpenClaw Gateway 正在运行 (docker compose ps)",
         )
-
-
-def check_chromium_installed() -> StartupCheckResult:
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            browser.close()
-        return StartupCheckResult("Chromium浏览器", True, "可正常启动")
     except Exception as e:
-        return StartupCheckResult(
-            "Chromium浏览器",
-            False,
-            f"启动失败: {e}. 请运行: python -m playwright install chromium",
-        )
+        return StartupCheckResult("OpenClaw Gateway", False, f"检查失败: {e}")
 
 
 def check_database_writable() -> StartupCheckResult:
@@ -149,7 +143,7 @@ def run_all_checks(skip_browser: bool = False) -> List[StartupCheckResult]:
     ]
 
     if not skip_browser:
-        results.append(check_playwright_installed())
+        results.append(check_gateway_reachable())
 
     return results
 

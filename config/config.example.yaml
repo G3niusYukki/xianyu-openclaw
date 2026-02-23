@@ -4,13 +4,13 @@
 # 应用配置
 app:
   name: "xianyu-openclaw"
-  version: "1.0.0"
+  version: "4.0.0"
   debug: false
   log_level: "INFO"
   data_dir: "data"
   logs_dir: "logs"
 
-# 浏览器自动化配置 (基于 Playwright)
+# 浏览器自动化配置 (通过 OpenClaw Gateway Browser API)
 openclaw:
   timeout: 30
   retry_times: 3
