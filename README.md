@@ -88,7 +88,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-打开 **http://localhost:8080**，开始跟你的闲鱼 AI 助手对话。
+打开 **http://localhost:8080** ，开始跟你的闲鱼 AI 助手对话。
 
 ---
 
