@@ -5,6 +5,7 @@ Startup Health Checks
 在应用启动时验证所有关键依赖和配置是否就绪
 """
 
+import importlib.util
 import os
 import platform
 import shutil
@@ -13,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from src.core.logger import get_logger
 
@@ -280,21 +282,21 @@ def check_env_file() -> StartupCheckResult:
 
 
 def check_dependencies() -> StartupCheckResult:
-    try:
-        import dotenv
-        import httpx
-        import yaml
-        from loguru import logger as _
+    required = ["dotenv", "httpx", "yaml", "loguru"]
+    missing = []
+    for pkg in required:
+        if importlib.util.find_spec(pkg) is None:
+            missing.append(pkg)
 
-        return StartupCheckResult("Python 依赖", True, "核心依赖已安装", critical=False)
-    except ImportError as e:
+    if missing:
         return StartupCheckResult(
             "Python 依赖",
             False,
-            f"缺少依赖: {e}",
+            f"缺少依赖: {', '.join(missing)}",
             critical=False,
             fix_hint="请安装依赖: pip install -r requirements.txt",
         )
+    return StartupCheckResult("Python 依赖", True, "核心依赖已安装", critical=False)
 
 
 def run_all_checks(skip_browser: bool = False, include_docker: bool = True) -> list[StartupCheckResult]:
@@ -363,8 +365,6 @@ def print_startup_report(results: list[StartupCheckResult]) -> bool:
 
 def generate_doctor_report() -> dict[str, Any]:
     """生成诊断报告（供 CLI 使用）"""
-    import json
-
     results = run_all_checks(skip_browser=False, include_docker=True)
     report = {
         "platform": platform.platform(),
@@ -394,6 +394,3 @@ def generate_doctor_report() -> dict[str, Any]:
                 report["fix_hints"].append({"check": r.name, "hint": r.fix_hint})
 
     return report
-
-
-from typing import Any
