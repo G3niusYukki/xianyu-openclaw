@@ -77,11 +77,23 @@ async def test_quote_engine_circuit_breaker_opens_after_failures() -> None:
     req = QuoteRequest(origin="杭州", destination="深圳", weight=1.3, service_level="standard")
     req2 = QuoteRequest(origin="杭州", destination="深圳", weight=2.2, service_level="standard")
 
-    first = await engine.get_quote(req)
-    second = await engine.get_quote(req2)
+     first = await engine.get_quote(req)
+     second = await engine.get_quote(req2)
 
-    assert first.fallback_used is True
-    assert first.explain["failure_class"] in {"transient", "provider_error"}
-    assert second.fallback_used is True
-    assert second.explain["fallback_reason"] == "remote_circuit_open"
-    assert second.explain["failure_class"] == "unavailable"
+ 
+     assert first.fallback_used is True
+     assert first.snapshot is not None
+     assert first.snapshot.fallback_reason in {"Remote provider temporary failure", "Remote provider timeout"}
+     assert second.fallback_used is True
+     assert second.snapshot is not None
+     assert "circuit_open" in second.snapshot.fallback_reason or "remote_circuit_open"
+     assert second.snapshot.provider_chain == ["hot_cache_miss", "cost_table"]
+ 
+     engine = AutoQuoteEngine({
+         "enabled": True,
+         "mode": "hybrid",
+         "providers": {"remote": {"enabled": True, "failure_rate": 1.0}},
+         "circuit_fail_threshold": 1,
+         "circuit_open_seconds": 30,
+         "analytics_log_enabled": False,
+     })

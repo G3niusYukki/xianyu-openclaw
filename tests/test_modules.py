@@ -145,14 +145,17 @@ async def test_messages_auto_reply_unread_dry_run(mock_controller) -> None:
 
 @pytest.mark.asyncio
 async def test_messages_quote_request_generates_quote(mock_controller) -> None:
-    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "fast_reply_enabled": True})
+    service = MessagesService(
+        controller=mock_controller,
+        config={"max_replies_per_run": 3, "fast_reply_enabled": True, "two_stage_enabled": False},
+    )
     service.get_unread_sessions = AsyncMock(
         return_value=[
             {
                 "session_id": "q1",
                 "peer_name": "买家Q",
                 "item_title": "快递服务",
-                "last_message": "从上海寄到杭州 2kg 多少钱",
+                "last_message": "从上海寄到杭州 3kg 多少钱",
                 "unread_count": 1,
             }
         ]
