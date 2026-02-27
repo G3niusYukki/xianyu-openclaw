@@ -17,6 +17,7 @@ from src.core.logger import get_logger
 from src.modules.messages.followup_policy import ReadNoReplyFollowupPolicy
 from src.modules.messages.followup_store import FollowupStateStore
 from src.modules.messages.fulfillment import FulfillmentHelper
+from src.modules.messages.outbound_compliance import OutboundCompliancePolicy
 from src.modules.messages.reply_engine import ReplyStrategyEngine
 from src.modules.messages.workflow_state import WorkflowStage, WorkflowStateStore
 from src.modules.quote.service import QuoteService
@@ -125,6 +126,7 @@ class MessagesService:
         self.quote_service = QuoteService()
         self.fulfillment_helper = FulfillmentHelper(self.config)
         self.followup_policy = ReadNoReplyFollowupPolicy(self.config)
+        self.outbound_compliance_policy = OutboundCompliancePolicy(self.config)
         self.followup_store = FollowupStateStore(
             path=self.followup_state_path,
             max_sessions=self.followup_state_max_sessions,
@@ -404,13 +406,28 @@ class MessagesService:
         if not self.controller:
             raise BrowserError("Browser controller is not initialized. Cannot send reply.")
 
+        session_key = str(session_id or "").strip()
+        state = self.followup_store.get(session_key) if session_key else {}
+        allow_send, reason = self.outbound_compliance_policy.evaluate(session_key, reply_text, state)
+        if not allow_send:
+            if session_key:
+                updates = self.outbound_compliance_policy.build_state_updates_on_blocked(reason, state)
+                self.followup_store.upsert(session_key, updates)
+            self.logger.warning(f"Reply blocked by outbound compliance: session={session_key}, reason={reason}")
+            return False
+
         own_page = page_id is None
         try:
             if own_page:
                 page_id = await self.controller.new_page()
                 await self.controller.navigate(page_id, self.selectors.MESSAGE_PAGE)
                 await asyncio.sleep(self._random_delay())
-            return await self._send_message(page_id, session_id, reply_text)
+            sent = await self._send_message(page_id, session_id, reply_text)
+            if sent and session_key:
+                current = self.followup_store.get(session_key)
+                updates = self.outbound_compliance_policy.build_state_updates_on_sent(current)
+                self.followup_store.upsert(session_key, updates)
+            return sent
         finally:
             if own_page and close_page and page_id:
                 await self.controller.close_page(page_id)

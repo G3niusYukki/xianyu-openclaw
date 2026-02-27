@@ -1,6 +1,9 @@
 [project]
 name = "xianyu-openclaw"
 version = "1.0.0"
+description = "闲鱼运营自动化工具：消息自动回复、自动报价、工作流监控与低门槛部署。"
+readme = "README.md"
+requires-python = ">=3.10"
 
 [tool.black]
 line-length = 100

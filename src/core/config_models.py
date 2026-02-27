@@ -167,6 +167,11 @@ class MessagesConfig(BaseModel):
     read_no_reply_max_per_session: int = Field(default=1, ge=1, le=5, description="单会话最多跟进次数")
     read_no_reply_templates: list[str] = Field(default_factory=list, description="已读未回跟进话术模板")
     read_no_reply_stop_keywords: list[str] = Field(default_factory=list, description="触发停发的关键词")
+    outbound_compliance_enabled: bool = Field(default=True, description="是否启用消息外发合规护栏")
+    outbound_block_keywords: list[str] = Field(default_factory=list, description="外发消息禁词列表")
+    outbound_min_interval_seconds: int = Field(default=1, ge=0, le=3600, description="同会话外发最小间隔（秒）")
+    outbound_max_per_session_hour: int = Field(default=6, ge=1, le=200, description="单会话每小时外发上限")
+    outbound_max_per_session_day: int = Field(default=20, ge=1, le=2000, description="单会话每日外发上限")
     fulfillment_confirm_enabled: bool = Field(default=True, description="是否启用下单/付款履约确认")
     order_intent_keywords: list[str] = Field(default_factory=list, description="订单确认意图关键词")
     fulfillment_ack_template: str = Field(

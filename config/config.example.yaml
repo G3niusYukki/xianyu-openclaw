@@ -130,6 +130,12 @@ messages:
     - "看到你已读啦，我先把这个方案给你留着。需要我按你的重量和地区再精确算一次吗？"
     - "如果你还在比较寄件方案，我可以按你的预算再给一个更省的选项，需要的话直接回我“继续报价”就行。"
   read_no_reply_stop_keywords: ["不用", "不需要", "先不", "别发了", "勿扰", "拉黑", "举报"]
+  # 外发消息合规护栏（禁词+频控）
+  outbound_compliance_enabled: true
+  outbound_block_keywords: ["微信", "vx", "qq", "qq群", "站外", "私下交易", "加我"]
+  outbound_min_interval_seconds: 1
+  outbound_max_per_session_hour: 6
+  outbound_max_per_session_day: 20
   # 下单/付款后的履约确认
   fulfillment_confirm_enabled: true
   order_intent_keywords: ["下单", "已下单", "拍下", "已拍", "拍了", "已拍下", "付款", "已付款", "付了"]

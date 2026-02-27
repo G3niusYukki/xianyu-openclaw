@@ -1,6 +1,7 @@
 """消息模块。"""
 
 from .fulfillment import FulfillmentHelper
+from .outbound_compliance import OutboundCompliancePolicy
 from .service import MessagesService
 from .sla_monitor import WorkflowSlaMonitor
 from .worker import WorkflowWorker
@@ -13,4 +14,5 @@ __all__ = [
     "WorkflowStateStore",
     "WorkflowStage",
     "FulfillmentHelper",
+    "OutboundCompliancePolicy",
 ]

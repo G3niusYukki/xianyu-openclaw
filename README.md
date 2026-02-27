@@ -21,11 +21,20 @@
   <a href="#功能特性">功能特性</a> •
   <a href="#系统架构">系统架构</a> •
   <a href="#技能列表">技能列表</a> •
-  <a href="USER_GUIDE.md">零基础使用指南</a> •
+  <a href="docs/0基础使用说明.md">0基础使用说明</a> •
+  <a href="USER_GUIDE.md">零基础使用指南（旧版）</a> •
   <a href="CONTRIBUTING.md">参与贡献</a>
 </p>
 
 ---
+
+## 项目描述
+
+`xianyu-openclaw` 是一个面向闲鱼运营的自动化工具，核心能力包括：
+- 消息自动回复（首响、询价二阶段回复、已读未回跟进）
+- 自动报价（本地成本表 + 加价规则 / API 成本价 + 加价规则）
+- 会话工作流与 SLA 监控（常驻 worker + 告警）
+- 低门槛部署（setup 向导、Windows bat、quote doctor 体检）
 
 ## 4.2.1 更新摘要（2026-02-27）
 
@@ -284,6 +293,20 @@ messages:
       priority: 20
       keywords: ["代下单", "代拍", "代充", "代购", "代订"]
       reply: "支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。"
+  read_no_reply_followup_enabled: false
+  fulfillment_confirm_enabled: true
+  order_intent_keywords: ["下单", "已下单", "拍下", "已拍", "付款", "已付款"]
+  fulfillment_ack_template: "收到你的订单，我这边开始处理，结果会优先在闲鱼聊天内同步，请耐心等我一下。"
+  read_no_reply_min_elapsed_seconds: 300
+  read_no_reply_min_interval_seconds: 1800
+  read_no_reply_max_per_session: 1
+  outbound_compliance_enabled: true
+  outbound_block_keywords: ["微信", "vx", "qq", "qq群", "站外", "私下交易", "加我"]
+  outbound_min_interval_seconds: 1
+  outbound_max_per_session_hour: 6
+  outbound_max_per_session_day: 20
+  read_no_reply_templates:
+    - "看到你已读啦，我先把这个方案给你留着。需要我按你的重量和地区再精确算一次吗？"
 ai:
   usage_mode: "minimal"
   max_calls_per_run: 20
@@ -293,15 +316,6 @@ ai:
     description: false
     optimize_title: true
     seo_keywords: true
-  read_no_reply_followup_enabled: false
-  fulfillment_confirm_enabled: true
-  order_intent_keywords: ["下单", "已下单", "拍下", "已拍", "付款", "已付款"]
-  fulfillment_ack_template: "收到你的订单，我这边开始处理，结果会优先在闲鱼聊天内同步，请耐心等我一下。"
-  read_no_reply_min_elapsed_seconds: 300
-  read_no_reply_min_interval_seconds: 1800
-  read_no_reply_max_per_session: 1
-  read_no_reply_templates:
-    - "看到你已读啦，我先把这个方案给你留着。需要我按你的重量和地区再精确算一次吗？"
 ```
 
 ---
