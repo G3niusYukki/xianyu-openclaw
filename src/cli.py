@@ -25,7 +25,12 @@
 import argparse
 import asyncio
 import json
+import os
+import signal
+import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import Any
 
 
@@ -33,28 +38,252 @@ def _json_out(data: Any) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
-def _required_checks_for_module(target: str) -> set[str]:
-    base = {"Python版本", "数据库", "配置文件"}
-    if target in {"presales", "operations", "aftersales"}:
-        base.update({"闲鱼Cookie", "OpenClaw Gateway"})
-    if target == "presales":
-        base.add("消息首响SLA")
-    return base
-
-
 def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[str, Any]:
-    required_names = _required_checks_for_module(target)
+    from src.core.startup_checks import resolve_runtime_mode
+
+    runtime = resolve_runtime_mode()
     checks = doctor_report.get("checks", [])
-    required_checks = [item for item in checks if str(item.get("name", "")) in required_names]
+    check_map = {str(item.get("name", "")): item for item in checks}
+
+    required_names = {"Python版本", "数据库", "配置文件", "闲鱼Cookie"}
+    if target == "presales":
+        required_names.add("消息首响SLA")
+
+    required_checks = [check_map[name] for name in required_names if name in check_map]
     blockers = [item for item in required_checks if not bool(item.get("passed", False))]
+
+    gateway_item = check_map.get("OpenClaw Gateway")
+    lite_item = check_map.get("Lite 浏览器驱动")
+
+    if runtime == "pro":
+        if gateway_item is not None:
+            required_checks.append(gateway_item)
+            if not bool(gateway_item.get("passed", False)):
+                blockers.append(gateway_item)
+    elif runtime == "lite":
+        if lite_item is not None:
+            required_checks.append(lite_item)
+            if not bool(lite_item.get("passed", False)):
+                blockers.append(lite_item)
+    else:
+        # auto: gateway/lite 任一可用即通过，二者都不可用才阻塞。
+        browser_ready = bool(gateway_item and gateway_item.get("passed", False)) or bool(
+            lite_item and lite_item.get("passed", False)
+        )
+        if gateway_item is not None:
+            required_checks.append(gateway_item)
+        if lite_item is not None:
+            required_checks.append(lite_item)
+        if not browser_ready:
+            blockers.append(
+                {
+                    "name": "浏览器运行时",
+                    "passed": False,
+                    "critical": True,
+                    "message": "auto 模式下 OpenClaw Gateway 与 Lite 驱动均不可用",
+                    "suggestion": (
+                        "启动 Gateway（docker compose up -d）或安装 Playwright"
+                        "（pip install playwright && playwright install chromium）。"
+                    ),
+                    "meta": {"runtime": runtime},
+                }
+            )
+
     return {
         "target": target,
+        "runtime": runtime,
         "ready": len(blockers) == 0,
         "required_checks": required_checks,
         "blockers": blockers,
         "next_steps": doctor_report.get("next_steps", []),
         "doctor_summary": doctor_report.get("summary", {}),
     }
+
+
+_MODULE_RUNTIME_DIR = Path("data/module_runtime")
+
+
+def _module_state_path(target: str) -> Path:
+    _MODULE_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    return _MODULE_RUNTIME_DIR / f"{target}.json"
+
+
+def _module_log_path(target: str) -> Path:
+    _MODULE_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    return _MODULE_RUNTIME_DIR / f"{target}.log"
+
+
+def _read_module_state(target: str) -> dict[str, Any]:
+    path = _module_state_path(target)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_module_state(target: str, data: dict[str, Any]) -> None:
+    path = _module_state_path(target)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _build_module_start_command(target: str, args: argparse.Namespace) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "src.cli",
+        "module",
+        "--action",
+        "start",
+        "--target",
+        target,
+        "--mode",
+        "daemon",
+    ]
+
+    if args.max_loops:
+        cmd.extend(["--max-loops", str(args.max_loops)])
+    if args.interval:
+        cmd.extend(["--interval", str(args.interval)])
+
+    if target == "presales":
+        cmd.extend(["--limit", str(args.limit), "--claim-limit", str(args.claim_limit)])
+        if args.workflow_db:
+            cmd.extend(["--workflow-db", str(args.workflow_db)])
+        if bool(args.dry_run):
+            cmd.append("--dry-run")
+    elif target == "operations":
+        if bool(args.init_default_tasks):
+            cmd.append("--init-default-tasks")
+        if bool(args.skip_polish):
+            cmd.append("--skip-polish")
+        if bool(args.skip_metrics):
+            cmd.append("--skip-metrics")
+        if args.polish_max_items:
+            cmd.extend(["--polish-max-items", str(args.polish_max_items)])
+        if args.polish_cron:
+            cmd.extend(["--polish-cron", str(args.polish_cron)])
+        if args.metrics_cron:
+            cmd.extend(["--metrics-cron", str(args.metrics_cron)])
+    else:
+        cmd.extend(["--limit", str(args.limit), "--issue-type", str(args.issue_type or "delay")])
+        if args.orders_db:
+            cmd.extend(["--orders-db", str(args.orders_db)])
+        if bool(args.include_manual):
+            cmd.append("--include-manual")
+        if bool(args.dry_run):
+            cmd.append("--dry-run")
+
+    return cmd
+
+
+def _start_background_module(target: str, args: argparse.Namespace) -> dict[str, Any]:
+    state = _read_module_state(target)
+    old_pid = int(state.get("pid", 0) or 0)
+    if old_pid > 0 and _process_alive(old_pid):
+        return {
+            "target": target,
+            "started": False,
+            "reason": "already_running",
+            "pid": old_pid,
+            "log_file": str(_module_log_path(target)),
+        }
+
+    cmd = _build_module_start_command(target=target, args=args)
+    log_file = _module_log_path(target)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(log_file, "a", encoding="utf-8")
+    handle.write(
+        f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] start target={target} cmd={' '.join(cmd)}\n"
+    )
+    handle.flush()
+
+    popen_kwargs: dict[str, Any] = {
+        "stdout": handle,
+        "stderr": handle,
+        "cwd": os.getcwd(),
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+    else:
+        popen_kwargs["preexec_fn"] = os.setsid
+
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    handle.close()
+    state = {
+        "target": target,
+        "pid": proc.pid,
+        "log_file": str(log_file),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "command": cmd,
+    }
+    _write_module_state(target, state)
+    return {"target": target, "started": True, "pid": proc.pid, "log_file": str(log_file)}
+
+
+def _stop_background_module(target: str, timeout_seconds: float = 6.0) -> dict[str, Any]:
+    state = _read_module_state(target)
+    pid = int(state.get("pid", 0) or 0)
+    if pid <= 0:
+        return {"target": target, "stopped": False, "reason": "not_running"}
+    if not _process_alive(pid):
+        return {"target": target, "stopped": False, "reason": "pid_not_alive", "pid": pid}
+
+    try:
+        if os.name == "nt":
+            os.kill(pid, signal.SIGTERM)
+        else:
+            os.killpg(pid, signal.SIGTERM)
+    except Exception as exc:
+        return {"target": target, "stopped": False, "reason": f"signal_failed: {exc}", "pid": pid}
+
+    start = time.time()
+    while time.time() - start <= timeout_seconds:
+        if not _process_alive(pid):
+            return {"target": target, "stopped": True, "pid": pid}
+        time.sleep(0.2)
+
+    try:
+        if os.name == "nt":
+            os.kill(pid, signal.SIGKILL)
+        else:
+            os.killpg(pid, signal.SIGKILL)
+    except Exception:
+        pass
+
+    return {"target": target, "stopped": not _process_alive(pid), "pid": pid, "forced": True}
+
+
+def _module_process_status(target: str) -> dict[str, Any]:
+    state = _read_module_state(target)
+    pid = int(state.get("pid", 0) or 0)
+    alive = _process_alive(pid) if pid > 0 else False
+    return {
+        "pid": pid if pid > 0 else None,
+        "alive": alive,
+        "log_file": state.get("log_file", str(_module_log_path(target))),
+        "started_at": state.get("started_at", ""),
+    }
+
+
+def _module_logs(target: str, tail_lines: int = 80) -> dict[str, Any]:
+    log_file = _module_log_path(target)
+    if not log_file.exists():
+        return {"target": target, "log_file": str(log_file), "lines": []}
+
+    lines = log_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+    return {"target": target, "log_file": str(log_file), "lines": lines[-max(int(tail_lines), 1) :]}
 
 
 def _resolve_workflow_state(stage: str | None) -> Any:
@@ -791,6 +1020,7 @@ async def cmd_module(args: argparse.Namespace) -> None:
             _json_out(
                 {
                     "target": target,
+                    "process": _module_process_status(target),
                     "workflow": store.get_workflow_summary(),
                     "sla": store.get_sla_summary(window_minutes=args.window_minutes or 1440),
                 }
@@ -799,10 +1029,15 @@ async def cmd_module(args: argparse.Namespace) -> None:
 
         if target == "aftersales":
             service = OrderFulfillmentService(db_path=args.orders_db or "data/orders.db")
-            preview = service.list_orders(status="after_sales", limit=max(int(args.limit or 20), 1), include_manual=True)
+            preview = service.list_orders(
+                status="after_sales",
+                limit=max(int(args.limit or 20), 1),
+                include_manual=True,
+            )
             _json_out(
                 {
                     "target": target,
+                    "process": _module_process_status(target),
                     "summary": service.get_summary(),
                     "recent_after_sales_cases": [
                         {
@@ -818,10 +1053,23 @@ async def cmd_module(args: argparse.Namespace) -> None:
             return
 
         scheduler = Scheduler()
-        _json_out({"target": target, "scheduler": scheduler.get_scheduler_status()})
+        _json_out(
+            {
+                "target": target,
+                "process": _module_process_status(target),
+                "scheduler": scheduler.get_scheduler_status(),
+            }
+        )
         return
 
     if action == "start":
+        if bool(args.background):
+            if args.mode != "daemon":
+                _json_out({"error": "background start only supports --mode daemon"})
+                raise SystemExit(2)
+            _json_out(_start_background_module(target=target, args=args))
+            return
+
         if target == "presales":
             result = await _start_presales_module(args)
         elif target == "operations":
@@ -829,6 +1077,20 @@ async def cmd_module(args: argparse.Namespace) -> None:
         else:
             result = await _start_aftersales_module(args)
         _json_out(result)
+        return
+
+    if action == "stop":
+        _json_out(_stop_background_module(target=target, timeout_seconds=float(args.stop_timeout or 6.0)))
+        return
+
+    if action == "restart":
+        stopped = _stop_background_module(target=target, timeout_seconds=float(args.stop_timeout or 6.0))
+        started = _start_background_module(target=target, args=args)
+        _json_out({"target": target, "stopped": stopped, "started": started})
+        return
+
+    if action == "logs":
+        _json_out(_module_logs(target=target, tail_lines=int(args.tail_lines or 80)))
         return
 
     _json_out({"error": f"Unknown module action: {action}"})
@@ -1129,10 +1391,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # module
     p = sub.add_parser("module", help="模块化可用性检查与启动（售前/运营/售后）")
-    p.add_argument("--action", required=True, choices=["check", "status", "start"])
+    p.add_argument("--action", required=True, choices=["check", "status", "start", "stop", "restart", "logs"])
     p.add_argument("--target", required=True, choices=["presales", "operations", "aftersales"])
     p.add_argument("--strict", action="store_true", help="check 未通过时返回非0")
     p.add_argument("--mode", choices=["once", "daemon"], default="once", help="start 运行模式")
+    p.add_argument("--background", action="store_true", help="start 时后台运行（仅 daemon）")
     p.add_argument("--skip-gateway", action="store_true", help="check 时跳过网关连通性")
     p.add_argument("--window-minutes", type=int, default=1440, help="status 时 SLA 统计窗口（分钟）")
     p.add_argument("--workflow-db", default=None, help="presales workflow 数据库路径")
@@ -1150,6 +1413,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--polish-max-items", type=int, default=50, help="默认擦亮任务最大数量")
     p.add_argument("--polish-cron", default="", help="默认擦亮任务 cron")
     p.add_argument("--metrics-cron", default="", help="默认数据任务 cron")
+    p.add_argument("--tail-lines", type=int, default=80, help="logs 返回行数")
+    p.add_argument("--stop-timeout", type=float, default=6.0, help="stop/restart 等待进程退出超时（秒）")
 
     # quote
     p = sub.add_parser("quote", help="自动报价诊断与配置")

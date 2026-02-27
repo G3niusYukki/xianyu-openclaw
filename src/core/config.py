@@ -165,6 +165,7 @@ class Config:
                 "log_level": "INFO",
                 "data_dir": "data",
                 "logs_dir": "logs",
+                "runtime": "auto",
             },
             "openclaw": {
                 "host": "localhost",

@@ -12,8 +12,10 @@ from src.core.startup_checks import run_all_checks
 from src.modules.quote import CostTableRepository
 
 _SUGGESTIONS = {
+    "浏览器运行时": "可通过 `.env` 设置 `OPENCLAW_RUNTIME=auto|lite|pro`，推荐先用 `auto`。",
     "Python版本": "请安装 Python 3.10+，并使用 `python3 -m venv .venv` 创建虚拟环境。",
     "OpenClaw Gateway": "请先执行 `docker compose up -d`，再重试 doctor。",
+    "Lite 浏览器驱动": "请执行 `pip install playwright`，然后执行 `playwright install chromium`。",
     "数据库": "请确认数据库目录可写，并检查 `config/config.yaml` 中 database.path 配置。",
     "闲鱼Cookie": "请在 `.env` 中设置有效的 `XIANYU_COOKIE_1`。",
     "Cookie有效性": "请重新抓取并更新闲鱼 Cookie，避免使用过期会话。",

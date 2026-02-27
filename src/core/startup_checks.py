@@ -23,6 +23,28 @@ class StartupCheckResult:
         self.critical = critical
 
 
+def resolve_runtime_mode() -> str:
+    env_runtime = str(os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
+    if env_runtime in {"auto", "lite", "pro"}:
+        return env_runtime
+
+    try:
+        from src.core.config import get_config
+
+        cfg_runtime = str(get_config().get("app.runtime", "auto")).strip().lower()
+        if cfg_runtime in {"auto", "lite", "pro"}:
+            return cfg_runtime
+    except Exception:
+        pass
+
+    return "auto"
+
+
+def check_runtime_mode() -> StartupCheckResult:
+    runtime = resolve_runtime_mode()
+    return StartupCheckResult("浏览器运行时", True, f"当前运行时: {runtime}", critical=False)
+
+
 def check_python_version() -> StartupCheckResult:
     v = sys.version_info
     ok = v.major == 3 and v.minor >= 10
@@ -130,9 +152,25 @@ def check_cookie_expiration() -> StartupCheckResult:
     return StartupCheckResult("Cookie有效性", True, "Cookie格式正常", critical=False)
 
 
+def check_lite_browser_dependency() -> StartupCheckResult:
+    try:
+        import playwright  # noqa: F401
+
+        return StartupCheckResult("Lite 浏览器驱动", True, "Playwright 已安装", critical=True)
+    except Exception:
+        return StartupCheckResult(
+            "Lite 浏览器驱动",
+            False,
+            "未安装 Playwright。请执行: pip install playwright && playwright install chromium",
+            critical=True,
+        )
+
+
 def run_all_checks(skip_browser: bool = False) -> list[StartupCheckResult]:
     """运行所有启动检查"""
+    runtime = resolve_runtime_mode()
     results = [
+        check_runtime_mode(),
         check_python_version(),
         check_data_directories(),
         check_database_writable(),
@@ -141,8 +179,31 @@ def run_all_checks(skip_browser: bool = False) -> list[StartupCheckResult]:
         check_cookie_expiration(),
     ]
 
-    if not skip_browser:
+    if skip_browser:
+        return results
+
+    if runtime == "pro":
         results.append(check_gateway_reachable())
+        return results
+
+    if runtime == "lite":
+        results.append(check_lite_browser_dependency())
+        return results
+
+    # auto 模式：优先探测 gateway，失败则检查 lite 依赖。
+    gateway = check_gateway_reachable()
+    if gateway.passed:
+        results.append(gateway)
+    else:
+        results.append(
+            StartupCheckResult(
+                "OpenClaw Gateway",
+                False,
+                f"{gateway.message}（auto 模式将尝试 lite 回退）",
+                critical=False,
+            )
+        )
+        results.append(check_lite_browser_dependency())
 
     return results
 

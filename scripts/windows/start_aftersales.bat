@@ -23,5 +23,8 @@ if not "%~4"=="" set ISSUE_TYPE=%~4
 set DRYRUN=
 if /I "%~5"=="dry-run" set DRYRUN=--dry-run
 
-call .venv\Scripts\python -m src.cli module --action start --target aftersales --mode %MODE% --limit %LIMIT% --interval %INTERVAL% --issue-type %ISSUE_TYPE% %DRYRUN%
+set BG=--background
+if /I "%~6"=="foreground" set BG=
+
+call .venv\Scripts\python -m src.cli module --action start --target aftersales --mode %MODE% --limit %LIMIT% --interval %INTERVAL% --issue-type %ISSUE_TYPE% %DRYRUN% %BG%
 exit /b %ERRORLEVEL%

@@ -17,5 +17,8 @@ if not "%~2"=="" set LIMIT=%~2
 set INTERVAL=5
 if not "%~3"=="" set INTERVAL=%~3
 
-call .venv\Scripts\python -m src.cli module --action start --target presales --mode %MODE% --limit %LIMIT% --interval %INTERVAL%
+set BG=--background
+if /I "%~4"=="foreground" set BG=
+
+call .venv\Scripts\python -m src.cli module --action start --target presales --mode %MODE% --limit %LIMIT% --interval %INTERVAL% %BG%
 exit /b %ERRORLEVEL%

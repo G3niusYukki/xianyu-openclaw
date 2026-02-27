@@ -9,6 +9,7 @@ app:
   log_level: "INFO"
   data_dir: "data"
   logs_dir: "logs"
+  runtime: "auto" # auto | lite | pro
 
 # 浏览器自动化配置 (通过 OpenClaw Gateway Browser API)
 openclaw:
