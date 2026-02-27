@@ -4,7 +4,7 @@
 # 应用配置
 app:
   name: "xianyu-openclaw"
-  version: "4.1.0"
+  version: "4.3.0"
   debug: false
   log_level: "INFO"
   data_dir: "data"
@@ -100,9 +100,18 @@ browser:
 messages:
   enabled: false
   max_replies_per_run: 10
+  fast_reply_enabled: true
+  reply_target_seconds: 3.0
+  reuse_message_page: true
+  first_reply_delay_seconds: [0.25, 0.9]
+  inter_reply_delay_seconds: [0.4, 1.2]
+  send_confirm_delay_seconds: [0.15, 0.35]
   reply_prefix: ""
   default_reply: "您好，宝贝在的，感兴趣可以直接拍下。"
   virtual_default_reply: "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。"
+  quote_intent_keywords: ["报价", "多少钱", "运费", "邮费", "快递费", "寄到", "到"]
+  quote_missing_template: "为了给您准确报价，请补充：{fields}。"
+  quote_failed_template: "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。"
   virtual_product_keywords: ["虚拟", "卡密", "激活码", "兑换码", "CDK", "代下单", "代充", "代订"]
   intent_rules:
     - name: "card_code_delivery"
@@ -122,6 +131,23 @@ messages:
     还在: "在的，商品还在，直接拍就可以。"
     包邮: "默认不包邮，具体看地区可以商量。"
     最低: "价格已经尽量实在了，诚心要的话可以小刀。"
+
+# 自动报价配置
+quote:
+  enabled: true
+  mode: "hybrid" # rule_only | provider_only | hybrid
+  ttl_seconds: 90
+  max_stale_seconds: 300
+  timeout_ms: 3000
+  retry_times: 2
+  safety_margin: 0.03
+  validity_minutes: 30
+  analytics_log_enabled: true
+  providers:
+    remote:
+      enabled: false
+      simulated_latency_ms: 120
+      failure_rate: 0.0
 
 # 合规规则文件（详细规则见 config/rules.yaml）
 rules:

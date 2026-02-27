@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-02-27
+
+### Added
+- `src/modules/quote/` 自动报价模块：
+  - `models.py`：`QuoteRequest` / `QuoteResult`
+  - `providers.py`：`IQuoteProvider`、`RuleTableQuoteProvider`、`RemoteQuoteProvider(mock)`
+  - `cache.py`：`TTL + stale-while-revalidate` 缓存
+  - `engine.py`：`AutoQuoteEngine`（provider 重试、失败回退、缓存刷新、审计日志）
+- 消息自动回复新增询价分流：
+  - 识别询价意图后自动解析寄件地/收件地/重量/时效
+  - 缺参时生成补充提问模板
+  - 字段完整时返回结构化报价文案（含费用拆分和有效期）
+- 消息链路新增快速回复指标：
+  - `target_reply_seconds`
+  - `within_target_count` / `within_target_rate`
+  - `quote_latency_ms` / `quote_success_rate` / `quote_fallback_rate`
+- 新增测试 `tests/test_quote_engine.py`，覆盖规则报价、远程失败回退、缓存命中。
+
+### Changed
+- `src/modules/messages/service.py`：
+  - 支持复用消息页（降低批量回复页面开关开销）
+  - 新增 `reply_to_session(..., page_id=...)` 复用调用路径
+  - `auto_reply_unread` 接入自动报价、缺参补问、合规降级回复
+  - `dry-run` 模式跳过随机等待，提升测试与验收效率
+- 配置模型与样例新增 `quote` 配置段与 `messages.fast_reply_*` 参数。
+- `README.md` 更新为 4.3.0，补充自动报价与快速回复配置示例。
+- `src/__init__.py` 版本号更新为 `4.3.0`。
+
 ## [4.2.1] - 2026-02-27
 
 ### Added

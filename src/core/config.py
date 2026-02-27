@@ -199,6 +199,34 @@ class Config:
                 "virtual_product_keywords": [],
                 "intent_rules": [],
                 "keyword_replies": {},
+                "fast_reply_enabled": False,
+                "reply_target_seconds": 3.0,
+                "reuse_message_page": True,
+                "first_reply_delay_seconds": [0.25, 0.9],
+                "inter_reply_delay_seconds": [0.4, 1.2],
+                "send_confirm_delay_seconds": [0.15, 0.35],
+                "quote_intent_keywords": [],
+                "quote_missing_template": "为了给您准确报价，请补充：{fields}。",
+                "quote_failed_template": "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
+                "quote": {},
+            },
+            "quote": {
+                "enabled": True,
+                "mode": "rule_only",
+                "ttl_seconds": 90,
+                "max_stale_seconds": 300,
+                "timeout_ms": 3000,
+                "retry_times": 1,
+                "safety_margin": 0.0,
+                "validity_minutes": 30,
+                "analytics_log_enabled": True,
+                "providers": {
+                    "remote": {
+                        "enabled": False,
+                        "simulated_latency_ms": 120,
+                        "failure_rate": 0.0,
+                    }
+                },
             },
         }
 

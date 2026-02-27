@@ -115,6 +115,46 @@ class MessagesConfig(BaseModel):
     virtual_product_keywords: list[str] = Field(default_factory=list, description="虚拟商品识别关键词")
     intent_rules: list[dict[str, Any]] = Field(default_factory=list, description="意图规则列表")
     keyword_replies: dict[str, str] = Field(default_factory=dict, description="关键词回复模板")
+    fast_reply_enabled: bool = Field(default=False, description="是否启用快速回复链路")
+    reply_target_seconds: float = Field(default=3.0, ge=0.5, le=20.0, description="自动回复目标时延")
+    reuse_message_page: bool = Field(default=True, description="是否复用消息页")
+    first_reply_delay_seconds: list[float] = Field(
+        default_factory=lambda: [0.25, 0.9],
+        description="首条回复抖动延迟范围",
+    )
+    inter_reply_delay_seconds: list[float] = Field(
+        default_factory=lambda: [0.4, 1.2],
+        description="会话间回复延迟范围",
+    )
+    send_confirm_delay_seconds: list[float] = Field(
+        default_factory=lambda: [0.15, 0.35],
+        description="发送确认后延迟范围",
+    )
+    quote_intent_keywords: list[str] = Field(default_factory=list, description="询价意图关键词")
+    quote_missing_template: str = Field(
+        default="为了给您准确报价，请补充：{fields}。",
+        description="询价缺参补问模板",
+    )
+    quote_failed_template: str = Field(
+        default="报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
+        description="报价失败降级模板",
+    )
+    quote: dict[str, Any] = Field(default_factory=dict, description="消息模块中的报价覆盖配置")
+
+
+class QuoteConfig(BaseModel):
+    """自动报价配置模型"""
+
+    enabled: bool = Field(default=True, description="是否启用自动报价")
+    mode: str = Field(default="rule_only", description="报价模式：rule_only|provider_only|hybrid")
+    ttl_seconds: int = Field(default=90, ge=1, le=3600, description="缓存 TTL")
+    max_stale_seconds: int = Field(default=300, ge=0, le=86400, description="陈旧缓存允许时长")
+    timeout_ms: int = Field(default=3000, ge=100, le=30000, description="provider 超时时间")
+    retry_times: int = Field(default=1, ge=1, le=10, description="provider 重试次数")
+    safety_margin: float = Field(default=0.0, ge=0.0, le=1.0, description="报价安全系数")
+    validity_minutes: int = Field(default=30, ge=1, le=1440, description="报价有效期（分钟）")
+    analytics_log_enabled: bool = Field(default=True, description="是否写入报价审计日志")
+    providers: dict[str, Any] = Field(default_factory=dict, description="报价 provider 配置")
 
 
 class AppConfig(BaseModel):
@@ -150,6 +190,7 @@ class ConfigModel(BaseModel):
     content: ContentConfig = Field(default_factory=ContentConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     messages: MessagesConfig = Field(default_factory=MessagesConfig)
+    quote: QuoteConfig = Field(default_factory=QuoteConfig)
 
     @field_validator("default_account")
     @classmethod

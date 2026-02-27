@@ -30,6 +30,7 @@ async def main():
         from src.modules.media.service import MediaService  # noqa: F401
         from src.modules.messages.service import MessagesService  # noqa: F401
         from src.modules.operations.service import OperationsService  # noqa: F401
+        from src.modules.quote.engine import AutoQuoteEngine  # noqa: F401
 
         logger.success("All modules loaded successfully")
         logger.info("Tool is ready for use")

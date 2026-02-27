@@ -129,3 +129,50 @@ async def test_messages_auto_reply_unread_dry_run(mock_controller) -> None:
     assert result["failed"] == 0
     assert result["dry_run"] is True
     service.reply_to_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_messages_quote_request_generates_quote(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "fast_reply_enabled": True})
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "q1",
+                "peer_name": "买家Q",
+                "item_title": "快递服务",
+                "last_message": "从上海寄到杭州 2kg 多少钱",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.auto_reply_unread(limit=5, dry_run=True)
+    detail = result["details"][0]
+
+    assert detail["is_quote"] is True
+    assert detail["quote_success"] is True
+    assert "预估报价" in detail["reply"]
+    assert result["quote_success_rate"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_messages_quote_request_missing_fields_returns_followup_question(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3})
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "q2",
+                "peer_name": "买家M",
+                "item_title": "快递服务",
+                "last_message": "寄到北京运费多少",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.auto_reply_unread(limit=5, dry_run=True)
+    detail = result["details"][0]
+
+    assert detail["is_quote"] is True
+    assert detail["quote_success"] is False
+    assert "请补充" in detail["reply"]

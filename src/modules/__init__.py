@@ -16,6 +16,11 @@ except Exception:  # pragma: no cover - optional dependency/runtime environment
     MessagesService = None
 
 try:
+    from .quote.engine import AutoQuoteEngine
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    AutoQuoteEngine = None
+
+try:
     from .operations.service import OperationsService
 except Exception:  # pragma: no cover - optional dependency/runtime environment
     OperationsService = None
@@ -33,6 +38,7 @@ except Exception:  # pragma: no cover - optional dependency/runtime environment
 __all__ = [
     "AccountsService",
     "AnalyticsService",
+    "AutoQuoteEngine",
     "ContentService",
     "Listing",
     "ListingImage",
