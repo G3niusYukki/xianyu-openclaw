@@ -114,6 +114,7 @@ python -m src.cli messages --action workflow-status
 python -m src.cli messages --action workflow-transition --session-id s1 --stage ORDERED --force-state
 python -m src.cli quote --action health
 python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
+python -m src.cli quote --action setup --mode cost_table_plus_markup --origin-city 安徽 --cost-table-dir data/quote_costs
 ```
 
 Windows 可用批处理脚本：
@@ -126,6 +127,8 @@ scripts\windows\workflow_status.bat
 scripts\windows\workflow_transition.bat s1 ORDERED --force-state
 scripts\windows\quote_health.bat
 scripts\windows\quote_preview.bat "寄到上海 2kg 圆通 报价"
+scripts\windows\quote_setup_local.bat 安徽 data/quote_costs
+scripts\windows\quote_setup_api.bat https://your-cost-api.example.com/v1/quote-cost 安徽 data/quote_costs
 scripts\windows\dashboard.bat 8091
 ```
 
@@ -141,6 +144,16 @@ quote:
   cost_table_patterns: ["*.xlsx", "*.csv"]
   api_fallback_to_table_parallel: true
   api_prefer_max_wait_seconds: 1.2
+```
+
+快速一键配置（自动写入 `config/config.yaml`，会自动备份原文件）：
+
+```bash
+# 本地成本表 + 加价规则
+python -m src.cli quote --action setup --mode cost_table_plus_markup --origin-city 安徽 --cost-table-dir data/quote_costs
+
+# API 成本价 + 加价规则（慢接口自动快速回退本地表）
+python -m src.cli quote --action setup --mode api_cost_plus_markup --origin-city 安徽 --cost-table-dir data/quote_costs --cost-api-url "https://your-cost-api.example.com/v1/quote-cost"
 ```
 
 ### 一键部署向导（推荐）
@@ -244,6 +257,7 @@ python -m src.cli messages  --action run-worker --limit 20 --interval-seconds 15
 python -m src.cli messages  --action workflow-status
 python -m src.cli quote --action health
 python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
+python -m src.cli quote --action setup --mode cost_table_plus_markup --origin-city 安徽 --cost-table-dir data/quote_costs
 python -m src.dashboard_server --port 8091
 ```
 

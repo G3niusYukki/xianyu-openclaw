@@ -3,6 +3,7 @@
 from .cost_table import CostRecord, CostTableRepository
 from .models import QuoteParseResult, QuoteRequest, QuoteResult
 from .service import QuoteService
+from .setup import QuoteSetupService
 
 __all__ = [
     "CostRecord",
@@ -11,4 +12,5 @@ __all__ = [
     "QuoteRequest",
     "QuoteResult",
     "QuoteService",
+    "QuoteSetupService",
 ]

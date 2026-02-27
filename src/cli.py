@@ -24,6 +24,7 @@
     python -m src.cli messages --action workflow-transition --session-id s1 --stage ORDERED --force-state
     python -m src.cli quote --action health
     python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
+    python -m src.cli quote --action setup --mode cost_table_plus_markup --origin-city 安徽 --cost-table-dir data/quote_costs
 """
 
 import argparse
@@ -263,6 +264,7 @@ async def cmd_messages(args: argparse.Namespace) -> None:
 
 async def cmd_quote(args: argparse.Namespace) -> None:
     from src.modules.quote.service import QuoteService
+    from src.modules.quote.setup import QuoteSetupService
 
     service = QuoteService()
     action = args.action
@@ -335,6 +337,29 @@ async def cmd_quote(args: argparse.Namespace) -> None:
                 "quote_message": quote_message,
             }
         )
+        return
+
+    if action == "setup":
+        setup_service = QuoteSetupService(config_path=args.config_path or "config/config.yaml")
+        patterns = []
+        raw_patterns = str(args.cost_table_patterns or "*.xlsx,*.csv")
+        for item in raw_patterns.split(","):
+            text = item.strip()
+            if text:
+                patterns.append(text)
+
+        result = setup_service.apply(
+            mode=args.mode or "cost_table_plus_markup",
+            origin_city=args.origin_city,
+            pricing_profile=args.pricing_profile or "normal",
+            cost_table_dir=args.cost_table_dir or "data/quote_costs",
+            cost_table_patterns=patterns,
+            api_cost_url=args.cost_api_url or "",
+            cost_api_key_env=args.cost_api_key_env or "QUOTE_COST_API_KEY",
+            api_fallback_to_table_parallel=not bool(args.disable_fast_fallback),
+            api_prefer_max_wait_seconds=float(args.api_prefer_max_wait_seconds or 1.2),
+        )
+        _json_out(result)
         return
 
     _json_out({"error": f"Unknown quote action: {action}"})
@@ -425,13 +450,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     # quote
     p = sub.add_parser("quote", help="自动报价诊断与预览")
-    p.add_argument("--action", required=True, choices=["health", "preview", "candidates"])
+    p.add_argument("--action", required=True, choices=["health", "preview", "candidates", "setup"])
     p.add_argument("--message", help="买家消息文本（preview 时必填）")
     p.add_argument("--item-title", default="", help="商品标题（preview 可选）")
     p.add_argument("--origin-city", help="始发地（candidates 时必填）")
     p.add_argument("--destination-city", help="目的地（candidates 时必填）")
     p.add_argument("--courier", help="快递公司（candidates 可选）")
     p.add_argument("--limit", type=int, default=20, help="候选数量上限（candidates）")
+    p.add_argument("--mode", help="报价模式（setup）")
+    p.add_argument("--pricing-profile", default="normal", help="加价档位 normal/member（setup）")
+    p.add_argument("--cost-table-dir", help="成本价表目录（setup）")
+    p.add_argument("--cost-table-patterns", default="*.xlsx,*.csv", help="成本表匹配规则（setup，逗号分隔）")
+    p.add_argument("--cost-api-url", default="", help="成本价接口 URL（setup）")
+    p.add_argument("--cost-api-key-env", default="QUOTE_COST_API_KEY", help="成本接口 Key 的环境变量名（setup）")
+    p.add_argument("--api-prefer-max-wait-seconds", type=float, default=1.2, help="API 优先等待窗口秒数（setup）")
+    p.add_argument("--disable-fast-fallback", action="store_true", help="关闭 API 慢时快速回退（setup）")
+    p.add_argument("--config-path", default="config/config.yaml", help="配置文件路径（setup）")
 
     return parser
 
