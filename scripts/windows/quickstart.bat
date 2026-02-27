@@ -44,4 +44,5 @@ echo [INFO] Module restart: run scripts\windows\module_restart.bat presales
 echo [INFO] Start presales: run scripts\windows\start_presales.bat daemon 20 5
 echo [INFO] Start operations: run scripts\windows\start_operations.bat daemon 30
 echo [INFO] Start aftersales: run scripts\windows\start_aftersales.bat daemon 20 15 delay
+echo [INFO] Launcher menu: run scripts\windows\launcher.bat
 exit /b 0

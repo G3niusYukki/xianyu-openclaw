@@ -304,24 +304,24 @@ python3 -m src.cli module --action start --target aftersales --mode daemon --lim
 启动前建议先做模块检查：
 
 ```bash
-python3 -m src.cli module --action check --target presales --strict
-python3 -m src.cli module --action check --target operations --strict
-python3 -m src.cli module --action check --target aftersales --strict
+python3 -m src.cli module --action check --target all --strict
 ```
 
 查看运行状态：
 
 ```bash
-python3 -m src.cli module --action status --target presales --window-minutes 60
-python3 -m src.cli module --action status --target operations
-python3 -m src.cli module --action status --target aftersales
+python3 -m src.cli module --action status --target all --window-minutes 60
+python3 -m src.cli module --action logs --target all --tail-lines 80
+python3 -m src.cli module --action stop --target all
 ```
 
 Windows 一键脚本：
 
 ```bat
+scripts\windows\launcher.bat
 scripts\windows\module_check.bat
 scripts\windows\module_status.bat
+scripts\windows\start_all_lite.bat
 scripts\windows\start_presales.bat daemon 20 5
 scripts\windows\start_operations.bat daemon 30
 scripts\windows\start_aftersales.bat daemon 20 15 delay

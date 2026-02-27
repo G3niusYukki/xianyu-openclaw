@@ -224,23 +224,24 @@ python -m src.cli doctor    --strict
 python -m src.cli automation --action setup --enable-feishu --feishu-webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
 python -m src.cli automation --action status
 python -m src.cli automation --action test-feishu
-python -m src.cli module --action check  --target presales   --strict
-python -m src.cli module --action check  --target operations --strict
-python -m src.cli module --action check  --target aftersales --strict
-python -m src.cli module --action status --target presales   --window-minutes 60
-python -m src.cli module --action status --target operations
-python -m src.cli module --action status --target aftersales
+python -m src.cli module --action check  --target all --strict
+python -m src.cli module --action status --target all --window-minutes 60
 python -m src.cli module --action start  --target presales   --mode daemon --limit 20 --interval 5
 python -m src.cli module --action start  --target operations --mode daemon --init-default-tasks --interval 30
 python -m src.cli module --action start  --target aftersales --mode daemon --limit 20 --interval 15 --issue-type delay
+python -m src.cli module --action start  --target all --mode daemon --background
+python -m src.cli module --action stop   --target all
+python -m src.cli module --action logs   --target all --tail-lines 80
 python -m src.dashboard_server --port 8091
 ```
 
 Windows 可直接按模块启动：
 
 ```bat
+scripts\windows\launcher.bat
 scripts\windows\module_check.bat
 scripts\windows\module_status.bat
+scripts\windows\start_all_lite.bat
 scripts\windows\start_presales.bat daemon 20 5
 scripts\windows\start_operations.bat daemon 30
 scripts\windows\start_aftersales.bat daemon 20 15 delay

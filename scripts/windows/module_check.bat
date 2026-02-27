@@ -17,14 +17,6 @@ if not "%TARGET%"=="" (
   exit /b %ERRORLEVEL%
 )
 
-echo [INFO] Check presales
-call .venv\Scripts\python -m src.cli module --action check --target presales %STRICT_FLAG%
-if errorlevel 1 exit /b 1
-
-echo [INFO] Check operations
-call .venv\Scripts\python -m src.cli module --action check --target operations %STRICT_FLAG%
-if errorlevel 1 exit /b 1
-
-echo [INFO] Check aftersales
-call .venv\Scripts\python -m src.cli module --action check --target aftersales %STRICT_FLAG%
+echo [INFO] Check all modules
+call .venv\Scripts\python -m src.cli module --action check --target all %STRICT_FLAG%
 exit /b %ERRORLEVEL%

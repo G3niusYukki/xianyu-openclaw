@@ -17,12 +17,6 @@ if not "%TARGET%"=="" (
   exit /b %ERRORLEVEL%
 )
 
-echo [INFO] Stop presales
-call .venv\Scripts\python -m src.cli module --action stop --target presales --stop-timeout %TIMEOUT%
-
-echo [INFO] Stop operations
-call .venv\Scripts\python -m src.cli module --action stop --target operations --stop-timeout %TIMEOUT%
-
-echo [INFO] Stop aftersales
-call .venv\Scripts\python -m src.cli module --action stop --target aftersales --stop-timeout %TIMEOUT%
+echo [INFO] Stop all modules
+call .venv\Scripts\python -m src.cli module --action stop --target all --stop-timeout %TIMEOUT%
 exit /b %ERRORLEVEL%

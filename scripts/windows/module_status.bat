@@ -19,14 +19,6 @@ if not "%TARGET%"=="" (
   exit /b %ERRORLEVEL%
 )
 
-echo [INFO] Presales status
-call .venv\Scripts\python -m src.cli module --action status --target presales --limit %LIMIT% --window-minutes %WINDOW%
-if errorlevel 1 exit /b 1
-
-echo [INFO] Operations status
-call .venv\Scripts\python -m src.cli module --action status --target operations --limit %LIMIT%
-if errorlevel 1 exit /b 1
-
-echo [INFO] Aftersales status
-call .venv\Scripts\python -m src.cli module --action status --target aftersales --limit %LIMIT%
+echo [INFO] All module status
+call .venv\Scripts\python -m src.cli module --action status --target all --limit %LIMIT% --window-minutes %WINDOW%
 exit /b %ERRORLEVEL%

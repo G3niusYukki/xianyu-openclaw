@@ -38,6 +38,9 @@ def _json_out(data: Any) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
+_MODULE_TARGETS = ("presales", "operations", "aftersales")
+
+
 def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[str, Any]:
     from src.core.startup_checks import resolve_runtime_mode
 
@@ -1001,66 +1004,113 @@ async def cmd_module(args: argparse.Namespace) -> None:
     action = args.action
     target = args.target
 
-    if action == "check":
-        report = run_doctor(
-            skip_gateway=bool(args.skip_gateway),
-            skip_quote=(target != "presales"),
-        )
-        summary = _module_check_summary(target=target, doctor_report=report)
-        _json_out(summary)
-        if bool(args.strict) and not summary["ready"]:
-            raise SystemExit(2)
-        return
-
-    if action == "status":
-        if target == "presales":
+    def _status_payload(single_target: str) -> dict[str, Any]:
+        if single_target == "presales":
             store = WorkflowStore(db_path=args.workflow_db)
-            _json_out(
-                {
-                    "target": target,
-                    "process": _module_process_status(target),
-                    "workflow": store.get_workflow_summary(),
-                    "sla": store.get_sla_summary(window_minutes=args.window_minutes or 1440),
-                }
-            )
-            return
+            return {
+                "target": single_target,
+                "process": _module_process_status(single_target),
+                "workflow": store.get_workflow_summary(),
+                "sla": store.get_sla_summary(window_minutes=args.window_minutes or 1440),
+            }
 
-        if target == "aftersales":
+        if single_target == "aftersales":
             service = OrderFulfillmentService(db_path=args.orders_db or "data/orders.db")
             preview = service.list_orders(
                 status="after_sales",
                 limit=max(int(args.limit or 20), 1),
                 include_manual=True,
             )
+            return {
+                "target": single_target,
+                "process": _module_process_status(single_target),
+                "summary": service.get_summary(),
+                "recent_after_sales_cases": [
+                    {
+                        "order_id": item.get("order_id"),
+                        "session_id": item.get("session_id"),
+                        "manual_takeover": bool(item.get("manual_takeover", False)),
+                        "updated_at": item.get("updated_at", ""),
+                    }
+                    for item in preview
+                ],
+            }
+
+        scheduler = Scheduler()
+        return {
+            "target": single_target,
+            "process": _module_process_status(single_target),
+            "scheduler": scheduler.get_scheduler_status(),
+        }
+
+    if action == "check":
+        report = run_doctor(
+            skip_gateway=bool(args.skip_gateway),
+            skip_quote=(target not in {"presales", "all"}),
+        )
+
+        if target == "all":
+            modules = {name: _module_check_summary(target=name, doctor_report=report) for name in _MODULE_TARGETS}
+            blockers: list[dict[str, Any]] = []
+            for name, item in modules.items():
+                for blocker in item.get("blockers", []):
+                    payload = dict(blocker)
+                    payload["target"] = name
+                    blockers.append(payload)
+            result = {
+                "target": "all",
+                "runtime": next(iter(modules.values())).get("runtime", "auto"),
+                "ready": all(bool(item.get("ready", False)) for item in modules.values()),
+                "modules": modules,
+                "blockers": blockers,
+                "next_steps": report.get("next_steps", []),
+                "doctor_summary": report.get("summary", {}),
+            }
+            _json_out(result)
+            if bool(args.strict) and not result["ready"]:
+                raise SystemExit(2)
+            return
+
+        summary = _module_check_summary(target=target, doctor_report=report)
+        _json_out(summary)
+        if bool(args.strict) and not bool(summary.get("ready", False)):
+            raise SystemExit(2)
+        return
+
+    if action == "status":
+        if target == "all":
+            modules = {name: _status_payload(name) for name in _MODULE_TARGETS}
+            alive_count = sum(1 for item in modules.values() if bool(item.get("process", {}).get("alive", False)))
             _json_out(
                 {
-                    "target": target,
-                    "process": _module_process_status(target),
-                    "summary": service.get_summary(),
-                    "recent_after_sales_cases": [
-                        {
-                            "order_id": item.get("order_id"),
-                            "session_id": item.get("session_id"),
-                            "manual_takeover": bool(item.get("manual_takeover", False)),
-                            "updated_at": item.get("updated_at", ""),
-                        }
-                        for item in preview
-                    ],
+                    "target": "all",
+                    "modules": modules,
+                    "alive_count": alive_count,
+                    "total_modules": len(modules),
                 }
             )
             return
 
-        scheduler = Scheduler()
-        _json_out(
-            {
-                "target": target,
-                "process": _module_process_status(target),
-                "scheduler": scheduler.get_scheduler_status(),
-            }
-        )
+        _json_out(_status_payload(target))
         return
 
     if action == "start":
+        if target == "all":
+            if not bool(args.background):
+                _json_out({"error": "start --target all requires --background to avoid blocking"})
+                raise SystemExit(2)
+            if args.mode != "daemon":
+                _json_out({"error": "start --target all only supports --mode daemon"})
+                raise SystemExit(2)
+            _json_out(
+                {
+                    "target": "all",
+                    "action": "start",
+                    "modules": {name: _start_background_module(target=name, args=args) for name in _MODULE_TARGETS},
+                }
+            )
+            return
+
         if bool(args.background):
             if args.mode != "daemon":
                 _json_out({"error": "background start only supports --mode daemon"})
@@ -1078,16 +1128,51 @@ async def cmd_module(args: argparse.Namespace) -> None:
         return
 
     if action == "stop":
+        if target == "all":
+            _json_out(
+                {
+                    "target": "all",
+                    "action": "stop",
+                    "modules": {
+                        name: _stop_background_module(target=name, timeout_seconds=float(args.stop_timeout or 6.0))
+                        for name in _MODULE_TARGETS
+                    },
+                }
+            )
+            return
+
         _json_out(_stop_background_module(target=target, timeout_seconds=float(args.stop_timeout or 6.0)))
         return
 
     if action == "restart":
+        if target == "all":
+            results: dict[str, Any] = {}
+            for name in _MODULE_TARGETS:
+                stopped = _stop_background_module(target=name, timeout_seconds=float(args.stop_timeout or 6.0))
+                started = _start_background_module(target=name, args=args)
+                results[name] = {"target": name, "stopped": stopped, "started": started}
+            _json_out({"target": "all", "action": "restart", "modules": results})
+            return
+
         stopped = _stop_background_module(target=target, timeout_seconds=float(args.stop_timeout or 6.0))
         started = _start_background_module(target=target, args=args)
         _json_out({"target": target, "stopped": stopped, "started": started})
         return
 
     if action == "logs":
+        if target == "all":
+            _json_out(
+                {
+                    "target": "all",
+                    "action": "logs",
+                    "modules": {
+                        name: _module_logs(target=name, tail_lines=int(args.tail_lines or 80))
+                        for name in _MODULE_TARGETS
+                    },
+                }
+            )
+            return
+
         _json_out(_module_logs(target=target, tail_lines=int(args.tail_lines or 80)))
         return
 
@@ -1390,7 +1475,7 @@ def build_parser() -> argparse.ArgumentParser:
     # module
     p = sub.add_parser("module", help="模块化可用性检查与启动（售前/运营/售后）")
     p.add_argument("--action", required=True, choices=["check", "status", "start", "stop", "restart", "logs"])
-    p.add_argument("--target", required=True, choices=["presales", "operations", "aftersales"])
+    p.add_argument("--target", required=True, choices=["presales", "operations", "aftersales", "all"])
     p.add_argument("--strict", action="store_true", help="check 未通过时返回非0")
     p.add_argument("--mode", choices=["once", "daemon"], default="once", help="start 运行模式")
     p.add_argument("--background", action="store_true", help="start 时后台运行（仅 daemon）")
