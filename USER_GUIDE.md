@@ -172,7 +172,7 @@ http://localhost:8080
 如果你想看图表和操作日志，可单独启动后台页面：
 
 ```bash
-python -m src.dashboard_server --port 8091
+python3 -m src.dashboard_server --port 8091
 ```
 
 浏览器打开 `http://localhost:8091`，可看到趋势图、商品表现和最近操作记录。
