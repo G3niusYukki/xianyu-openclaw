@@ -110,6 +110,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python -m src.cli messages --action auto-workflow --limit 20 --dry-run
 python -m src.cli messages --action run-worker --limit 20 --interval-seconds 15
+python -m src.cli messages --action workflow-status
 ```
 
 Windows 可用批处理脚本：
@@ -118,6 +119,7 @@ Windows 可用批处理脚本：
 scripts\windows\setup_windows.bat
 scripts\windows\auto_workflow.bat 20 --dry-run
 scripts\windows\run_worker.bat 20 15
+scripts\windows\workflow_status.bat
 scripts\windows\dashboard.bat 8091
 ```
 
@@ -219,6 +221,7 @@ python -m src.cli messages  --action auto-reply --limit 20 --dry-run
 python -m src.cli messages  --action auto-followup --limit 20 --dry-run
 python -m src.cli messages  --action auto-workflow --limit 20 --dry-run
 python -m src.cli messages  --action run-worker --limit 20 --interval-seconds 15
+python -m src.cli messages  --action workflow-status
 python -m src.dashboard_server --port 8091
 ```
 

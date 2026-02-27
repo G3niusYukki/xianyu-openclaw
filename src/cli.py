@@ -233,6 +233,11 @@ async def cmd_messages(args: argparse.Namespace) -> None:
             _json_out(result)
             return
 
+        if action == "workflow-status":
+            worker = WorkflowWorker(messages_service=service)
+            _json_out(worker.get_runtime_status())
+            return
+
         _json_out({"error": f"Unknown messages action: {action}"})
     finally:
         await client.disconnect()
@@ -295,7 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--action",
         required=True,
-        choices=["list-unread", "reply", "auto-reply", "auto-followup", "auto-workflow", "run-worker"],
+        choices=["list-unread", "reply", "auto-reply", "auto-followup", "auto-workflow", "run-worker", "workflow-status"],
     )
     p.add_argument("--limit", type=int, default=20, help="最多处理会话数")
     p.add_argument("--session-id", help="会话 ID（reply 时必填）")

@@ -15,6 +15,7 @@ from typing import Any
 from src.core.config import get_config
 from src.core.logger import get_logger
 from src.modules.messages.service import MessagesService
+from src.modules.messages.sla_monitor import WorkflowSlaMonitor
 
 
 class WorkflowWorker:
@@ -45,6 +46,7 @@ class WorkflowWorker:
         )
         self.state_path = Path(str(self.config.get("worker_state_path", "data/workflow_worker_state.json")))
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.sla_monitor = WorkflowSlaMonitor(self.config)
 
         self._stop_event = asyncio.Event()
 
@@ -66,6 +68,25 @@ class WorkflowWorker:
         temp_path = self.state_path.with_suffix(f"{self.state_path.suffix}.tmp")
         temp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         temp_path.replace(self.state_path)
+
+    def get_runtime_status(self) -> dict[str, Any]:
+        """读取 worker 运行状态与 SLA 快照。"""
+        state: dict[str, Any] = {}
+        if self.state_path.exists():
+            try:
+                state = json.loads(self.state_path.read_text(encoding="utf-8"))
+                if not isinstance(state, dict):
+                    state = {}
+            except Exception:
+                state = {}
+
+        sla = self.sla_monitor.get_snapshot()
+        return {
+            "worker_state_path": str(self.state_path),
+            "worker_state": state,
+            "sla_path": str(self.sla_monitor.path),
+            "sla": sla,
+        }
 
     async def _sleep_or_stop(self, seconds: float) -> bool:
         try:
@@ -102,6 +123,7 @@ class WorkflowWorker:
         cycles_failed = 0
         consecutive_failures = 0
         last_error = ""
+        latest_alerts: list[dict[str, Any]] = []
 
         self.logger.info(
             f"Workflow worker started (limit={limit}, dry_run={dry_run}, interval={interval:.2f}s, max_cycles={max_cycles})"
@@ -123,9 +145,17 @@ class WorkflowWorker:
 
             try:
                 result = await self.messages_service.auto_workflow(limit=limit, dry_run=dry_run)
+                duration_seconds = time.time() - cycle_started
                 cycles_success += 1
                 consecutive_failures = 0
                 last_error = ""
+                sla_snapshot = self.sla_monitor.record_cycle(
+                    cycle_status="success",
+                    duration_seconds=duration_seconds,
+                    cycle_result=result,
+                    error="",
+                )
+                latest_alerts = sla_snapshot.get("alerts", []) if isinstance(sla_snapshot, dict) else []
 
                 state = {
                     "status": "running",
@@ -136,6 +166,7 @@ class WorkflowWorker:
                     "cycles_failed": cycles_failed,
                     "last_error": "",
                     "last_result_summary": result.get("summary", {}),
+                    "alerts": latest_alerts,
                     "updated_at": time.time(),
                 }
                 self._write_state(state)
@@ -152,6 +183,14 @@ class WorkflowWorker:
                 consecutive_failures += 1
                 last_error = str(e)
                 self.logger.error(f"Workflow worker cycle failed: {e}")
+                duration_seconds = time.time() - cycle_started
+                sla_snapshot = self.sla_monitor.record_cycle(
+                    cycle_status="failed",
+                    duration_seconds=duration_seconds,
+                    cycle_result=None,
+                    error=last_error,
+                )
+                latest_alerts = sla_snapshot.get("alerts", []) if isinstance(sla_snapshot, dict) else []
 
                 state = {
                     "status": "running",
@@ -161,6 +200,7 @@ class WorkflowWorker:
                     "cycles_success": cycles_success,
                     "cycles_failed": cycles_failed,
                     "last_error": last_error,
+                    "alerts": latest_alerts,
                     "updated_at": time.time(),
                 }
                 self._write_state(state)
@@ -182,10 +222,12 @@ class WorkflowWorker:
             "cycles_success": cycles_success,
             "cycles_failed": cycles_failed,
             "last_error": last_error,
+            "alerts": latest_alerts,
             "updated_at": ended_at,
         }
         self._write_state(final_status)
 
+        runtime_status = self.get_runtime_status()
         return {
             "action": "run_worker",
             "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started_at)),
@@ -199,4 +241,6 @@ class WorkflowWorker:
             "limit": limit,
             "interval_seconds": interval,
             "state_path": str(self.state_path),
+            "alerts": latest_alerts,
+            "sla_summary": (runtime_status.get("sla", {}) or {}).get("summary", {}),
         }

@@ -52,11 +52,13 @@ async def test_workflow_worker_runs_with_max_cycles_and_writes_state(tmp_path: P
     assert result["cycles_success"] == 2
     assert result["cycles_failed"] == 0
     assert service.calls == 2
+    assert isinstance(result.get("sla_summary", {}), dict)
 
     assert state_path.exists()
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["status"] == "stopped"
     assert state["cycles_total"] == 2
+    assert "alerts" in state
 
 
 @pytest.mark.asyncio

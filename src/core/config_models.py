@@ -181,6 +181,28 @@ class MessagesConfig(BaseModel):
     worker_backoff_seconds: float = Field(default=5.0, ge=0.01, le=600, description="worker 失败退避基数（秒）")
     worker_max_backoff_seconds: float = Field(default=120.0, ge=0.01, le=3600, description="worker 最大退避（秒）")
     worker_state_path: str = Field(default="data/workflow_worker_state.json", description="worker 状态文件路径")
+    worker_sla_enabled: bool = Field(default=True, description="是否启用 worker SLA 监控")
+    worker_sla_path: str = Field(default="data/workflow_sla_metrics.json", description="worker SLA 数据文件路径")
+    worker_sla_window_size: int = Field(default=500, ge=10, le=50000, description="SLA 统计窗口大小（轮次）")
+    worker_alert_min_samples: int = Field(default=10, ge=1, le=10000, description="触发告警的最小样本数")
+    worker_alert_failure_rate_threshold: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="失败率告警阈值",
+    )
+    worker_alert_first_reply_within_target_ratio_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="首响达标率告警阈值",
+    )
+    worker_alert_cycle_p95_seconds: float = Field(
+        default=20.0,
+        ge=0.1,
+        le=600.0,
+        description="工作流周期时延 P95 告警阈值（秒）",
+    )
     reply_prefix: str = Field(default="", description="回复前缀")
     default_reply: str = Field(default="您好，宝贝在的，感兴趣可以直接拍下。", description="默认回复文案")
     virtual_default_reply: str = Field(
