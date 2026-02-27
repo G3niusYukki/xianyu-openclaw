@@ -39,7 +39,14 @@ GATEWAY_PROVIDERS = [
 ]
 
 CONTENT_PROVIDERS = [
-    ContentProvider("deepseek", "DeepSeek", "DEEPSEEK_API_KEY", "sk-...", "https://api.deepseek.com/v1", "deepseek-chat"),
+    ContentProvider(
+        "deepseek",
+        "DeepSeek",
+        "DEEPSEEK_API_KEY",
+        "sk-...",
+        "https://api.deepseek.com/v1",
+        "deepseek-chat",
+    ),
     ContentProvider(
         "aliyun_bailian",
         "阿里云百炼（DashScope）",
