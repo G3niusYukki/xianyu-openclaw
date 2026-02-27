@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from dotenv import dotenv_values
+from src.modules.quote.setup import QuoteSetupService
 
 
 def _prompt(text: str, default: str | None = None, required: bool = False, secret: bool = False) -> str:
@@ -99,6 +100,50 @@ def _ensure_docker_ready() -> bool:
     return True
 
 
+def _setup_quote_strategy(root: Path) -> None:
+    print("\n是否顺便初始化自动报价配置？")
+    print("1) 本地成本表 + 加价规则（推荐）")
+    print("2) API 成本价 + 加价规则（失败自动回退本地成本表）")
+    print("3) 跳过")
+
+    while True:
+        choice = input("输入编号 [1/2/3]: ").strip() or "1"
+        if choice in {"1", "2", "3"}:
+            break
+        print("请输入 1 / 2 / 3")
+
+    if choice == "3":
+        print("已跳过报价配置。")
+        return
+
+    origin_city = _prompt("设置报价默认寄件城市 origin_city", default="安徽", required=True)
+    cost_table_dir = _prompt("设置成本价表目录 cost_table_dir", default="data/quote_costs", required=True)
+    pricing_profile = _prompt("设置报价档位 pricing_profile", default="normal", required=True)
+
+    mode = "cost_table_plus_markup"
+    cost_api_url = ""
+    if choice == "2":
+        mode = "api_cost_plus_markup"
+        cost_api_url = _prompt("设置成本价接口 cost_api_url", default="", required=True)
+
+    setup_service = QuoteSetupService(config_path=str(root / "config/config.yaml"))
+    result = setup_service.apply(
+        mode=mode,
+        origin_city=origin_city,
+        pricing_profile=pricing_profile,
+        cost_table_dir=cost_table_dir,
+        api_cost_url=cost_api_url,
+        cost_api_key_env="QUOTE_COST_API_KEY",
+    )
+
+    backup_path = str(result.get("backup_path", "")).strip()
+    if backup_path:
+        print(f"已备份旧配置: {backup_path}")
+    print("报价配置已写入:", result.get("config_path", "config/config.yaml"))
+    table = result.get("cost_table", {})
+    print(f"成本价表文件数: {int(table.get('file_count', 0))}")
+
+
 def run_setup() -> int:
     root = Path.cwd()
     env_path = root / ".env"
@@ -145,6 +190,7 @@ def run_setup() -> int:
     env_path.write_text(content, encoding="utf-8")
 
     print(f"\n已写入配置: {env_path}")
+    _setup_quote_strategy(root)
 
     start_now = _prompt("是否立即启动容器？[Y/n]", default="Y")
     if start_now.lower() in {"", "y", "yes"}:

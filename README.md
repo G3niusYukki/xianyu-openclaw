@@ -160,7 +160,7 @@ python -m src.cli quote --action setup --mode api_cost_plus_markup --origin-city
 
 ### 一键部署向导（推荐）
 
-如果你不想手动编辑 `.env`，可以直接运行交互式向导，按提示一步步输入 API Key、Cookie、密码并自动启动：
+如果你不想手动编辑 `.env`，可以直接运行交互式向导，按提示一步步输入 API Key、Cookie、密码，并可直接初始化报价策略（本地成本表/API成本价）：
 
 ```bash
 python -m src.setup_wizard
