@@ -231,7 +231,7 @@ class AutoQuoteEngine:
             return await self._fallback_chain(request, provider_chain, QuoteProviderError("circuit_open"))
 
         remote_error: Exception | None = None
-        for attempt in range(max(1, self.retry_times)):
+        for _ in range(max(1, self.retry_times)):
             try:
                 result = await self.remote_provider.get_quote(request, timeout_ms=self.timeout_ms)
                 self._record_success(circuit)
@@ -263,7 +263,7 @@ class AutoQuoteEngine:
                 cost_source="hot_cache",
                 cost_version="cached",
                 pricing_rule_version=self.PRICING_RULE_VERSION,
-                provider_chain=provider_chain + ["hot_cache"],
+                provider_chain=[*provider_chain, "hot_cache"],
                 fallback_reason=str(remote_error) if remote_error else "api_unavailable",
             )
             return hot_cached

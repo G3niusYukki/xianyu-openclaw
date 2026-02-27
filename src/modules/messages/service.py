@@ -70,9 +70,7 @@ class TwoStageReplyOrchestrator:
         actor: str = "two_stage_orchestrator",
     ) -> dict[str, Any]:
         session_start = perf_counter()
-        session_id = str(session.get("session_id", ""))
         msg = str(session.get("last_message", ""))
-        item_title = str(session.get("item_title", ""))
 
         is_quote_request = self.message_service._is_quote_request(msg)
 
@@ -670,7 +668,6 @@ class MessagesService:
     ) -> dict[str, Any]:
         """单阶段回复处理（兼容旧逻辑）。"""
         session_start = perf_counter()
-        session_id = str(session.get("session_id", ""))
         msg = str(session.get("last_message", ""))
         item_title = str(session.get("item_title", ""))
 
