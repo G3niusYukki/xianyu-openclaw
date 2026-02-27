@@ -5,12 +5,9 @@ Message Reply Strategy Engine
 将自动回复逻辑从服务层剥离，支持意图规则、虚拟商品场景兜底和旧关键词兼容。
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 from typing import Any
-
 
 DEFAULT_VIRTUAL_PRODUCT_KEYWORDS = [
     "虚拟",
@@ -126,7 +123,10 @@ class ReplyStrategyEngine:
                 break
 
         if not reply:
-            reply = self.virtual_default_reply if self._is_virtual_context(normalized, item_title) else self.default_reply
+            if self._is_virtual_context(normalized, item_title):
+                reply = self.virtual_default_reply
+            else:
+                reply = self.default_reply
 
         if item_title:
             reply = f"关于「{item_title}」，{reply}"
