@@ -3,6 +3,7 @@
 Messages Service
 
 提供站内会话读取、自动回复与自动报价能力。
+支持两阶段回复：快速确认 + 异步报价补发。
 """
 
 import asyncio
@@ -31,6 +32,166 @@ class MessageSelectors:
     SESSION_LIST = "[class*='session'], [class*='conversation'], [data-session-id]"
     MESSAGE_INPUT = "textarea, [contenteditable='true'], input[placeholder*='消息']"
     SEND_BUTTON = "button:has-text('发送'), button:has-text('Send'), [class*='send']"
+
+
+class FirstReplySLA:
+    """首响 SLA 预算管理：900ms 规则层 + 700ms 路由层 + 1200ms 发送层"""
+
+    RULE_BUDGET_MS = 900
+    ROUTE_BUDGET_MS = 700
+    SEND_BUDGET_MS = 1200
+    TOTAL_BUDGET_MS = RULE_BUDGET_MS + ROUTE_BUDGET_MS + SEND_BUDGET_MS
+
+    QUICK_ACK_TEMPLATES = [
+        "收到，正在为您核实价格，稍后回复~",
+        "您好，正在查询运费，马上给您报价。",
+        "已读，正在为您核算中，请稍候。",
+    ]
+
+    @classmethod
+    def select_quick_ack(cls) -> str:
+        return random.choice(cls.QUICK_ACK_TEMPLATES)
+
+
+class TwoStageReplyOrchestrator:
+    """两阶段回复编排器。"""
+
+    def __init__(self, message_service: "MessagesService"):
+        self.message_service = message_service
+        self.logger = get_logger()
+        self._pending_quotes: dict[str, asyncio.Task] = {}
+
+    async def orchestrate(
+        self,
+        session: dict[str, Any],
+        dry_run: bool = False,
+        page_id: str | None = None,
+        account_id: str | None = None,
+        actor: str = "two_stage_orchestrator",
+    ) -> dict[str, Any]:
+        session_start = perf_counter()
+        session_id = str(session.get("session_id", ""))
+        msg = str(session.get("last_message", ""))
+        item_title = str(session.get("item_title", ""))
+
+        is_quote_request = self.message_service._is_quote_request(msg)
+
+        if not is_quote_request:
+            return await self.message_service._process_single_stage(
+                session=session,
+                dry_run=dry_run,
+                page_id=page_id,
+                account_id=account_id,
+                actor=actor,
+            )
+
+        rule_start = perf_counter()
+        request, missing = self.message_service._build_quote_request(msg)
+        rule_latency_ms = int((perf_counter() - rule_start) * 1000)
+
+        if missing:
+            fields = "、".join([self.message_service.quote_missing_prompts[f] for f in missing])
+            prompt = self.message_service.quote_missing_template.format(fields=fields)
+            return await self.message_service._send_and_record(
+                session=session,
+                reply_text=prompt,
+                quote_meta={
+                    "is_quote": True,
+                    "quote_missing_fields": missing,
+                    "quote_success": False,
+                    "quote_fallback": False,
+                    "rule_latency_ms": rule_latency_ms,
+                },
+                dry_run=dry_run,
+                page_id=page_id,
+                account_id=account_id,
+                actor=actor,
+                session_start=session_start,
+            )
+
+        quick_ack = FirstReplySLA.select_quick_ack()
+        first_reply_start = perf_counter()
+
+        first_result = await self.message_service._send_and_record(
+            session=session,
+            reply_text=quick_ack,
+            quote_meta={
+                "is_quote": True,
+                "quote_stage": "quick_ack",
+                "quote_success": False,
+                "rule_latency_ms": rule_latency_ms,
+            },
+            dry_run=dry_run,
+            page_id=page_id,
+            account_id=account_id,
+            actor=actor,
+            session_start=session_start,
+        )
+
+        first_reply_latency_ms = int((perf_counter() - first_reply_start) * 1000)
+
+        if not dry_run and first_result.get("sent"):
+            asyncio.create_task(
+                self._send_quote_followup(
+                    session=session,
+                    request=request,
+                    page_id=page_id,
+                    account_id=account_id,
+                    actor=actor,
+                    first_reply_latency_ms=first_reply_latency_ms,
+                )
+            )
+
+        first_result["two_stage"] = True
+        first_result["first_reply_latency_ms"] = first_reply_latency_ms
+        return first_result
+
+    async def _send_quote_followup(
+        self,
+        session: dict[str, Any],
+        request: QuoteRequest,
+        page_id: str | None,
+        account_id: str | None,
+        actor: str,
+        first_reply_latency_ms: int,
+    ) -> dict[str, Any]:
+        session_id = str(session.get("session_id", ""))
+        quote_start = perf_counter()
+
+        try:
+            result = await self.message_service.quote_engine.get_quote(request)
+            quote_latency_ms = int((perf_counter() - quote_start) * 1000)
+            reply_text = result.compose_reply(
+                validity_minutes=int(self.message_service.quote_config.get("validity_minutes", 30))
+            )
+            reply_text = self.message_service._sanitize_reply(reply_text)
+
+            sent = await self.message_service.reply_to_session(session_id, reply_text, page_id=page_id)
+
+            return {
+                "session_id": session_id,
+                "quote_stage": "followup_quote",
+                "is_quote": True,
+                "quote_success": True,
+                "quote_fallback": bool(result.fallback_used),
+                "quote_latency_ms": quote_latency_ms,
+                "first_reply_latency_ms": first_reply_latency_ms,
+                "total_latency_ms": first_reply_latency_ms + quote_latency_ms,
+                "sent": sent,
+            }
+        except QuoteProviderError as exc:
+            self.logger.warning(f"Quote followup failed for {session_id}: {exc}")
+            fallback_reply = self.message_service.quote_failed_template
+            sent = await self.message_service.reply_to_session(session_id, fallback_reply, page_id=page_id)
+            return {
+                "session_id": session_id,
+                "quote_stage": "followup_failed",
+                "is_quote": True,
+                "quote_success": False,
+                "quote_fallback": True,
+                "error": str(exc),
+                "sent": sent,
+            }
 
 
 class MessagesService:
@@ -130,6 +291,8 @@ class MessagesService:
         self.safe_fallback_reply = "建议您全程在闲鱼站内交易沟通，我这边可继续为您提供合规报价与服务说明。"
 
         self.selectors = MessageSelectors()
+        self.two_stage_orchestrator = TwoStageReplyOrchestrator(self)
+        self.two_stage_enabled = bool(self.config.get("two_stage_enabled", True))
 
     def _random_delay(self, min_factor: float = 1.0, max_factor: float = 1.0) -> float:
         min_delay = self.delay_range[0] * min_factor
@@ -481,12 +644,63 @@ class MessagesService:
         actor: str = "messages_service",
     ) -> dict[str, Any]:
         """处理单个会话（供批处理与 worker 复用）。"""
+        if self.two_stage_enabled and self._is_quote_request(str(session.get("last_message", ""))):
+            return await self.two_stage_orchestrator.orchestrate(
+                session=session,
+                dry_run=dry_run,
+                page_id=page_id,
+                account_id=account_id,
+                actor=actor,
+            )
+        return await self._process_single_stage(
+            session=session,
+            dry_run=dry_run,
+            page_id=page_id,
+            account_id=account_id,
+            actor=actor,
+        )
+
+    async def _process_single_stage(
+        self,
+        session: dict[str, Any],
+        dry_run: bool = False,
+        page_id: str | None = None,
+        account_id: str | None = None,
+        actor: str = "messages_service",
+    ) -> dict[str, Any]:
+        """单阶段回复处理（兼容旧逻辑）。"""
         session_start = perf_counter()
         session_id = str(session.get("session_id", ""))
         msg = str(session.get("last_message", ""))
         item_title = str(session.get("item_title", ""))
 
         reply_text, quote_meta = await self._generate_reply_with_quote(msg, item_title=item_title)
+        return await self._send_and_record(
+            session=session,
+            reply_text=reply_text,
+            quote_meta=quote_meta,
+            dry_run=dry_run,
+            page_id=page_id,
+            account_id=account_id,
+            actor=actor,
+            session_start=session_start,
+        )
+
+    async def _send_and_record(
+        self,
+        session: dict[str, Any],
+        reply_text: str,
+        quote_meta: dict[str, Any],
+        dry_run: bool,
+        page_id: str | None,
+        account_id: str | None,
+        actor: str,
+        session_start: float,
+    ) -> dict[str, Any]:
+        """发送回复并记录结果。"""
+        session_id = str(session.get("session_id", ""))
+        msg = str(session.get("last_message", ""))
+
         decision = self.compliance_center.evaluate_before_send(
             reply_text,
             actor=actor,
@@ -498,7 +712,6 @@ class MessagesService:
         sent = False
         blocked_by_policy = bool(decision.blocked)
         if blocked_by_policy:
-            sent = False
             reply_text = self.safe_fallback_reply
         elif dry_run:
             sent = True

@@ -17,6 +17,8 @@
     python -m src.cli accounts --action list
     python -m src.cli accounts --action health --id account_1
     python -m src.cli messages --action auto-reply --limit 20 --dry-run
+    python -m src.cli doctor
+    python -m src.cli followup --action check --session-id s1
 """
 
 import argparse
@@ -28,6 +30,88 @@ from typing import Any
 
 def _json_out(data: Any) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    from src.core.startup_checks import generate_doctor_report, print_startup_report, run_all_checks
+
+    if args.json:
+        report = generate_doctor_report()
+        _json_out(report)
+    else:
+        results = run_all_checks(skip_browser=args.skip_browser, include_docker=not args.skip_docker)
+        passed = print_startup_report(results)
+        if not passed:
+            sys.exit(1)
+
+
+async def cmd_followup(args: argparse.Namespace) -> None:
+    from src.modules.followup.service import FollowUpEngine, FollowUpPolicy
+
+    policy = FollowUpPolicy(
+        max_touches_per_day=args.max_touches or 2,
+        min_interval_hours=args.min_interval or 4.0,
+    )
+    engine = FollowUpEngine(policy=policy, db_path=args.db_path or "data/followup.db")
+    action = args.action
+
+    if action == "check":
+        if not args.session_id:
+            _json_out({"error": "Specify --session-id"})
+            return
+        eligible, reason = engine.check_eligibility(
+            session_id=args.session_id,
+            account_id=args.account_id,
+            last_read_at=args.last_read_at,
+            last_reply_at=args.last_reply_at,
+        )
+        _json_out({"session_id": args.session_id, "eligible": eligible, "reason": reason})
+        return
+
+    if action == "process":
+        if not args.session_id:
+            _json_out({"error": "Specify --session-id"})
+            return
+        result = engine.process_session(
+            session_id=args.session_id,
+            account_id=args.account_id,
+            last_read_at=args.last_read_at,
+            last_reply_at=args.last_reply_at,
+            dry_run=bool(args.dry_run),
+        )
+        _json_out(result)
+        return
+
+    if action == "dnd-add":
+        if not args.session_id:
+            _json_out({"error": "Specify --session-id"})
+            return
+        engine.add_dnd(args.session_id, reason=args.reason or "user_reject")
+        _json_out({"session_id": args.session_id, "added_to_dnd": True})
+        return
+
+    if action == "dnd-remove":
+        if not args.session_id:
+            _json_out({"error": "Specify --session-id"})
+            return
+        removed = engine.remove_dnd(args.session_id)
+        _json_out({"session_id": args.session_id, "removed_from_dnd": removed})
+        return
+
+    if action == "audit":
+        events = engine.get_audit_log(
+            session_id=args.session_id,
+            account_id=args.account_id,
+            limit=args.limit or 50,
+        )
+        _json_out({"total": len(events), "events": events})
+        return
+
+    if action == "stats":
+        _json_out(engine.get_stats())
+        return
+
+    _json_out({"error": f"Unknown followup action: {action}"})
 
 
 async def cmd_publish(args: argparse.Namespace) -> None:
@@ -667,6 +751,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-stage", default="inquiry", help="转化起始阶段")
     p.add_argument("--to-stage", default="ordered", help="转化目标阶段")
 
+    # doctor
+    p = sub.add_parser("doctor", help="环境诊断")
+    p.add_argument("--json", action="store_true", help="输出 JSON 格式")
+    p.add_argument("--skip-browser", action="store_true", help="跳过浏览器检查")
+    p.add_argument("--skip-docker", action="store_true", help="跳过 Docker 检查")
+
+    # followup
+    p = sub.add_parser("followup", help="跟进引擎")
+    p.add_argument(
+        "--action",
+        required=True,
+        choices=["check", "process", "dnd-add", "dnd-remove", "audit", "stats"],
+    )
+    p.add_argument("--session-id", default=None, help="会话ID")
+    p.add_argument("--account-id", default=None, help="账号ID")
+    p.add_argument("--db-path", default="data/followup.db", help="跟进数据库路径")
+    p.add_argument("--dry-run", action="store_true", help="仅模拟")
+    p.add_argument("--max-touches", type=int, default=2, help="每日最大触达次数")
+    p.add_argument("--min-interval", type=float, default=4.0, help="最小间隔（小时）")
+    p.add_argument("--last-read-at", type=int, default=None, help="最后已读时间戳")
+    p.add_argument("--last-reply-at", type=int, default=None, help="最后回复时间戳")
+    p.add_argument("--reason", default=None, help="DND 原因")
+    p.add_argument("--limit", type=int, default=50, help="审计日志数量")
+
     return parser
 
 
@@ -692,6 +800,8 @@ def main() -> None:
         "ai": cmd_ai,
         "quote": cmd_quote,
         "growth": cmd_growth,
+        "doctor": cmd_doctor,
+        "followup": cmd_followup,
     }
 
     handler = dispatch.get(args.command)
@@ -700,7 +810,10 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        asyncio.run(handler(args))
+        if asyncio.iscoroutinefunction(handler):
+            asyncio.run(handler(args))
+        else:
+            handler(args)
     except KeyboardInterrupt:
         pass
     except Exception as e:
