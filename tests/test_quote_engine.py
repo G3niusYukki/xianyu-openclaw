@@ -87,12 +87,14 @@ async def test_quote_engine_circuit_breaker_opens_after_failures() -> None:
     assert second.snapshot is not None
     assert "circuit_open" in second.snapshot.fallback_reason or "remote_circuit_open"
     assert second.snapshot.provider_chain == ["hot_cache_miss", "cost_table"]
- 
-     engine = AutoQuoteEngine({
-         "enabled": True,
-         "mode": "hybrid",
-         "providers": {"remote": {"enabled": True, "failure_rate": 1.0}},
-         "circuit_fail_threshold": 1,
-         "circuit_open_seconds": 30,
-         "analytics_log_enabled": False,
-     })
+
+    engine = AutoQuoteEngine(
+        {
+            "enabled": True,
+            "mode": "hybrid",
+            "providers": {"remote": {"enabled": True, "failure_rate": 1.0}},
+            "circuit_fail_threshold": 1,
+            "circuit_open_seconds": 30,
+            "analytics_log_enabled": False,
+        }
+    )
