@@ -111,6 +111,7 @@ pip install -r requirements.txt
 python -m src.cli messages --action auto-workflow --limit 20 --dry-run
 python -m src.cli messages --action run-worker --limit 20 --interval-seconds 15
 python -m src.cli messages --action workflow-status
+python -m src.cli messages --action workflow-transition --session-id s1 --stage ORDERED --force-state
 ```
 
 Windows 可用批处理脚本：
@@ -120,6 +121,7 @@ scripts\windows\setup_windows.bat
 scripts\windows\auto_workflow.bat 20 --dry-run
 scripts\windows\run_worker.bat 20 15
 scripts\windows\workflow_status.bat
+scripts\windows\workflow_transition.bat s1 ORDERED --force-state
 scripts\windows\dashboard.bat 8091
 ```
 
@@ -255,6 +257,9 @@ ai:
     optimize_title: true
     seo_keywords: true
   read_no_reply_followup_enabled: false
+  fulfillment_confirm_enabled: true
+  order_intent_keywords: ["下单", "已下单", "拍下", "已拍", "付款", "已付款"]
+  fulfillment_ack_template: "收到你的订单，我这边开始处理，结果会优先在闲鱼聊天内同步，请耐心等我一下。"
   read_no_reply_min_elapsed_seconds: 300
   read_no_reply_min_interval_seconds: 1800
   read_no_reply_max_per_session: 1

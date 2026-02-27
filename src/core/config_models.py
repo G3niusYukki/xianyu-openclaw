@@ -167,6 +167,12 @@ class MessagesConfig(BaseModel):
     read_no_reply_max_per_session: int = Field(default=1, ge=1, le=5, description="单会话最多跟进次数")
     read_no_reply_templates: list[str] = Field(default_factory=list, description="已读未回跟进话术模板")
     read_no_reply_stop_keywords: list[str] = Field(default_factory=list, description="触发停发的关键词")
+    fulfillment_confirm_enabled: bool = Field(default=True, description="是否启用下单/付款履约确认")
+    order_intent_keywords: list[str] = Field(default_factory=list, description="订单确认意图关键词")
+    fulfillment_ack_template: str = Field(
+        default="收到你的订单，我这边开始处理，结果会优先在闲鱼聊天内同步，请耐心等我一下。",
+        description="履约确认回复模板",
+    )
     followup_state_path: str = Field(
         default="data/messages_followup_state.json",
         description="会话跟进状态存储文件",

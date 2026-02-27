@@ -20,6 +20,8 @@
     python -m src.cli messages --action auto-followup --limit 20 --dry-run
     python -m src.cli messages --action auto-workflow --limit 20 --dry-run
     python -m src.cli messages --action run-worker --limit 20 --interval-seconds 15
+    python -m src.cli messages --action workflow-status
+    python -m src.cli messages --action workflow-transition --session-id s1 --stage ORDERED --force-state
 """
 
 import argparse
@@ -238,6 +240,19 @@ async def cmd_messages(args: argparse.Namespace) -> None:
             _json_out(worker.get_runtime_status())
             return
 
+        if action == "workflow-transition":
+            if not args.session_id or not args.stage:
+                _json_out({"error": "Specify --session-id and --stage"})
+                return
+            result = service.transition_workflow_stage(
+                args.session_id,
+                args.stage,
+                force=bool(args.force_state),
+                metadata={"event": "manual_cli_transition"},
+            )
+            _json_out(result)
+            return
+
         _json_out({"error": f"Unknown messages action: {action}"})
     finally:
         await client.disconnect()
@@ -300,11 +315,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--action",
         required=True,
-        choices=["list-unread", "reply", "auto-reply", "auto-followup", "auto-workflow", "run-worker", "workflow-status"],
+        choices=[
+            "list-unread",
+            "reply",
+            "auto-reply",
+            "auto-followup",
+            "auto-workflow",
+            "run-worker",
+            "workflow-status",
+            "workflow-transition",
+        ],
     )
     p.add_argument("--limit", type=int, default=20, help="最多处理会话数")
     p.add_argument("--session-id", help="会话 ID（reply 时必填）")
     p.add_argument("--text", help="回复内容（reply 时必填）")
+    p.add_argument("--stage", help="状态机目标状态（workflow-transition 时必填）")
+    p.add_argument("--force-state", action="store_true", help="强制状态迁移（workflow-transition）")
     p.add_argument("--dry-run", action="store_true", help="仅生成回复，不真正发送")
     p.add_argument("--interval-seconds", type=float, default=None, help="worker 轮询间隔（仅 run-worker）")
     p.add_argument("--max-cycles", type=int, default=None, help="worker 最大循环次数（仅 run-worker）")

@@ -130,6 +130,10 @@ messages:
     - "看到你已读啦，我先把这个方案给你留着。需要我按你的重量和地区再精确算一次吗？"
     - "如果你还在比较寄件方案，我可以按你的预算再给一个更省的选项，需要的话直接回我“继续报价”就行。"
   read_no_reply_stop_keywords: ["不用", "不需要", "先不", "别发了", "勿扰", "拉黑", "举报"]
+  # 下单/付款后的履约确认
+  fulfillment_confirm_enabled: true
+  order_intent_keywords: ["下单", "已下单", "拍下", "已拍", "拍了", "已拍下", "付款", "已付款", "付了"]
+  fulfillment_ack_template: "收到你的订单，我这边开始处理，结果会优先在闲鱼聊天内同步，请耐心等我一下。"
   followup_state_path: "data/messages_followup_state.json"
   followup_state_max_sessions: 5000
   # 会话状态机（NEW/REPLIED/QUOTED/FOLLOWED/ORDERED/CLOSED）

@@ -16,6 +16,7 @@ from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
 from src.modules.messages.followup_policy import ReadNoReplyFollowupPolicy
 from src.modules.messages.followup_store import FollowupStateStore
+from src.modules.messages.fulfillment import FulfillmentHelper
 from src.modules.messages.reply_engine import ReplyStrategyEngine
 from src.modules.messages.workflow_state import WorkflowStage, WorkflowStateStore
 from src.modules.quote.service import QuoteService
@@ -122,6 +123,7 @@ class MessagesService:
         )
 
         self.quote_service = QuoteService()
+        self.fulfillment_helper = FulfillmentHelper(self.config)
         self.followup_policy = ReadNoReplyFollowupPolicy(self.config)
         self.followup_store = FollowupStateStore(
             path=self.followup_state_path,
@@ -434,20 +436,25 @@ class MessagesService:
                 session_id = str(session.get("session_id", ""))
                 msg = str(session.get("last_message", ""))
                 item_title = str(session.get("item_title", ""))
+                is_order_intent = self.fulfillment_helper.is_order_intent(msg)
 
                 if not dry_run and session_id:
                     self.followup_store.record_inbound(session_id, msg)
                     if self.workflow_state_store is not None:
+                        stage = WorkflowStage.ORDERED if is_order_intent else WorkflowStage.NEW
                         self.workflow_state_store.transition(
                             session_id,
-                            WorkflowStage.NEW,
-                            metadata={"event": "inbound_message", "last_message": msg},
+                            stage,
+                            metadata={"event": "inbound_message", "last_message": msg, "is_order_intent": is_order_intent},
+                            force=bool(is_order_intent),
                         )
 
                 parsed_quote = self.quote_service.parse_quote_request(msg, item_title=item_title)
-                is_quote_intent = bool(self.followup_quote_enabled and parsed_quote.is_quote_intent)
+                is_quote_intent = bool(self.followup_quote_enabled and parsed_quote.is_quote_intent and not is_order_intent)
 
-                if is_quote_intent:
+                if is_order_intent:
+                    first_reply_text = self.fulfillment_helper.build_ack_reply(item_title=item_title)
+                elif is_quote_intent:
                     first_reply_text = self.quote_service.build_first_reply(parsed_quote)
                 else:
                     first_reply_text = self.generate_reply(msg, item_title=item_title)
@@ -475,10 +482,12 @@ class MessagesService:
                     if not dry_run and session_id:
                         self.followup_store.record_first_reply(session_id, first_reply_text, item_title=item_title)
                         if self.workflow_state_store is not None:
+                            target_stage = WorkflowStage.ORDERED if is_order_intent else WorkflowStage.REPLIED
                             self.workflow_state_store.transition(
                                 session_id,
-                                WorkflowStage.REPLIED,
-                                metadata={"event": "first_reply_sent"},
+                                target_stage,
+                                metadata={"event": "first_reply_sent", "is_order_intent": is_order_intent},
+                                force=bool(is_order_intent),
                             )
 
                 quote_reply = ""
@@ -530,6 +539,7 @@ class MessagesService:
                             first_reply_latency is not None and first_reply_latency <= self.first_reply_target_seconds
                         ),
                         "is_quote_intent": is_quote_intent,
+                        "is_order_intent": is_order_intent,
                         "quote_reply": quote_reply,
                         "quote_source": quote_source,
                         "quote_sent": quote_sent,
@@ -684,3 +694,26 @@ class MessagesService:
                 "read_no_reply_followup_success": int(second_stage.get("success", 0)),
             },
         }
+
+    def transition_workflow_stage(
+        self,
+        session_id: str,
+        stage: str,
+        *,
+        force: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """手动推进/修正会话工作流状态。"""
+        sid = str(session_id or "").strip()
+        if not sid:
+            return {"success": False, "reason": "missing_session_id", "record": {}}
+        if self.workflow_state_store is None:
+            return {"success": False, "reason": "workflow_state_disabled", "record": {}}
+
+        ok, reason, record = self.workflow_state_store.transition(
+            sid,
+            stage,
+            metadata=metadata or {"event": "manual_transition"},
+            force=force,
+        )
+        return {"success": bool(ok), "reason": reason, "record": record}
