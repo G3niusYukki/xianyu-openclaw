@@ -346,6 +346,7 @@ ai:
 
 - 工具只支持闲鱼站内合规交易，不应发布违法、侵权、仿冒或导流到站外的信息。
 - 默认启用最小合规护栏：内容禁词拦截、发布频率限制、批量擦亮冷却、审计日志记录。
+- 消息外发默认启用禁词与频控护栏，命中拦截会写入 `operation_logs`（`MESSAGE_COMPLIANCE_BLOCK`）用于审计追踪。
 - 规则文件为 `config/rules.yaml`，支持 `mode: block|warn`。`block` 会拒绝执行，`warn` 仅告警并继续执行。
 - 命中规则会记录审计事件：`COMPLIANCE_BLOCK` 或 `COMPLIANCE_WARN`，并支持规则文件自动重载。
 

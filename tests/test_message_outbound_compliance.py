@@ -1,6 +1,7 @@
 """消息外发合规策略测试。"""
 
 import pytest
+from unittest.mock import AsyncMock, Mock
 
 from src.modules.messages.outbound_compliance import OutboundCompliancePolicy
 from src.modules.messages.service import MessagesService
@@ -77,3 +78,27 @@ async def test_messages_reply_records_outbound_compliance_state(mock_controller,
     assert state.get("compliance_last_decision") == "allowed"
     assert isinstance(state.get("compliance_outbound_timestamps"), list)
     assert len(state.get("compliance_outbound_timestamps", [])) == 1
+
+
+@pytest.mark.asyncio
+async def test_messages_reply_blocked_writes_compliance_audit(mock_controller, tmp_path) -> None:
+    service = MessagesService(
+        controller=mock_controller,
+        config={
+            "followup_state_path": str(tmp_path / "followup_state.json"),
+            "outbound_compliance_enabled": True,
+            "outbound_block_keywords": ["微信"],
+        },
+    )
+    analytics = Mock()
+    analytics.log_operation = AsyncMock(return_value=1)
+    service.analytics = analytics
+
+    sent = await service.reply_to_session("s-block-audit", "支持微信联系")
+
+    assert sent is False
+    analytics.log_operation.assert_awaited_once()
+    kwargs = analytics.log_operation.await_args.kwargs
+    assert kwargs["operation_type"] == "MESSAGE_COMPLIANCE_BLOCK"
+    assert kwargs["status"] == "blocked"
+    assert kwargs["error_message"] == "blocked_keyword"

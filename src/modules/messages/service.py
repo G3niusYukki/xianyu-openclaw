@@ -127,6 +127,7 @@ class MessagesService:
         self.fulfillment_helper = FulfillmentHelper(self.config)
         self.followup_policy = ReadNoReplyFollowupPolicy(self.config)
         self.outbound_compliance_policy = OutboundCompliancePolicy(self.config)
+        self.analytics = None
         self.followup_store = FollowupStateStore(
             path=self.followup_state_path,
             max_sessions=self.followup_state_max_sessions,
@@ -413,6 +414,7 @@ class MessagesService:
             if session_key:
                 updates = self.outbound_compliance_policy.build_state_updates_on_blocked(reason, state)
                 self.followup_store.upsert(session_key, updates)
+            await self._audit_outbound_compliance_block(session_key, reason, reply_text)
             self.logger.warning(f"Reply blocked by outbound compliance: session={session_key}, reason={reason}")
             return False
 
@@ -431,6 +433,32 @@ class MessagesService:
         finally:
             if own_page and close_page and page_id:
                 await self.controller.close_page(page_id)
+
+    async def _audit_outbound_compliance_block(self, session_id: str, reason: str, reply_text: str) -> None:
+        """记录消息外发合规拦截事件到运营日志。"""
+        try:
+            analytics = self.analytics
+            if analytics is None:
+                from src.modules.analytics.service import AnalyticsService
+
+                analytics = AnalyticsService()
+                self.analytics = analytics
+
+            await analytics.log_operation(
+                operation_type="MESSAGE_COMPLIANCE_BLOCK",
+                product_id=None,
+                account_id=None,
+                details={
+                    "event": "MESSAGE_COMPLIANCE_BLOCK",
+                    "session_id": session_id,
+                    "reason": reason,
+                    "reply_text_preview": str(reply_text or "")[:120],
+                },
+                status="blocked",
+                error_message=reason,
+            )
+        except Exception as exc:
+            self.logger.warning(f"Failed to write outbound compliance audit log: {exc}")
 
     async def auto_reply_unread(self, limit: int = 20, dry_run: bool = False) -> dict[str, Any]:
         """自动回复未读消息。"""
