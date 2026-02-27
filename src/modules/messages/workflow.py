@@ -485,12 +485,8 @@ class WorkflowStore:
 
     def get_workflow_summary(self) -> dict[str, Any]:
         with self._connect() as conn:
-            job_rows = conn.execute(
-                "SELECT status, COUNT(*) AS c FROM workflow_jobs GROUP BY status"
-            ).fetchall()
-            state_rows = conn.execute(
-                "SELECT state, COUNT(*) AS c FROM session_tasks GROUP BY state"
-            ).fetchall()
+            job_rows = conn.execute("SELECT status, COUNT(*) AS c FROM workflow_jobs GROUP BY status").fetchall()
+            state_rows = conn.execute("SELECT state, COUNT(*) AS c FROM session_tasks GROUP BY state").fetchall()
             manual = conn.execute("SELECT COUNT(*) AS c FROM session_tasks WHERE manual_takeover=1").fetchone()
 
         jobs = {str(r["status"]): int(r["c"]) for r in job_rows}
