@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 import math
+from pathlib import Path
 import re
 from typing import Any
 
@@ -77,11 +78,14 @@ class QuoteService:
     def get_cost_table_stats(self, max_files: int = 20) -> dict[str, Any]:
         files = self.cost_table_repo._collect_files()
         self.cost_table_repo._reload_if_needed()
+        table_dir = str(self.cost_table_repo.table_dir)
+        table_path = Path(table_dir)
 
         couriers = Counter(normalize_courier_name(item.courier) for item in self.cost_table_repo._records)
         top_couriers = sorted(couriers.items(), key=lambda item: (-item[1], item[0]))
         return {
-            "table_dir": str(self.cost_table_repo.table_dir),
+            "table_dir": table_dir,
+            "exists": table_path.exists(),
             "file_count": len(files),
             "files": [path.name for path in files[:max(1, max_files)]],
             "record_count": len(self.cost_table_repo._records),

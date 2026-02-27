@@ -23,6 +23,7 @@
     python -m src.cli messages --action workflow-status
     python -m src.cli messages --action workflow-transition --session-id s1 --stage ORDERED --force-state
     python -m src.cli quote --action health
+    python -m src.cli quote --action doctor
     python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
     python -m src.cli quote --action setup --mode cost_table_plus_markup --origin-city 安徽 --cost-table-dir data/quote_costs
 """
@@ -284,6 +285,60 @@ async def cmd_quote(args: argparse.Namespace) -> None:
         )
         return
 
+    if action == "doctor":
+        mode = str(service.config.get("mode", "rule_only"))
+        stats = service.get_cost_table_stats(max_files=30)
+        api_url = str(service.config.get("cost_api_url", "")).strip()
+        checks: list[dict[str, Any]] = []
+
+        if mode in {"cost_table_plus_markup", "api_cost_plus_markup"}:
+            checks.append(
+                {
+                    "name": "cost_table_files",
+                    "ok": bool(stats.get("exists") and int(stats.get("file_count", 0)) > 0),
+                    "message": f"检测到成本表文件数: {int(stats.get('file_count', 0))}",
+                }
+            )
+
+        if mode == "api_cost_plus_markup":
+            checks.append(
+                {
+                    "name": "cost_api_url",
+                    "ok": bool(api_url),
+                    "message": "已配置 cost_api_url" if api_url else "未配置 cost_api_url",
+                }
+            )
+
+        if mode == "rule_only":
+            checks.append(
+                {
+                    "name": "mode_warning",
+                    "ok": True,
+                    "message": "当前是 rule_only，适合演示，不建议用于真实成本报价。",
+                }
+            )
+
+        ok_count = sum(1 for item in checks if bool(item.get("ok")))
+        overall_ok = ok_count == len(checks) if checks else True
+        suggestions = []
+        if mode in {"cost_table_plus_markup", "api_cost_plus_markup"} and int(stats.get("file_count", 0)) == 0:
+            suggestions.append("请先把成本价表放到 quote.cost_table_dir，并执行 quote setup。")
+        if mode == "api_cost_plus_markup" and not api_url:
+            suggestions.append("请设置 quote.cost_api_url，或改用 cost_table_plus_markup。")
+        if not suggestions:
+            suggestions.append("当前报价配置可用，可直接执行 quote preview 做抽样验证。")
+
+        _json_out(
+            {
+                "mode": mode,
+                "overall_ok": overall_ok,
+                "checks": checks,
+                "suggestions": suggestions,
+                "cost_table": stats,
+            }
+        )
+        return
+
     if action == "candidates":
         if not args.origin_city or not args.destination_city:
             _json_out({"error": "Specify --origin-city and --destination-city"})
@@ -450,7 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # quote
     p = sub.add_parser("quote", help="自动报价诊断与预览")
-    p.add_argument("--action", required=True, choices=["health", "preview", "candidates", "setup"])
+    p.add_argument("--action", required=True, choices=["health", "doctor", "preview", "candidates", "setup"])
     p.add_argument("--message", help="买家消息文本（preview 时必填）")
     p.add_argument("--item-title", default="", help="商品标题（preview 可选）")
     p.add_argument("--origin-city", help="始发地（candidates 时必填）")

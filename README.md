@@ -113,6 +113,7 @@ python -m src.cli messages --action run-worker --limit 20 --interval-seconds 15
 python -m src.cli messages --action workflow-status
 python -m src.cli messages --action workflow-transition --session-id s1 --stage ORDERED --force-state
 python -m src.cli quote --action health
+python -m src.cli quote --action doctor
 python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
 python -m src.cli quote --action setup --mode cost_table_plus_markup --origin-city 安徽 --cost-table-dir data/quote_costs
 ```
@@ -126,6 +127,7 @@ scripts\windows\run_worker.bat 20 15
 scripts\windows\workflow_status.bat
 scripts\windows\workflow_transition.bat s1 ORDERED --force-state
 scripts\windows\quote_health.bat
+scripts\windows\quote_doctor.bat
 scripts\windows\quote_preview.bat "寄到上海 2kg 圆通 报价"
 scripts\windows\quote_setup_local.bat 安徽 data/quote_costs
 scripts\windows\quote_setup_api.bat https://your-cost-api.example.com/v1/quote-cost 安徽 data/quote_costs
@@ -256,6 +258,7 @@ python -m src.cli messages  --action auto-workflow --limit 20 --dry-run
 python -m src.cli messages  --action run-worker --limit 20 --interval-seconds 15
 python -m src.cli messages  --action workflow-status
 python -m src.cli quote --action health
+python -m src.cli quote --action doctor
 python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
 python -m src.cli quote --action setup --mode cost_table_plus_markup --origin-city 安徽 --cost-table-dir data/quote_costs
 python -m src.dashboard_server --port 8091
