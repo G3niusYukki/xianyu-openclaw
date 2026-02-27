@@ -10,6 +10,7 @@ import random
 import time
 from typing import Any
 
+from src.core.compliance import get_compliance_guard
 from src.core.config import get_config
 from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
@@ -75,6 +76,7 @@ class OperationsService:
         self.config = config or {}
         self.logger = get_logger()
         self.analytics = analytics
+        self.compliance = get_compliance_guard()
 
         browser_config = get_config().browser
         self.delay_range = (
@@ -153,36 +155,66 @@ class OperationsService:
             raise BrowserError("Browser controller is not initialized. Cannot batch polish.")
 
         try:
+            rate_check = await self.compliance.evaluate_batch_polish_rate("batch_polish:global")
+            if rate_check["blocked"]:
+                summary = {
+                    "success": 0,
+                    "failed": 0,
+                    "total": 0,
+                    "action": "batch_polish",
+                    "blocked": True,
+                    "message": rate_check["message"],
+                    "details": [],
+                }
+                if self.analytics:
+                    await self.analytics.log_operation(
+                        "COMPLIANCE_BLOCK",
+                        None,
+                        details={"event": "BATCH_POLISH_RATE_LIMIT", **summary},
+                        status="blocked",
+                    )
+                return summary
+            if rate_check["warn"] and self.analytics:
+                await self.analytics.log_operation(
+                    "COMPLIANCE_WARN",
+                    None,
+                    details={
+                        "event": "BATCH_POLISH_RATE_LIMIT_WARN",
+                        "message": rate_check["message"],
+                        "action": "batch_polish",
+                    },
+                    status="warning",
+                )
+
             page_id = await self.controller.new_page()
             await self.controller.navigate(page_id, self.selectors.MY_SELLING)
             await asyncio.sleep(self._random_delay(1.5, 2.5))
 
             results = []
-            polished = set()
 
             if not product_ids:
                 items = await self.controller.find_elements(page_id, self.selectors.SELLING_ITEM)
-                for i, _item in enumerate(items[:max_items]):
-                    if i >= max_items:
-                        break
+                product_ids = await self._extract_product_ids(page_id, limit=min(len(items), max_items))
+            else:
+                product_ids = product_ids[:max_items]
 
+            for idx, product_id in enumerate(product_ids):
+                await asyncio.sleep(self._random_delay())
+
+                success = await self.controller.click(page_id, self.selectors.POLISH_BUTTON)
+                confirmed = False
+                if success:
                     await asyncio.sleep(self._random_delay())
+                    confirmed = await self.controller.click(page_id, self.selectors.POLISH_CONFIRM)
+                    await asyncio.sleep(self._random_delay(2, 4))
 
-                    success = await self.controller.click(page_id, self.selectors.POLISH_BUTTON)
-                    if success:
-                        await asyncio.sleep(self._random_delay())
-                        confirm = await self.controller.click(page_id, self.selectors.POLISH_CONFIRM)
-
-                        if confirm:
-                            product_id = f"item_{random.randint(100000, 999999)}"
-                            results.append({"success": True, "product_id": product_id, "action": "polish"})
-                            polished.add(product_id)
-
-                        await asyncio.sleep(self._random_delay(2, 4))
+                results.append({"success": bool(success and confirmed), "product_id": product_id, "action": "polish"})
+                if idx >= max_items - 1:
+                    break
 
             summary = {
-                "success": len(results),
-                "failed": len(polished) - len(results) if len(polished) > len(results) else 0,
+                "success": sum(1 for r in results if r["success"]),
+                "failed": sum(1 for r in results if not r["success"]),
                 "total": len(results),
                 "action": "batch_polish",
                 "details": results,
@@ -199,6 +231,30 @@ class OperationsService:
         except Exception as e:
             self.logger.error(f"Batch polish failed: {e}")
             return self._error_result("batch_polish", None, str(e))
+
+    async def _extract_product_ids(self, page_id: str, limit: int = 50) -> list[str]:
+        """从当前页面提取真实商品ID，失败时回退为占位ID"""
+        script = """
+(() => {
+  const ids = new Set();
+  const anchors = Array.from(document.querySelectorAll("a[href*='/item/']"));
+  for (const a of anchors) {
+    const href = a.getAttribute("href") || "";
+    const m = href.match(/\\/item\\/([a-zA-Z0-9_-]+)/);
+    if (m && m[1]) ids.add(m[1]);
+  }
+  const cards = Array.from(document.querySelectorAll("[data-item-id],[data-id]"));
+  for (const el of cards) {
+    const id = el.getAttribute("data-item-id") || el.getAttribute("data-id") || "";
+    if (id) ids.add(id);
+  }
+  return Array.from(ids);
+})();
+"""
+        extracted = await self.controller.execute_script(page_id, script)
+        if isinstance(extracted, list) and extracted:
+            return [str(pid) for pid in extracted[:limit]]
+        return [f"unknown_{i + 1}" for i in range(limit)]
 
     async def update_price(
         self, product_id: str, new_price: float, original_price: float | None = None

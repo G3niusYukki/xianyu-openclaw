@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-02-27
+
+### Added
+- `src/core/compliance.py` — 合规规则引擎，支持内容审查、频率限制与规则热重载
+- `config/rules.yaml` — 合规规则配置（`warn/block` 模式、发布间隔、批量冷却、禁词词表）
+- `tests/test_compliance.py`、`tests/test_service_container.py` — 合规与容器核心行为单测
+
+### Changed
+- **Compliance**: 发布/运营/内容链路接入增强合规决策，新增 `COMPLIANCE_BLOCK` / `COMPLIANCE_WARN` 审计事件
+- **Scheduler**: 擦亮/发布任务显式创建并注入 `BrowserClient`，连接失败返回结构化错误码
+- **Monitor**: 健康检查告警调用改为 `await`，并修复回调字段引用错误
+- **Analytics**: 周报统计不再依赖缺失表；`new_listings` 统计口径从分组数修正为总数
+- **Accounts**: 账号 Cookie 字段统一为 `cookie_encrypted`，读写与脱敏逻辑统一
+- **Skills/Test alignment**: 废弃 legacy `skills/xianyu_*` Python 包运行路径，测试改为校验 `SKILL.md + CLI` 契约
+- **Quality gates**: 修复并启用全量 `pytest.ini` 配置，测试与 lint 门槛可真实执行
+
+### Fixed
+- `ServiceContainer` 单例集合类型错误（`_singletons`）与 `clear()` 清理不完整问题
+- 发布流程中“分类/成色选择”空操作问题
+- 批量擦亮结果中随机伪商品 ID 与失败统计失真问题
+- 媒体格式映射大小写问题（`png/webp`）
+- 监控与错误处理中的 Python 3.14 兼容性警告（协程判断方式）
+
 ## [4.0.0] - 2026-02-23
 
 ### Added

@@ -104,7 +104,7 @@ class MediaService:
             "png": "PNG",
             "webp": "WEBP",
         }
-        return format_map.get(ext.upper(), "JPEG")
+        return format_map.get(ext.lower(), "JPEG")
 
     def add_watermark(
         self, image_path: str, output_path: str | None = None, text: str | None = None, position: str = "bottom-right"
@@ -164,7 +164,7 @@ class MediaService:
                 if output_path is None:
                     output_path = image_path
 
-                img.save(output_path, format=self._get_save_format(Path(output_path).suffix[1:]))
+                img.save(output_path, format=self._get_save_format(Path(output_path).suffix.lower()[1:]))
                 self.logger.debug(f"Added watermark to: {image_path}")
                 return output_path
 

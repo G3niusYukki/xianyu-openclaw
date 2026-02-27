@@ -1,10 +1,7 @@
+"""Deprecated legacy Python skill package.
+
+技能执行路径以 skills/*/SKILL.md + src.cli 为准，
+此包仅保留用于兼容旧引用，不再提供运行时代码。
 """
-闲鱼发布技能
-Xianyu Publish Skill
 
-发布商品到闲鱼平台
-"""
-
-from .skill import XianyuPublishSkill
-
-__all__ = ["XianyuPublishSkill"]
+__all__: list[str] = []

@@ -133,7 +133,13 @@ class AccountsService:
         """
         accounts = [acc for acc in self.accounts if not enabled_only or acc.get("enabled", True)]
         if mask_sensitive:
-            accounts = [{**acc, "cookie": self._mask_sensitive_data(acc.get("cookie", ""))} for acc in accounts]
+            masked_accounts = []
+            for acc in accounts:
+                account_copy = acc.copy()
+                cookie_val = ensure_decrypted(account_copy.pop("cookie_encrypted", ""))
+                account_copy["cookie"] = self._mask_sensitive_data(cookie_val)
+                masked_accounts.append(account_copy)
+            accounts = masked_accounts
         return accounts
 
     def get_account(self, account_id: str, mask_sensitive: bool = True) -> dict[str, Any] | None:
@@ -231,7 +237,7 @@ class AccountsService:
             {
                 "id": account_id,
                 "name": name or account_id,
-                "cookie": cookie,
+                "cookie_encrypted": ensure_encrypted(cookie),
                 "priority": priority,
                 "enabled": True,
                 "status": AccountStatus.ACTIVE,

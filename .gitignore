@@ -149,6 +149,7 @@ output/
 
 # Config files (keep examples, ignore actual)
 config/*.yaml
+!config/rules.yaml
 config/*.json
 !config/*.example.yaml
 !config/*.example.json

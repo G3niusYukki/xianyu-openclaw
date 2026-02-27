@@ -4,7 +4,7 @@
 # 应用配置
 app:
   name: "xianyu-openclaw"
-  version: "4.0.0"
+  version: "4.1.0"
   debug: false
   log_level: "INFO"
   data_dir: "data"
@@ -95,3 +95,7 @@ browser:
     min: 1
     max: 3
   upload_timeout: 60
+
+# 合规规则文件（详细规则见 config/rules.yaml）
+rules:
+  path: "config/rules.yaml"

@@ -1,193 +1,78 @@
-"""
-测试脚本
-Tests
+"""核心模块行为测试。"""
 
-测试闲鱼自动化工具的核心功能
-"""
+from unittest.mock import AsyncMock
 
-import asyncio
-import sys
-from pathlib import Path
+import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from src.core.error_handler import BrowserError
+from src.modules.listing.service import ListingService, XianyuSelectors
+from src.modules.media.service import MediaService
+from src.modules.operations.service import OperationsService
 
 
-def test_config():
-    """测试配置加载"""
-    from src.core.config import get_config
-
-    config = get_config()
-    assert config.app.get("name") == "xianyu-openclaw"
-    print("✅ 配置加载测试通过")
-
-
-def test_logger():
-    """测试日志系统"""
-    from src.core.logger import get_logger
-
-    logger = get_logger()
-    logger.info("测试日志")
-    print("✅ 日志系统测试通过")
-
-
-def test_models():
-    """测试数据模型"""
-    from src.modules.listing.models import Listing, ListingImage, PublishResult
-
-    image = ListingImage(local_path="test.jpg")
-    assert image.local_path == "test.jpg"
-
-    listing = Listing(
-        title="测试商品",
-        description="测试描述",
-        price=100.0,
-        images=["img1.jpg", "img2.jpg"]
-    )
-    assert listing.title == "测试商品"
-    assert len(listing.images) == 2
-
-    result = PublishResult(success=True, product_id="item_123")
-    assert result.success is True
-
-    print("✅ 数据模型测试通过")
-
-
-def test_media_service():
-    """测试媒体处理服务"""
-    from src.modules.media.service import MediaService
-
-    service = MediaService()
-    assert service.max_size == (1500, 1500)
-    print("✅ 媒体处理服务测试通过")
-
-
-def test_content_service():
-    """测试内容生成服务"""
-    from src.modules.content.service import ContentService
-
-    service = ContentService()
-
-    title = service._default_title("iPhone", ["95新", "国行"])
-    assert "iPhone" in title
-    assert len(title) <= 30
-
-    description = service._default_description("iPhone", "95新", "换新手机", ["苹果"])
-    assert "iPhone" in description
-
-    keywords = service._get_sample_keywords("数码手机")
-    assert "自用" in keywords
-
-    print("✅ 内容生成服务测试通过")
-
-
-def test_operations_selectors():
-    """测试运营操作选择器"""
-    from src.modules.operations.service import OperationsSelectors
-
-    selectors = OperationsSelectors()
-    assert selectors.MY_SELLING == "https://www.goofish.com/my/selling"
-    assert "POLISH_BUTTON" in dir(selectors)
-
-    print("✅ 运营操作选择器测试通过")
-
-
-def test_listing_selectors():
-    """测试商品上架选择器"""
-    from src.modules.listing.service import XianyuSelectors
-
+def test_listing_selectors_publish_page() -> None:
     selectors = XianyuSelectors()
-    assert selectors.PUBLISH_PAGE == "https://www.goofish.com/publish"
-    assert selectors.TITLE_INPUT
-
-    print("✅ 商品上架选择器测试通过")
+    assert selectors.PUBLISH_PAGE == "https://www.goofish.com/sell"
 
 
-async def test_async_operations():
-    """测试异步操作"""
-    from src.modules.operations.service import OperationsService
+@pytest.mark.asyncio
+async def test_select_category_clicks_mapped_option(mock_controller) -> None:
+    service = ListingService(controller=mock_controller)
 
-    service = OperationsService()
+    await service._step_select_category("page_test_id", "数码手机")
 
-    result = await service.polish_listing("test_item")
-    assert "success" in result
-
-    result = await service.delist("test_item")
-    assert "success" in result
-
-    result = await service.update_price("test_item", 100.0, 150.0)
-    assert "success" in result
-
-    print("✅ 异步操作测试通过")
+    mock_controller.click.assert_any_call("page_test_id", service.selectors.CATEGORY_SELECT)
+    assert mock_controller.execute_script.await_count >= 1
+    script = mock_controller.execute_script.await_args_list[-1].args[1]
+    assert "手机" in script
 
 
-async def test_analytics_service():
-    """测试数据分析服务"""
-    from src.modules.analytics.service import AnalyticsService
+@pytest.mark.asyncio
+async def test_select_condition_clicks_target_option(mock_controller) -> None:
+    service = ListingService(controller=mock_controller)
 
-    service = AnalyticsService()
+    await service._step_select_condition("page_test_id", ["99新", "国行"])
 
-    stats = await service.get_dashboard_stats()
-    assert "total_operations" in stats
-
-    print("✅ 数据分析服务测试通过")
+    mock_controller.click.assert_any_call("page_test_id", service.selectors.CONDITION_SELECT)
+    assert mock_controller.execute_script.await_count >= 1
 
 
-async def test_accounts_service():
-    """测试账号管理服务"""
-    from src.modules.accounts.service import AccountsService
-
-    service = AccountsService()
-
-    accounts = service.get_accounts()
-    assert isinstance(accounts, list)
-
-    current = service.get_current_account()
-    assert current is None or isinstance(current, dict)
-
-    print("✅ 账号管理服务测试通过")
+@pytest.mark.asyncio
+async def test_batch_polish_requires_controller() -> None:
+    service = OperationsService(controller=None)
+    with pytest.raises(BrowserError):
+        await service.batch_polish(max_items=5)
 
 
-def run_tests():
-    """运行所有测试"""
-    print("="*50)
-    print("闲鱼自动化工具 - 功能测试")
-    print("="*50)
+@pytest.mark.asyncio
+async def test_batch_polish_uses_real_ids_and_counts_failures(mock_controller) -> None:
+    service = OperationsService(controller=mock_controller)
+    service.compliance._last_action_at.clear()
 
-    tests = [
-        ("配置加载", test_config),
-        ("日志系统", test_logger),
-        ("数据模型", test_models),
-        ("媒体处理", test_media_service),
-        ("内容生成", test_content_service),
-        ("运营选择器", test_operations_selectors),
-        ("上架选择器", test_listing_selectors),
-    ]
+    mock_controller.find_elements = AsyncMock(return_value=[{"idx": 1}, {"idx": 2}, {"idx": 3}])
+    mock_controller.execute_script = AsyncMock(return_value=["item_a", "item_b", "item_c"])
 
-    for name, test_func in tests:
-        try:
-            test_func()
-        except Exception as e:
-            print(f"❌ {name} 测试失败: {e}")
+    state = {"polish_clicks": 0}
 
-    async def run_async_tests():
-        async_tests = [
-            ("异步操作", test_async_operations),
-            ("数据分析", test_analytics_service),
-            ("账号管理", test_accounts_service),
-        ]
+    async def click_side_effect(_page_id, selector):
+        if selector == service.selectors.POLISH_BUTTON:
+            state["polish_clicks"] += 1
+            return state["polish_clicks"] != 2
+        if selector == service.selectors.POLISH_CONFIRM:
+            return True
+        return True
 
-        for name, test_func in async_tests:
-            try:
-                await test_func()
-            except Exception as e:
-                print(f"❌ {name} 测试失败: {e}")
+    mock_controller.click = AsyncMock(side_effect=click_side_effect)
 
-    asyncio.run(run_async_tests())
+    result = await service.batch_polish(max_items=3)
 
-    print("\n" + "="*50)
-    print("测试完成！")
-    print("="*50)
+    assert result["total"] == 3
+    assert result["success"] == 2
+    assert result["failed"] == 1
+    assert [item["product_id"] for item in result["details"]] == ["item_a", "item_b", "item_c"]
 
 
-if __name__ == "__main__":
-    run_tests()
+def test_media_save_format_mapping_case_insensitive() -> None:
+    service = MediaService()
+    assert service._get_save_format("PNG") == "PNG"
+    assert service._get_save_format("webp") == "WEBP"

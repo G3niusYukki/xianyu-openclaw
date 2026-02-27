@@ -176,11 +176,11 @@ class Monitor:
         Args:
             callback: 回调函数
         """
-        self.alert_callbacks.append(callback)
+        self._alert_callbacks.append(callback)
 
     async def _trigger_callbacks(self, alert: Alert) -> None:
         """触发回调"""
-        for callback in self.alert_callbacks:
+        for callback in self._alert_callbacks:
             try:
                 if asyncio.iscoroutinefunction(callback):
                     await callback(alert)
@@ -436,7 +436,7 @@ class HealthChecker:
             connected = await client.connect()
 
             if not connected:
-                self.monitor.raise_alert(
+                await self.monitor.raise_alert(
                     alert_type="browser_connection",
                     title="Browser connection failed",
                     message="Cannot connect to OpenClaw browser",
@@ -446,7 +446,7 @@ class HealthChecker:
             return connected
 
         except Exception as e:
-            self.monitor.raise_alert(
+            await self.monitor.raise_alert(
                 alert_type="browser_connection",
                 title="Browser connection error",
                 message=str(e),
@@ -468,7 +468,7 @@ class HealthChecker:
                     issues.append({"account_id": acc["id"], "issue": "Invalid cookie", "severity": "high"})
 
             if issues:
-                self.monitor.raise_alert(
+                await self.monitor.raise_alert(
                     alert_type="account_status",
                     title="Account status issues detected",
                     message=f"{len(issues)} accounts have issues",

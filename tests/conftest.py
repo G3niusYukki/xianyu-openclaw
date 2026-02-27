@@ -3,28 +3,20 @@
 Test Utilities and Fixtures
 """
 
+import asyncio
 import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional
-from unittest.mock import Mock, AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, Mock
+
 import pytest
-import asyncio
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.core.config import Config, get_config
-from src.core.logger import Logger, get_logger
-from src.core.config_models import ConfigModel
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+from src.core.config import Config
+from src.core.logger import Logger
 
 
 @pytest.fixture
@@ -233,10 +225,10 @@ def config(temp_config_file):
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setenv("OPENAI_API_KEY", "test_openai_key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test_deepseek_key")
-    
+
     config = Config(str(temp_config_file))
     yield config
-    
+
     monkeypatch.undo()
 
 
@@ -250,7 +242,7 @@ def logger(temp_dir, config):
 def create_mock_listing(**kwargs):
     """创建Mock商品对象"""
     from src.modules.listing.models import Listing
-    
+
     defaults = {
         "title": "Test Product",
         "description": "Test Description",
@@ -259,14 +251,14 @@ def create_mock_listing(**kwargs):
         "images": []
     }
     defaults.update(kwargs)
-    
+
     return Listing(**defaults)
 
 
 def create_mock_publish_result(success=True, **kwargs):
     """创建Mock发布结果"""
     from src.modules.listing.models import PublishResult
-    
+
     defaults = {
         "success": success,
         "product_id": "test_product_id" if success else None,
@@ -274,22 +266,22 @@ def create_mock_publish_result(success=True, **kwargs):
         "error_message": None if success else "Test error"
     }
     defaults.update(kwargs)
-    
+
     return PublishResult(**defaults)
 
 
 class AsyncContextManager:
     """异步上下文管理器"""
-    
+
     def __init__(self, return_value=None):
         self.return_value = return_value
         self.entered = False
         self.exited = False
-    
+
     async def __aenter__(self):
         self.entered = True
         return self.return_value
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self.exited = True
         return False
@@ -304,9 +296,9 @@ def async_return(value):
 
 def async_raise(exc):
     """创建抛出异常的协程"""
-    @asyncio.coroutine
-    def coro():
+    async def coro():
         raise exc
+
     return coro()
 
 

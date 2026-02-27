@@ -1,10 +1,7 @@
+"""Deprecated legacy Python skill package.
+
+技能执行路径以 skills/*/SKILL.md + src.cli 为准，
+此包仅保留用于兼容旧引用，不再提供运行时代码。
 """
-闲鱼账号管理技能
-Xianyu Accounts Skill
 
-提供多闲鱼账号的统一管理和调度功能
-"""
-
-from .skill import XianyuAccountsSkill
-
-__all__ = ["XianyuAccountsSkill"]
+__all__: list[str] = []

@@ -124,6 +124,18 @@ class AnalyticsService:
                     sold_at DATETIME
                 )
             """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS daily_stats (
+                    date TEXT PRIMARY KEY,
+                    new_listings INTEGER DEFAULT 0,
+                    polished_count INTEGER DEFAULT 0,
+                    price_updates INTEGER DEFAULT 0,
+                    total_views INTEGER DEFAULT 0,
+                    total_wants INTEGER DEFAULT 0,
+                    total_sales INTEGER DEFAULT 0,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_op_logs_type_time
@@ -191,6 +203,18 @@ class AnalyticsService:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     sold_at DATETIME
+                )
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS daily_stats (
+                    date TEXT PRIMARY KEY,
+                    new_listings INTEGER DEFAULT 0,
+                    polished_count INTEGER DEFAULT 0,
+                    price_updates INTEGER DEFAULT 0,
+                    total_views INTEGER DEFAULT 0,
+                    total_wants INTEGER DEFAULT 0,
+                    total_sales INTEGER DEFAULT 0,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             db.execute("""
@@ -500,7 +524,7 @@ class AnalyticsService:
                 (day_start, day_end),
             )
 
-            new_listings = sum(1 for op in operations if op[0] == "PUBLISH")
+            new_listings = sum(op[1] for op in operations if op[0] == "PUBLISH")
             polished = sum(op[1] for op in operations if "POLISH" in op[0])
             price_updates = sum(op[1] for op in operations if "PRICE" in op[0])
             delisted = sum(op[1] for op in operations if op[0] == "DELIST")
@@ -556,7 +580,7 @@ class AnalyticsService:
                 (week_start, week_end),
             )
 
-            new_listings = sum(1 for op in operations if op[0] == "PUBLISH")
+            new_listings = sum(op[1] for op in operations if op[0] == "PUBLISH")
             polished = sum(op[1] for op in operations if "POLISH" in op[0])
             price_updates = sum(op[1] for op in operations if "PRICE" in op[0])
 
@@ -573,12 +597,36 @@ class AnalyticsService:
 
             daily_stats = await db.execute_fetchall(
                 """
-                SELECT date, new_listings, total_views, total_wants
-                FROM daily_stats
-                WHERE date BETWEEN ? AND ?
-                ORDER BY date ASC
+                WITH daily_ops AS (
+                    SELECT date(timestamp) AS date,
+                           SUM(CASE WHEN operation_type = 'PUBLISH' THEN 1 ELSE 0 END) AS new_listings
+                    FROM operation_logs
+                    WHERE timestamp BETWEEN ? AND ?
+                    GROUP BY date(timestamp)
+                ),
+                daily_metrics AS (
+                    SELECT date(timestamp) AS date,
+                           COALESCE(SUM(views), 0) AS total_views,
+                           COALESCE(SUM(wants), 0) AS total_wants
+                    FROM product_metrics
+                    WHERE timestamp BETWEEN ? AND ?
+                    GROUP BY date(timestamp)
+                ),
+                all_dates AS (
+                    SELECT date FROM daily_ops
+                    UNION
+                    SELECT date FROM daily_metrics
+                )
+                SELECT d.date AS date,
+                       COALESCE(o.new_listings, 0) AS new_listings,
+                       COALESCE(m.total_views, 0) AS total_views,
+                       COALESCE(m.total_wants, 0) AS total_wants
+                FROM all_dates d
+                LEFT JOIN daily_ops o ON d.date = o.date
+                LEFT JOIN daily_metrics m ON d.date = m.date
+                ORDER BY d.date ASC
             """,
-                (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")),
+                (week_start, week_end, week_start, week_end),
             )
 
             return {
@@ -632,7 +680,7 @@ class AnalyticsService:
                 (start_date, end_date),
             )
 
-            new_listings = sum(1 for op in operations if op[0] == "PUBLISH")
+            new_listings = sum(op[1] for op in operations if op[0] == "PUBLISH")
 
             sold_products = await db.execute_fetchall(
                 """

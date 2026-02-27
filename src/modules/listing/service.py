@@ -6,10 +6,12 @@ Listing Service
 """
 
 import asyncio
+import json
 import random
 from typing import Any
 from urllib.parse import urlparse
 
+from src.core.compliance import get_compliance_guard
 from src.core.config import get_config
 from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
@@ -93,7 +95,7 @@ class ListingService:
     负责商品的发布、批量发布等核心功能
     """
 
-    def __init__(self, controller=None, config: dict | None = None):
+    def __init__(self, controller=None, config: dict | None = None, analytics=None):
         """
         初始化上架服务
 
@@ -104,6 +106,8 @@ class ListingService:
         self.controller = controller
         self.config = config or {}
         self.logger = get_logger()
+        self.analytics = analytics
+        self.compliance = get_compliance_guard()
 
         browser_config = get_config().browser
         self.delay_range = (
@@ -133,6 +137,49 @@ class ListingService:
         self.logger.info(f"Creating listing: {listing.title}")
 
         try:
+            content_check = self.compliance.evaluate_content(listing.title, listing.description)
+            if content_check["warn"]:
+                await self._audit_compliance_event(
+                    event_type="LISTING_CONTENT_WARN",
+                    message=content_check["message"],
+                    account_id=account_id,
+                    title=listing.title,
+                    hits=content_check["hits"],
+                    blocked=False,
+                )
+            if content_check["blocked"]:
+                await self._audit_compliance_event(
+                    event_type="LISTING_CONTENT_BLOCK",
+                    message=content_check["message"],
+                    account_id=account_id,
+                    title=listing.title,
+                    hits=content_check["hits"],
+                    blocked=True,
+                )
+                return PublishResult(success=False, error_message=content_check["message"])
+
+            rate_key = f"publish:{account_id or 'global'}"
+            rate_check = await self.compliance.evaluate_publish_rate(rate_key)
+            if rate_check["warn"]:
+                await self._audit_compliance_event(
+                    event_type="LISTING_RATE_LIMIT_WARN",
+                    message=rate_check["message"],
+                    account_id=account_id,
+                    title=listing.title,
+                    hits=[],
+                    blocked=False,
+                )
+            if rate_check["blocked"]:
+                await self._audit_compliance_event(
+                    event_type="LISTING_RATE_LIMIT_BLOCK",
+                    message=rate_check["message"],
+                    account_id=account_id,
+                    title=listing.title,
+                    hits=[],
+                    blocked=True,
+                )
+                return PublishResult(success=False, error_message=rate_check["message"])
+
             if not self.controller:
                 raise BrowserError("Browser controller is not initialized. Cannot publish.")
 
@@ -146,6 +193,36 @@ class ListingService:
         except Exception as e:
             self.logger.error(f"Failed to create listing: {e}")
             return PublishResult(success=False, error_message=str(e))
+
+    async def _audit_compliance_event(
+        self,
+        event_type: str,
+        message: str,
+        account_id: str | None,
+        title: str,
+        hits: list[str],
+        blocked: bool,
+    ) -> None:
+        """记录合规审计事件（拦截或告警）"""
+        details = {"message": message, "title": title, "hits": hits}
+        operation_type = "COMPLIANCE_BLOCK" if blocked else "COMPLIANCE_WARN"
+        status = "blocked" if blocked else "warning"
+        try:
+            analytics = self.analytics
+            if analytics is None:
+                from src.modules.analytics.service import AnalyticsService
+
+                analytics = AnalyticsService()
+            await analytics.log_operation(
+                operation_type,
+                product_id=None,
+                account_id=account_id,
+                details={"event": event_type, **details},
+                status=status,
+                error_message=message,
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to write compliance audit log: {e}")
 
     async def _execute_publish(self, listing: Listing) -> tuple:
         """
@@ -253,10 +330,14 @@ class ListingService:
             "General": "其他闲置",
         }
 
-        category_map.get(category, category)
+        mapped_category = category_map.get(category, category)
 
         await self.controller.click(page_id, self.selectors.CATEGORY_SELECT)
         await asyncio.sleep(self._random_delay())
+
+        clicked = await self._click_text_option(page_id, self.selectors.CATEGORY_ITEM, mapped_category)
+        if not clicked:
+            self.logger.warning(f"Category option not found: {mapped_category}")
 
         await asyncio.sleep(self._random_delay())
 
@@ -273,14 +354,44 @@ class ListingService:
             "其他": ["其他"],
         }
 
+        target_condition = None
         for tag in tags:
             tag_lower = tag.lower()
             for condition, keywords in condition_map.items():
                 if any(kw.lower() in tag_lower for kw in keywords):
-                    self.logger.info(f"Detected condition: {condition}")
-                    await self.controller.click(page_id, self.selectors.CONDITION_SELECT)
-                    await asyncio.sleep(self._random_delay())
+                    target_condition = condition
                     break
+            if target_condition:
+                break
+
+        if not target_condition:
+            self.logger.info("Condition not detected from tags, fallback to 95新")
+            target_condition = "95新"
+
+        self.logger.info(f"Detected condition: {target_condition}")
+        await self.controller.click(page_id, self.selectors.CONDITION_SELECT)
+        await asyncio.sleep(self._random_delay())
+
+        clicked = await self._click_text_option(page_id, self.selectors.CONDITION_ITEM, target_condition)
+        if not clicked:
+            self.logger.warning(f"Condition option not found: {target_condition}")
+        await asyncio.sleep(self._random_delay())
+
+    async def _click_text_option(self, page_id: str, selector: str, text: str) -> bool:
+        """按文本匹配并点击候选项，避免空操作"""
+        safe_selector = json.dumps(selector, ensure_ascii=False)
+        safe_text = json.dumps(text, ensure_ascii=False)
+        script = f"""
+(() => {{
+  const nodes = Array.from(document.querySelectorAll({safe_selector}));
+  const target = nodes.find(el => (el.innerText || '').includes({safe_text}));
+  if (!target) return false;
+  target.click();
+  return true;
+}})();
+"""
+        clicked = await self.controller.execute_script(page_id, script)
+        return bool(clicked)
 
     async def _step_submit(self, page_id: str) -> None:
         """提交发布"""

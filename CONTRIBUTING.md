@@ -22,6 +22,10 @@ src/
 skills/                 # OpenClaw SKILL.md files (one per directory)
 ```
 
+Note:
+- `skills/xianyu_*` Python packages are deprecated compatibility stubs.
+- Use `skills/*/SKILL.md + src/cli.py` as the only supported skill execution path.
+
 ## How to Contribute
 
 ### Bug Reports
@@ -42,8 +46,9 @@ Open an [issue](https://github.com/G3niusYukki/xianyu-openclaw/issues/new?templa
 2. Create a feature branch: `git checkout -b feat/my-feature`
 3. Make your changes
 4. Run linting: `ruff check src/`
-5. Commit with a clear message: `git commit -m "feat: add price optimization"`
-6. Push to your fork and open a PR
+5. If your change affects publishing/operations, also verify `config/rules.yaml` compatibility behavior.
+6. Commit with a clear message: `git commit -m "feat: add price optimization"`
+7. Push to your fork and open a PR
 
 ### Commit Convention
 

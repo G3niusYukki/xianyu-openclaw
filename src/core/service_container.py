@@ -6,6 +6,7 @@ Service Container
 """
 
 import threading
+from collections.abc import Callable
 from functools import wraps
 from typing import Any, Optional, TypeVar
 
@@ -32,12 +33,16 @@ class ServiceContainer:
     def __init__(self):
         if not hasattr(self, "_initialized"):
             self._services: dict[str, Any] = {}
-            self._factories: dict[str, callable] = {}
-            self._singletons: dict[str, Any] = {}
+            self._factories: dict[str, Callable[[], Any]] = {}
+            self._singletons: set[str] = set()
             self._initialized = True
 
     def register(
-        self, service_type: type[T], instance: T | None = None, factory: callable | None = None, singleton: bool = True
+        self,
+        service_type: type[T],
+        instance: T | None = None,
+        factory: Callable[[], T] | None = None,
+        singleton: bool = True,
     ) -> None:
         """
         注册服务
@@ -114,6 +119,7 @@ class ServiceContainer:
         """清除所有服务"""
         self._services.clear()
         self._factories.clear()
+        self._singletons.clear()
 
     def _get_service_key(self, service_type: type) -> str:
         """获取服务键"""

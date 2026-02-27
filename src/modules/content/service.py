@@ -10,6 +10,7 @@ from typing import Any
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, OpenAI
 
+from src.core.compliance import get_compliance_guard
 from src.core.config import get_config
 from src.core.logger import get_logger
 
@@ -30,6 +31,7 @@ class ContentService:
         """
         self.config = config or get_config().ai
         self.logger = get_logger()
+        self.compliance = get_compliance_guard()
 
         self.api_key = self.config.get("api_key") or os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
         self.base_url = self.config.get("base_url") or os.getenv("OPENAI_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL")
@@ -204,7 +206,7 @@ class ContentService:
 - 成色：{condition}
 - 交易说明：走闲鱼，诚心要的私聊"""
 
-    def generate_listing_content(self, product_info: dict[str, Any]) -> dict[str, str]:
+    def generate_listing_content(self, product_info: dict[str, Any]) -> dict[str, Any]:
         """
         生成完整商品发布内容
 
@@ -224,8 +226,25 @@ class ContentService:
 
         title = self.generate_title(product_name, features, category)
         description = self.generate_description(product_name, condition, reason, tags, extra_info)
+        review = self.review_before_publish(title, description)
+        return {"title": title, "description": description, "compliance": review}
 
-        return {"title": title, "description": description}
+    def review_before_publish(self, title: str, description: str) -> dict[str, Any]:
+        """
+        发布前文本审查
+
+        Returns:
+            {"allowed": bool, "hits": list[str], "message": str}
+        """
+        decision = self.compliance.evaluate_content(title, description)
+        return {
+            "allowed": decision["allowed"],
+            "blocked": decision["blocked"],
+            "warn": decision["warn"],
+            "hits": decision["hits"],
+            "message": decision["message"],
+            "mode": self.compliance.mode,
+        }
 
     def optimize_title(self, current_title: str, category: str = "General") -> str:
         """

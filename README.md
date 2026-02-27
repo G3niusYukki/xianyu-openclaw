@@ -27,6 +27,13 @@
 
 ---
 
+## 4.1.0 更新摘要（2026-02-27）
+
+- 完成全量历史质量清理：`ruff check src tests` 通过，测试体系与现有架构对齐。
+- 修复关键运行时缺陷：调度器 BrowserClient 注入、监控 await 修复、分析周报表缺失修复。
+- 落地增强版合规护栏：支持 `warn/block` 双模式、规则自动重载、发布与运营链路审计日志。
+- 统一技能路线：以 `SKILL.md + CLI` 为唯一执行路径，旧 `skills/xianyu_*` Python 包标记为废弃兼容层。
+
 ## 为什么做这个？
 
 经营闲鱼店铺，每天都在重复同样的事：发商品、写标题、擦亮、调价、看数据。一天下来光点按钮就要花好几个小时。
@@ -183,6 +190,13 @@ python -m src.cli accounts  --action list
 ---
 
 ## 配置说明
+
+## 合规边界
+
+- 工具只支持闲鱼站内合规交易，不应发布违法、侵权、仿冒或导流到站外的信息。
+- 默认启用最小合规护栏：内容禁词拦截、发布频率限制、批量擦亮冷却、审计日志记录。
+- 规则文件为 `config/rules.yaml`，支持 `mode: block|warn`。`block` 会拒绝执行，`warn` 仅告警并继续执行。
+- 命中规则会记录审计事件：`COMPLIANCE_BLOCK` 或 `COMPLIANCE_WARN`，并支持规则文件自动重载。
 
 <details>
 <summary><strong><code>.env</code> 环境变量</strong></summary>

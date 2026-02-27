@@ -1,0 +1,24 @@
+# 闲鱼规则最小护栏配置
+# mode: block | warn
+mode: block
+
+reload:
+  auto_reload: true
+  check_interval_seconds: 10
+
+publish:
+  min_interval_seconds: 30
+
+batch_operations:
+  polish_cooldown_seconds: 300
+
+content:
+  case_sensitive: false
+  banned_keywords:
+    - "微信"
+    - "vx"
+    - "QQ"
+    - "私下交易"
+    - "站外交易"
+    - "假货"
+    - "仿品"

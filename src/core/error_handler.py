@@ -6,6 +6,7 @@ Unified Error Handling
 """
 
 import asyncio
+import inspect
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
@@ -103,7 +104,7 @@ def handle_operation_errors(default_return: Any = False, raise_on_error: bool = 
                     raise
                 return default_return
 
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+        return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
 
     return decorator
 
@@ -141,9 +142,7 @@ def safe_execute(logger=None, default_return: Any = None, raise_on_error: bool =
                     raise
                 return default_return
 
-        import asyncio
-
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper
@@ -201,7 +200,7 @@ def retry(max_attempts: int = 3, delay: float = 1.0, backoff_factor: float = 2.0
 
                     time.sleep(wait_time)
 
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+        return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
 
     return decorator
 
@@ -249,9 +248,7 @@ def log_execution_time(logger=None):
                 logger.error(f"{func.__name__} failed after {elapsed:.2f}s: {e}", exc_info=True)
                 raise
 
-        import asyncio
-
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper
@@ -347,9 +344,7 @@ def handle_errors(
                     raise
                 return default_return
 
-        import asyncio
-
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         else:
             return sync_wrapper

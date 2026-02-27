@@ -10,7 +10,7 @@ from typing import Any
 
 
 class IListingService(ABC):
-    """商品上架服务接口"""
+    """商品上架领域能力接口定义。"""
 
     @abstractmethod
     async def create_listing(self, listing: Any, account_id: str | None = None) -> Any:
@@ -85,7 +85,7 @@ class IListingService(ABC):
 
 
 class IContentService(ABC):
-    """内容生成服务接口"""
+    """商品文案生成与优化能力接口定义。"""
 
     @abstractmethod
     def generate_title(self, product_name: str, features: list[str], category: str = "General") -> str:
@@ -122,7 +122,7 @@ class IContentService(ABC):
         pass
 
     @abstractmethod
-    def generate_listing_content(self, product_info: dict[str, Any]) -> dict[str, str]:
+    def generate_listing_content(self, product_info: dict[str, Any]) -> dict[str, Any]:
         """
         生成完整商品发布内容
 
@@ -150,7 +150,7 @@ class IContentService(ABC):
 
 
 class IMediaService(ABC):
-    """媒体处理服务接口"""
+    """媒体处理与图片规范化能力接口定义。"""
 
     @abstractmethod
     def resize_image_for_xianyu(self, image_path: str, output_path: str | None = None) -> str:
@@ -231,7 +231,7 @@ class IMediaService(ABC):
 
 
 class IOperationsService(ABC):
-    """运营操作服务接口"""
+    """店铺运营动作能力接口定义。"""
 
     @abstractmethod
     async def batch_polish(self, max_items: int = 50) -> dict[str, Any]:
@@ -288,7 +288,7 @@ class IOperationsService(ABC):
 
 
 class IAnalyticsService(ABC):
-    """数据分析服务接口"""
+    """数据采集、分析与报表能力接口定义。"""
 
     @abstractmethod
     async def log_operation(
@@ -357,7 +357,7 @@ class IAnalyticsService(ABC):
 
 
 class IAccountsService(ABC):
-    """账号管理服务接口"""
+    """账号管理与健康状态能力接口定义。"""
 
     @abstractmethod
     def get_accounts(self, enabled_only: bool = True, mask_sensitive: bool = True) -> list[dict[str, Any]]:
@@ -450,7 +450,7 @@ class IAccountsService(ABC):
 
 
 class ISchedulerService(ABC):
-    """调度器服务接口"""
+    """定时任务调度能力接口定义。"""
 
     @abstractmethod
     def create_task(
@@ -491,12 +491,22 @@ class ISchedulerService(ABC):
 
     @abstractmethod
     async def start(self) -> None:
-        """启动调度器"""
+        """
+        启动调度器
+
+        Returns:
+            None
+        """
         pass
 
     @abstractmethod
     async def stop(self) -> None:
-        """停止调度器"""
+        """
+        停止调度器
+
+        Returns:
+            None
+        """
         pass
 
     @abstractmethod
@@ -511,7 +521,7 @@ class ISchedulerService(ABC):
 
 
 class IMonitorService(ABC):
-    """监控服务接口"""
+    """异常监控与告警能力接口定义。"""
 
     @abstractmethod
     async def raise_alert(

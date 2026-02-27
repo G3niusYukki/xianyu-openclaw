@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from src.core.browser_client import BrowserError, create_browser_client
 from src.core.logger import get_logger
 
 
@@ -324,19 +325,32 @@ class Scheduler:
 
     async def _execute_polish(self, params: dict) -> dict[str, Any]:
         """执行擦亮任务"""
+        client = None
         try:
             from src.modules.operations.service import OperationsService
 
-            service = OperationsService()
+            client = await create_browser_client()
+            service = OperationsService(controller=client)
             max_items = params.get("max_items", 50)
             result = await service.batch_polish(max_items=max_items)
 
             return {"success": True, "message": f"Polished {result.get('success', 0)} items", "details": result}
+        except BrowserError as e:
+            return {
+                "success": False,
+                "message": "Browser connection failed",
+                "error_code": "BROWSER_CONNECT_FAILED",
+                "error": str(e),
+            }
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            return {"success": False, "message": str(e), "error_code": "POLISH_EXECUTION_FAILED"}
+        finally:
+            if client:
+                await client.disconnect()
 
     async def _execute_publish(self, params: dict) -> dict[str, Any]:
         """执行发布任务"""
+        client = None
         try:
             from src.modules.listing.models import Listing
             from src.modules.listing.service import ListingService
@@ -345,7 +359,8 @@ class Scheduler:
             if not listings_data:
                 return {"success": False, "message": "No listings to publish"}
 
-            service = ListingService()
+            client = await create_browser_client()
+            service = ListingService(controller=client)
             listings = [Listing(**listing) for listing in listings_data]
             results = await service.batch_create_listings(listings)
 
@@ -356,8 +371,18 @@ class Scheduler:
                 "message": f"Published {success_count}/{len(results)} items",
                 "details": [{"id": r.product_id, "success": r.success} for r in results],
             }
+        except BrowserError as e:
+            return {
+                "success": False,
+                "message": "Browser connection failed",
+                "error_code": "BROWSER_CONNECT_FAILED",
+                "error": str(e),
+            }
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            return {"success": False, "message": str(e), "error_code": "PUBLISH_EXECUTION_FAILED"}
+        finally:
+            if client:
+                await client.disconnect()
 
     async def _execute_metrics(self, params: dict) -> dict[str, Any]:
         """执行数据采集任务"""
