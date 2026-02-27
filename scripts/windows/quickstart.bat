@@ -34,5 +34,9 @@ echo [OK] Quickstart finished.
 echo [INFO] Web UI: http://localhost:8080
 echo [INFO] Dashboard: run scripts\windows\dashboard.bat 8091
 echo [INFO] Workflow Worker: run scripts\windows\run_worker.bat 20 5
+echo [INFO] Module check: run scripts\windows\module_check.bat
+echo [INFO] Module status: run scripts\windows\module_status.bat
+echo [INFO] Start presales: run scripts\windows\start_presales.bat daemon 20 5
+echo [INFO] Start operations: run scripts\windows\start_operations.bat daemon 30
+echo [INFO] Start aftersales: run scripts\windows\start_aftersales.bat daemon 20 15 delay
 exit /b 0
-

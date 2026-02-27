@@ -283,6 +283,47 @@ scripts\windows\feishu_test.bat
 scripts\windows\run_worker.bat 20 5
 ```
 
+### 三大模块单独启动（售前/运营/售后）
+
+如果你只想开某一部分能力，可以按模块启动：
+
+```bash
+# 1) 售前客服（自动首响 + 自动报价）
+python3 -m src.cli module --action start --target presales --mode daemon --limit 20 --interval 5
+
+# 2) 闲鱼运营（擦亮/数据采集调度）
+python3 -m src.cli module --action start --target operations --mode daemon --init-default-tasks --interval 30
+
+# 3) 售后客服（售后订单跟进）
+python3 -m src.cli module --action start --target aftersales --mode daemon --limit 20 --interval 15 --issue-type delay
+```
+
+启动前建议先做模块检查：
+
+```bash
+python3 -m src.cli module --action check --target presales --strict
+python3 -m src.cli module --action check --target operations --strict
+python3 -m src.cli module --action check --target aftersales --strict
+```
+
+查看运行状态：
+
+```bash
+python3 -m src.cli module --action status --target presales --window-minutes 60
+python3 -m src.cli module --action status --target operations
+python3 -m src.cli module --action status --target aftersales
+```
+
+Windows 一键脚本：
+
+```bat
+scripts\windows\module_check.bat
+scripts\windows\module_status.bat
+scripts\windows\start_presales.bat daemon 20 5
+scripts\windows\start_operations.bat daemon 30
+scripts\windows\start_aftersales.bat daemon 20 15 delay
+```
+
 ---
 
 ## 9. 常见问题

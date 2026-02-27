@@ -141,6 +141,14 @@ class OrderFulfillmentService:
             (order_id, event_type, status, json.dumps(detail or {}, ensure_ascii=False), self._now()),
         )
 
+    @staticmethod
+    def _parse_order_row(row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        data["manual_takeover"] = bool(data.get("manual_takeover", 0))
+        quote = data.get("quote_snapshot_json") or "{}"
+        data["quote_snapshot"] = json.loads(quote)
+        return data
+
     def set_manual_takeover(self, order_id: str, enabled: bool) -> bool:
         now = self._now()
         with self._connect() as conn:
@@ -230,11 +238,87 @@ class OrderFulfillmentService:
             row = conn.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
             if not row:
                 return None
-            data = dict(row)
-            data["manual_takeover"] = bool(data.get("manual_takeover", 0))
-            quote = data.get("quote_snapshot_json") or "{}"
-            data["quote_snapshot"] = json.loads(quote)
-            return data
+            return self._parse_order_row(row)
+
+    def list_orders(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 20,
+        include_manual: bool = True,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM orders"
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if not include_manual:
+            clauses.append("manual_takeover = 0")
+
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(int(limit), 1))
+
+        with self._connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [self._parse_order_row(row) for row in rows]
+
+    def get_summary(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            total = conn.execute("SELECT COUNT(1) AS c FROM orders").fetchone()["c"]
+            manual = conn.execute("SELECT COUNT(1) AS c FROM orders WHERE manual_takeover=1").fetchone()["c"]
+            by_status_rows = conn.execute(
+                "SELECT status, COUNT(1) AS c FROM orders GROUP BY status ORDER BY c DESC"
+            ).fetchall()
+
+        by_status = {str(row["status"]): int(row["c"]) for row in by_status_rows}
+        return {
+            "total_orders": int(total),
+            "manual_takeover_orders": int(manual),
+            "after_sales_orders": int(by_status.get("after_sales", 0)),
+            "by_status": by_status,
+        }
+
+    def record_after_sales_followup(
+        self,
+        *,
+        order_id: str,
+        issue_type: str,
+        reply_text: str,
+        sent: bool,
+        dry_run: bool,
+        reason: str = "",
+        session_id: str = "",
+    ) -> dict[str, Any]:
+        order = self.get_order(order_id)
+        if not order:
+            raise ValueError(f"Order not found: {order_id}")
+
+        detail = {
+            "issue_type": issue_type,
+            "reply": reply_text,
+            "sent": bool(sent),
+            "dry_run": bool(dry_run),
+            "reason": reason,
+            "session_id": session_id,
+        }
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE orders SET updated_at=? WHERE order_id=?",
+                (self._now(), order_id),
+            )
+            self._append_event(conn, order_id, "after_sales_followup", "after_sales", detail)
+
+        return {
+            "order_id": order_id,
+            "status": "after_sales",
+            "sent": bool(sent),
+            "dry_run": bool(dry_run),
+            "reason": reason,
+        }
 
     def trace_order(self, order_id: str) -> dict[str, Any]:
         order = self.get_order(order_id)

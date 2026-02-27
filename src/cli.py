@@ -33,6 +33,30 @@ def _json_out(data: Any) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
+def _required_checks_for_module(target: str) -> set[str]:
+    base = {"Python版本", "数据库", "配置文件"}
+    if target in {"presales", "operations", "aftersales"}:
+        base.update({"闲鱼Cookie", "OpenClaw Gateway"})
+    if target == "presales":
+        base.add("消息首响SLA")
+    return base
+
+
+def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[str, Any]:
+    required_names = _required_checks_for_module(target)
+    checks = doctor_report.get("checks", [])
+    required_checks = [item for item in checks if str(item.get("name", "")) in required_names]
+    blockers = [item for item in required_checks if not bool(item.get("passed", False))]
+    return {
+        "target": target,
+        "ready": len(blockers) == 0,
+        "required_checks": required_checks,
+        "blockers": blockers,
+        "next_steps": doctor_report.get("next_steps", []),
+        "doctor_summary": doctor_report.get("summary", {}),
+    }
+
+
 def _resolve_workflow_state(stage: str | None) -> Any:
     if not stage:
         return None
@@ -501,6 +525,315 @@ async def cmd_automation(args: argparse.Namespace) -> None:
     _json_out({"error": f"Unknown automation action: {action}"})
 
 
+async def _start_presales_module(args: argparse.Namespace) -> dict[str, Any]:
+    from src.core.browser_client import create_browser_client
+    from src.modules.messages.service import MessagesService
+    from src.modules.messages.workflow import WorkflowWorker
+
+    client = await create_browser_client()
+    try:
+        service = MessagesService(controller=client)
+        worker = WorkflowWorker(
+            message_service=service,
+            config={
+                "db_path": args.workflow_db,
+                "poll_interval_seconds": args.interval,
+                "scan_limit": args.limit,
+                "claim_limit": args.claim_limit,
+            },
+        )
+        if args.mode == "daemon":
+            result = await worker.run_forever(
+                dry_run=bool(args.dry_run),
+                max_loops=args.max_loops,
+            )
+        else:
+            result = await worker.run_once(dry_run=bool(args.dry_run))
+        return {"target": "presales", "mode": args.mode, "result": result}
+    finally:
+        await client.disconnect()
+
+
+def _init_default_operation_tasks(args: argparse.Namespace) -> dict[str, Any]:
+    from src.core.config import get_config
+    from src.modules.accounts.scheduler import Scheduler, TaskType
+
+    scheduler = Scheduler()
+    created: list[dict[str, Any]] = []
+
+    if not bool(args.init_default_tasks):
+        return {"scheduler": scheduler, "created": created}
+
+    tasks = scheduler.list_tasks()
+    has_polish = any(t.task_type == TaskType.POLISH for t in tasks)
+    has_metrics = any(t.task_type == TaskType.METRICS for t in tasks)
+
+    cfg = get_config().get_section("scheduler", {})
+    polish_cfg = cfg.get("polish", {}) if isinstance(cfg.get("polish"), dict) else {}
+    metrics_cfg = cfg.get("metrics", {}) if isinstance(cfg.get("metrics"), dict) else {}
+
+    if not args.skip_polish and not has_polish:
+        cron_expr = str(args.polish_cron or polish_cfg.get("cron") or "0 9 * * *")
+        task = scheduler.create_polish_task(cron_expression=cron_expr, max_items=int(args.polish_max_items or 50))
+        created.append({"task_id": task.task_id, "task_type": task.task_type, "name": task.name})
+
+    if not args.skip_metrics and not has_metrics:
+        cron_expr = str(args.metrics_cron or metrics_cfg.get("cron") or "0 */4 * * *")
+        task = scheduler.create_metrics_task(cron_expression=cron_expr)
+        created.append({"task_id": task.task_id, "task_type": task.task_type, "name": task.name})
+
+    return {"scheduler": scheduler, "created": created}
+
+
+async def _start_operations_module(args: argparse.Namespace) -> dict[str, Any]:
+    from src.modules.accounts.scheduler import TaskType
+
+    setup = _init_default_operation_tasks(args)
+    scheduler = setup["scheduler"]
+    created = setup["created"]
+
+    if args.mode == "once":
+        task_results = []
+        for task in scheduler.list_tasks(enabled_only=True):
+            if args.skip_polish and task.task_type == TaskType.POLISH:
+                continue
+            if args.skip_metrics and task.task_type == TaskType.METRICS:
+                continue
+            task_results.append(await scheduler.execute_task(task))
+
+        success = sum(1 for item in task_results if bool(item.get("success", False)))
+        return {
+            "target": "operations",
+            "mode": "once",
+            "created_tasks": created,
+            "executed_tasks": len(task_results),
+            "success_tasks": success,
+            "failed_tasks": len(task_results) - success,
+            "results": task_results,
+        }
+
+    await scheduler.start()
+    loops = 0
+    try:
+        while True:
+            loops += 1
+            if args.max_loops and loops >= args.max_loops:
+                break
+            await asyncio.sleep(max(1.0, float(args.interval or 30.0)))
+    finally:
+        await scheduler.stop()
+
+    return {
+        "target": "operations",
+        "mode": "daemon",
+        "loops": loops,
+        "created_tasks": created,
+        "status": scheduler.get_scheduler_status(),
+    }
+
+
+async def _run_aftersales_once(args: argparse.Namespace, message_service: Any | None = None) -> dict[str, Any]:
+    from src.modules.orders.service import OrderFulfillmentService
+
+    service = OrderFulfillmentService(db_path=args.orders_db or "data/orders.db")
+    cases = service.list_orders(
+        status="after_sales",
+        limit=max(int(args.limit or 20), 1),
+        include_manual=bool(args.include_manual),
+    )
+
+    details: list[dict[str, Any]] = []
+    for case in cases:
+        order_id = str(case.get("order_id", ""))
+        session_id = str(case.get("session_id", ""))
+        issue_type = str(args.issue_type or "delay")
+        reply_text = service.generate_after_sales_reply(issue_type=issue_type)
+
+        sent = False
+        reason = ""
+        if not session_id:
+            reason = "missing_session_id"
+        elif bool(args.dry_run):
+            sent = True
+            reason = "dry_run"
+        elif message_service is None:
+            reason = "message_service_unavailable"
+        else:
+            sent = await message_service.reply_to_session(session_id, reply_text)
+            reason = "sent" if sent else "send_failed"
+
+        service.record_after_sales_followup(
+            order_id=order_id,
+            issue_type=issue_type,
+            reply_text=reply_text,
+            sent=sent,
+            dry_run=bool(args.dry_run),
+            reason=reason,
+            session_id=session_id,
+        )
+        details.append(
+            {
+                "order_id": order_id,
+                "session_id": session_id,
+                "manual_takeover": bool(case.get("manual_takeover", False)),
+                "issue_type": issue_type,
+                "reply_template": reply_text,
+                "sent": sent,
+                "reason": reason,
+            }
+        )
+
+    success = sum(1 for item in details if bool(item.get("sent", False)))
+    return {
+        "target": "aftersales",
+        "total_cases": len(cases),
+        "success_cases": success,
+        "failed_cases": len(cases) - success,
+        "dry_run": bool(args.dry_run),
+        "details": details,
+    }
+
+
+async def _start_aftersales_module(args: argparse.Namespace) -> dict[str, Any]:
+    from src.core.browser_client import create_browser_client
+    from src.modules.messages.service import MessagesService
+    from src.modules.orders.service import OrderFulfillmentService
+
+    service = OrderFulfillmentService(db_path=args.orders_db or "data/orders.db")
+    if args.mode == "once":
+        if bool(args.dry_run):
+            result = await _run_aftersales_once(args, message_service=None)
+        else:
+            client = await create_browser_client()
+            try:
+                message_service = MessagesService(controller=client)
+                result = await _run_aftersales_once(args, message_service=message_service)
+            finally:
+                await client.disconnect()
+
+        return {
+            "target": "aftersales",
+            "mode": "once",
+            "result": result,
+            "summary": service.get_summary(),
+        }
+
+    loops = 0
+    batches: list[dict[str, Any]] = []
+    if bool(args.dry_run):
+        while True:
+            loops += 1
+            batch = await _run_aftersales_once(args, message_service=None)
+            batches.append(
+                {
+                    "loop": loops,
+                    "total_cases": batch.get("total_cases", 0),
+                    "success_cases": batch.get("success_cases", 0),
+                    "failed_cases": batch.get("failed_cases", 0),
+                }
+            )
+            if args.max_loops and loops >= args.max_loops:
+                break
+            await asyncio.sleep(max(1.0, float(args.interval or 30.0)))
+    else:
+        client = await create_browser_client()
+        try:
+            message_service = MessagesService(controller=client)
+            while True:
+                loops += 1
+                batch = await _run_aftersales_once(args, message_service=message_service)
+                batches.append(
+                    {
+                        "loop": loops,
+                        "total_cases": batch.get("total_cases", 0),
+                        "success_cases": batch.get("success_cases", 0),
+                        "failed_cases": batch.get("failed_cases", 0),
+                    }
+                )
+                if args.max_loops and loops >= args.max_loops:
+                    break
+                await asyncio.sleep(max(1.0, float(args.interval or 30.0)))
+        finally:
+            await client.disconnect()
+
+    return {
+        "target": "aftersales",
+        "mode": "daemon",
+        "loops": loops,
+        "batches": batches,
+        "summary": service.get_summary(),
+    }
+
+
+async def cmd_module(args: argparse.Namespace) -> None:
+    from src.core.doctor import run_doctor
+    from src.modules.accounts.scheduler import Scheduler
+    from src.modules.messages.workflow import WorkflowStore
+    from src.modules.orders.service import OrderFulfillmentService
+
+    action = args.action
+    target = args.target
+
+    if action == "check":
+        report = run_doctor(
+            skip_gateway=bool(args.skip_gateway),
+            skip_quote=(target != "presales"),
+        )
+        summary = _module_check_summary(target=target, doctor_report=report)
+        _json_out(summary)
+        if bool(args.strict) and not summary["ready"]:
+            raise SystemExit(2)
+        return
+
+    if action == "status":
+        if target == "presales":
+            store = WorkflowStore(db_path=args.workflow_db)
+            _json_out(
+                {
+                    "target": target,
+                    "workflow": store.get_workflow_summary(),
+                    "sla": store.get_sla_summary(window_minutes=args.window_minutes or 1440),
+                }
+            )
+            return
+
+        if target == "aftersales":
+            service = OrderFulfillmentService(db_path=args.orders_db or "data/orders.db")
+            preview = service.list_orders(status="after_sales", limit=max(int(args.limit or 20), 1), include_manual=True)
+            _json_out(
+                {
+                    "target": target,
+                    "summary": service.get_summary(),
+                    "recent_after_sales_cases": [
+                        {
+                            "order_id": item.get("order_id"),
+                            "session_id": item.get("session_id"),
+                            "manual_takeover": bool(item.get("manual_takeover", False)),
+                            "updated_at": item.get("updated_at", ""),
+                        }
+                        for item in preview
+                    ],
+                }
+            )
+            return
+
+        scheduler = Scheduler()
+        _json_out({"target": target, "scheduler": scheduler.get_scheduler_status()})
+        return
+
+    if action == "start":
+        if target == "presales":
+            result = await _start_presales_module(args)
+        elif target == "operations":
+            result = await _start_operations_module(args)
+        else:
+            result = await _start_aftersales_module(args)
+        _json_out(result)
+        return
+
+    _json_out({"error": f"Unknown module action: {action}"})
+
+
 async def cmd_quote(args: argparse.Namespace) -> None:
     from src.core.config import get_config
     from src.modules.quote import CostTableRepository, QuoteSetupService
@@ -794,6 +1127,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--heartbeat-minutes", type=int, default=30, help="心跳通知周期（分钟，0=关闭）")
     p.add_argument("--message", default="【闲鱼自动化】飞书通知测试成功", help="test-feishu 测试消息")
 
+    # module
+    p = sub.add_parser("module", help="模块化可用性检查与启动（售前/运营/售后）")
+    p.add_argument("--action", required=True, choices=["check", "status", "start"])
+    p.add_argument("--target", required=True, choices=["presales", "operations", "aftersales"])
+    p.add_argument("--strict", action="store_true", help="check 未通过时返回非0")
+    p.add_argument("--mode", choices=["once", "daemon"], default="once", help="start 运行模式")
+    p.add_argument("--skip-gateway", action="store_true", help="check 时跳过网关连通性")
+    p.add_argument("--window-minutes", type=int, default=1440, help="status 时 SLA 统计窗口（分钟）")
+    p.add_argument("--workflow-db", default=None, help="presales workflow 数据库路径")
+    p.add_argument("--orders-db", default="data/orders.db", help="aftersales 订单数据库路径")
+    p.add_argument("--limit", type=int, default=20, help="presales 扫描会话数 / aftersales 处理工单数")
+    p.add_argument("--claim-limit", type=int, default=10, help="presales 每轮认领任务数")
+    p.add_argument("--interval", type=float, default=5.0, help="轮询间隔（秒）")
+    p.add_argument("--dry-run", action="store_true", help="presales/aftersales 仅生成回复不发送")
+    p.add_argument("--issue-type", default="delay", help="aftersales 售后类型：delay/refund/quality")
+    p.add_argument("--include-manual", action="store_true", help="aftersales 包含人工接管订单")
+    p.add_argument("--max-loops", type=int, default=None, help="daemon 模式下最多循环次数")
+    p.add_argument("--init-default-tasks", action="store_true", help="operations 自动初始化默认任务")
+    p.add_argument("--skip-polish", action="store_true", help="operations 跳过擦亮任务")
+    p.add_argument("--skip-metrics", action="store_true", help="operations 跳过数据任务")
+    p.add_argument("--polish-max-items", type=int, default=50, help="默认擦亮任务最大数量")
+    p.add_argument("--polish-cron", default="", help="默认擦亮任务 cron")
+    p.add_argument("--metrics-cron", default="", help="默认数据任务 cron")
+
     # quote
     p = sub.add_parser("quote", help="自动报价诊断与配置")
     p.add_argument("--action", required=True, choices=["health", "candidates", "setup"])
@@ -856,6 +1213,7 @@ def main() -> None:
         "ai": cmd_ai,
         "doctor": cmd_doctor,
         "automation": cmd_automation,
+        "module": cmd_module,
         "quote": cmd_quote,
         "growth": cmd_growth,
     }
