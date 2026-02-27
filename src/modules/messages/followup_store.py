@@ -17,6 +17,7 @@ class FollowupStateStore:
 
     def __init__(self, path: str = "data/messages_followup_state.json", max_sessions: int = 5000):
         self.path = Path(path)
+        self.backup_path = Path(f"{path}.bak")
         self.max_sessions = int(max_sessions) if int(max_sessions) > 0 else 5000
         self._lock = Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,21 +112,24 @@ class FollowupStateStore:
         )
 
     def _load_all(self) -> dict[str, Any]:
-        if not self.path.exists():
-            return {}
-        try:
-            raw = self.path.read_text(encoding="utf-8").strip()
-            if not raw:
-                return {}
-            data = json.loads(raw)
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
+        data = self._load_file(self.path)
+        if data is not None:
+            return data
+        backup_data = self._load_file(self.backup_path)
+        if backup_data is not None:
+            return backup_data
+        return {}
 
     def _save_all(self, data: dict[str, Any]) -> None:
         temp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
-        temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = json.dumps(data, ensure_ascii=False, indent=2)
+        temp_path.write_text(payload, encoding="utf-8")
         temp_path.replace(self.path)
+        try:
+            self.backup_path.write_text(payload, encoding="utf-8")
+        except Exception:
+            # 备份写入失败不影响主流程
+            pass
 
     def _prune_if_needed(self, data: dict[str, Any]) -> dict[str, Any]:
         if len(data) <= self.max_sessions:
@@ -144,3 +148,16 @@ class FollowupStateStore:
             return float(value)
         except (TypeError, ValueError):
             return 0.0
+
+    @staticmethod
+    def _load_file(path: Path) -> dict[str, Any] | None:
+        if not path.exists():
+            return None
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+            if not raw:
+                return {}
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return None
