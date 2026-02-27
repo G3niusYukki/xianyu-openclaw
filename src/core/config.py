@@ -234,6 +234,14 @@ class Config:
                 "safety_margin": 0.0,
                 "validity_minutes": 30,
                 "analytics_log_enabled": True,
+                "pricing_profile": "normal",
+                "cost_table_dir": "data/quote_costs",
+                "cost_table_patterns": ["*.xlsx", "*.csv"],
+                "markup_rules": {},
+                "cost_api_url": "",
+                "cost_api_key_env": "QUOTE_COST_API_KEY",
+                "api_fallback_to_table_parallel": True,
+                "api_prefer_max_wait_seconds": 1.2,
                 "providers": {
                     "remote": {
                         "enabled": False,

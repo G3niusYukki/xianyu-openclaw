@@ -164,7 +164,13 @@ class QuoteConfig(BaseModel):
     """自动报价配置模型"""
 
     enabled: bool = Field(default=True, description="是否启用自动报价")
-    mode: str = Field(default="rule_only", description="报价模式：rule_only|provider_only|hybrid")
+    mode: str = Field(
+        default="rule_only",
+        description=(
+            "报价模式：rule_only|remote_only|remote_then_rule|"
+            "cost_table_plus_markup|api_cost_plus_markup（兼容 provider_only/hybrid）"
+        ),
+    )
     ttl_seconds: int = Field(default=90, ge=1, le=3600, description="缓存 TTL")
     max_stale_seconds: int = Field(default=300, ge=0, le=86400, description="陈旧缓存允许时长")
     timeout_ms: int = Field(default=3000, ge=100, le=30000, description="provider 超时时间")

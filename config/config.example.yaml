@@ -167,7 +167,7 @@ messages:
 # 自动报价配置
 quote:
   enabled: true
-  mode: "hybrid" # rule_only | provider_only | hybrid
+  mode: "cost_table_plus_markup" # rule_only | remote_only | remote_then_rule | cost_table_plus_markup | api_cost_plus_markup
   ttl_seconds: 90
   max_stale_seconds: 300
   timeout_ms: 3000
@@ -177,6 +177,19 @@ quote:
   safety_margin: 0.03
   validity_minutes: 30
   analytics_log_enabled: true
+  pricing_profile: "normal" # normal | member
+  cost_table_dir: "data/quote_costs"
+  cost_table_patterns: ["*.xlsx", "*.csv"]
+  cost_api_url: ""
+  cost_api_key_env: "QUOTE_COST_API_KEY"
+  api_fallback_to_table_parallel: true
+  api_prefer_max_wait_seconds: 1.2
+  markup_rules:
+    default:
+      normal_first_add: 0.50
+      member_first_add: 0.25
+      normal_extra_add: 0.50
+      member_extra_add: 0.30
   providers:
     remote:
       enabled: false
