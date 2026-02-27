@@ -218,6 +218,8 @@ class Config:
                 "max_stale_seconds": 300,
                 "timeout_ms": 3000,
                 "retry_times": 1,
+                "circuit_fail_threshold": 3,
+                "circuit_open_seconds": 30,
                 "safety_margin": 0.0,
                 "validity_minutes": 30,
                 "analytics_log_enabled": True,

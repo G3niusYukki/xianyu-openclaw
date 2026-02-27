@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `src/modules/quote/route.py`：地理路由标准化组件，支持省/市/自治区别名与后缀容错。
+- `quote` 配置新增熔断参数：`circuit_fail_threshold`、`circuit_open_seconds`。
+- 自动报价新增测试：路由标准化缓存命中、远程 provider 熔断打开后自动降级。
+
+### Changed
+- `QuoteRequest.cache_key()` 升级为分层缓存 key：`origin + destination + courier + weight_bucket + service_level`。
+- `AutoQuoteEngine` 增强：
+  - 请求前路由标准化（统一 cache key 与 provider 入参）
+  - 远程 provider 失败计数与熔断窗口
+  - fallback 失败分类（`timeout/transient/unavailable/provider_error`）
+  - 回退结果追加标准化路由可观测字段
+
 ## [4.4.0] - 2026-02-27
 
 ### Added

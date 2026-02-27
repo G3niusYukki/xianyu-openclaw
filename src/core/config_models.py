@@ -152,6 +152,8 @@ class QuoteConfig(BaseModel):
     max_stale_seconds: int = Field(default=300, ge=0, le=86400, description="陈旧缓存允许时长")
     timeout_ms: int = Field(default=3000, ge=100, le=30000, description="provider 超时时间")
     retry_times: int = Field(default=1, ge=1, le=10, description="provider 重试次数")
+    circuit_fail_threshold: int = Field(default=3, ge=1, le=20, description="熔断触发失败阈值")
+    circuit_open_seconds: int = Field(default=30, ge=1, le=3600, description="熔断窗口秒数")
     safety_margin: float = Field(default=0.0, ge=0.0, le=1.0, description="报价安全系数")
     validity_minutes: int = Field(default=30, ge=1, le=1440, description="报价有效期（分钟）")
     analytics_log_enabled: bool = Field(default=True, description="是否写入报价审计日志")

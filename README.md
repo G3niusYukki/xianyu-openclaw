@@ -252,6 +252,8 @@ quote:
   max_stale_seconds: 300
   timeout_ms: 3000
   retry_times: 2
+  circuit_fail_threshold: 3
+  circuit_open_seconds: 30
   providers:
     remote:
       enabled: false

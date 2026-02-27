@@ -10,6 +10,7 @@ from src.modules.analytics.service import AnalyticsService
 from src.modules.quote.cache import QuoteCache
 from src.modules.quote.models import QuoteRequest, QuoteResult
 from src.modules.quote.providers import IQuoteProvider, QuoteProviderError, RemoteQuoteProvider, RuleTableQuoteProvider
+from src.modules.quote.route import normalize_request_route
 
 
 class AutoQuoteEngine:
@@ -26,6 +27,10 @@ class AutoQuoteEngine:
         self.retry_times = int(cfg.get("retry_times", 1))
         self.safety_margin = float(cfg.get("safety_margin", 0.0))
         self.validity_minutes = int(cfg.get("validity_minutes", 30))
+        self.circuit_fail_threshold = int(cfg.get("circuit_fail_threshold", 3))
+        self.circuit_open_seconds = int(cfg.get("circuit_open_seconds", 30))
+        self._remote_failures = 0
+        self._circuit_open_until = 0.0
 
         self.rule_provider: IQuoteProvider = RuleTableQuoteProvider()
         self.remote_provider: IQuoteProvider = RemoteQuoteProvider(
@@ -46,44 +51,81 @@ class AutoQuoteEngine:
         if not self.enabled:
             raise QuoteProviderError("Quote engine is disabled")
 
-        key = request.cache_key()
+        normalized_request = normalize_request_route(request)
+        key = normalized_request.cache_key()
         cached, fresh_hit, stale_hit = self.cache.get(key)
         if cached and fresh_hit:
             return deepcopy(cached)
 
         if stale_hit and cached:
-            asyncio.create_task(self._refresh_cache_in_background(request, key))
+            asyncio.create_task(self._refresh_cache_in_background(normalized_request, key))
             return deepcopy(cached)
 
         start = time.perf_counter()
-        result = await self._quote_with_fallback(request)
+        result = await self._quote_with_fallback(normalized_request)
         result.total_fee = round(result.total_fee * (1 + self.safety_margin), 2)
+        result.explain = {
+            **result.explain,
+            "normalized_origin": normalized_request.origin,
+            "normalized_destination": normalized_request.destination,
+            "courier": normalized_request.courier,
+        }
         self.cache.set(key, result)
 
-        await self._log_quote(request, result, latency_ms=int((time.perf_counter() - start) * 1000))
+        await self._log_quote(normalized_request, result, latency_ms=int((time.perf_counter() - start) * 1000))
         return deepcopy(result)
 
     async def _quote_with_fallback(self, request: QuoteRequest) -> QuoteResult:
         if self.mode == "rule_only":
             return await self.rule_provider.get_quote(request, timeout_ms=self.timeout_ms)
 
+        if self._is_circuit_open():
+            remote_error: Exception | None = QuoteProviderError("remote_circuit_open")
+            return await self._fallback_quote(request, remote_error)
+
         remote_error: Exception | None = None
         for _ in range(max(1, self.retry_times)):
             try:
-                return await self.remote_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                result = await self.remote_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                self._remote_failures = 0
+                self._circuit_open_until = 0.0
+                return result
             except Exception as exc:
                 remote_error = exc
+                self._remote_failures += 1
+                if self._remote_failures >= self.circuit_fail_threshold:
+                    self._circuit_open_until = time.time() + self.circuit_open_seconds
 
+        return await self._fallback_quote(request, remote_error)
+
+    async def _fallback_quote(self, request: QuoteRequest, remote_error: Exception | None) -> QuoteResult:
         try:
             fallback = await self.rule_provider.get_quote(request, timeout_ms=self.timeout_ms)
             fallback.fallback_used = True
             fallback.explain = {
                 **fallback.explain,
                 "fallback_reason": str(remote_error) if remote_error else "provider_unavailable",
+                "failure_class": self._classify_failure(remote_error),
             }
             return fallback
         except Exception as rule_exc:
             raise QuoteProviderError(f"Quote failed: remote={remote_error}, rule={rule_exc}") from rule_exc
+
+    def _is_circuit_open(self) -> bool:
+        return self._circuit_open_until > time.time()
+
+    @staticmethod
+    def _classify_failure(error: Exception | None) -> str:
+        if error is None:
+            return "unknown"
+        text = str(error).lower()
+        if "timeout" in text:
+            return "timeout"
+        if "disabled" in text or "circuit" in text:
+            return "unavailable"
+        if "temporary" in text:
+            return "transient"
+        return "provider_error"
 
     async def _refresh_cache_in_background(self, request: QuoteRequest, key: str) -> None:
         try:

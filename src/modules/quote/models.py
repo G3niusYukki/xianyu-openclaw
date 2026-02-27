@@ -13,11 +13,13 @@ class QuoteRequest:
     weight: float
     volume: float = 0.0
     service_level: str = "standard"
+    courier: str = "auto"
     item_type: str = "general"
     time_window: str = "normal"
 
     def cache_key(self) -> str:
-        return f"{self.origin}|{self.destination}|{self.weight:.3f}|{self.service_level}".lower()
+        weight_bucket = round(self.weight * 2) / 2
+        return (f"{self.origin}|{self.destination}|{self.courier}|{weight_bucket:.1f}|{self.service_level}").lower()
 
 
 @dataclass(slots=True)
