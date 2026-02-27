@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `src/modules/quote/route.py`：地理路由标准化组件，支持省/市/自治区别名与后缀容错。
 - `quote` 配置新增熔断参数：`circuit_fail_threshold`、`circuit_open_seconds`。
 - 自动报价新增测试：路由标准化缓存命中、远程 provider 熔断打开后自动降级。
+- `src/modules/orders/service.py`：订单履约闭环 MVP（状态映射、交付动作、售后模板、人工接管、订单追溯）。
+- CLI 新增 `orders` 命令：`upsert/deliver/after-sales/takeover/resume/trace`。
+- 新增测试 `tests/test_orders.py`，覆盖订单状态同步、交付、售后与追溯能力。
 
 ### Changed
 - `QuoteRequest.cache_key()` 升级为分层缓存 key：`origin + destination + courier + weight_bucket + service_level`。
@@ -19,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 远程 provider 失败计数与熔断窗口
   - fallback 失败分类（`timeout/transient/unavailable/provider_error`）
   - 回退结果追加标准化路由可观测字段
+- CI workflow 调整为严格失败策略：测试步骤不再 `continue-on-error`。
 
 ## [4.4.0] - 2026-02-27
 

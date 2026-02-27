@@ -247,6 +247,65 @@ async def cmd_messages(args: argparse.Namespace) -> None:
         await client.disconnect()
 
 
+async def cmd_orders(args: argparse.Namespace) -> None:
+    from src.modules.orders.service import OrderFulfillmentService
+
+    service = OrderFulfillmentService(db_path=args.db_path or "data/orders.db")
+    action = args.action
+
+    if action == "upsert":
+        if not args.order_id or not args.status:
+            _json_out({"error": "Specify --order-id and --status"})
+            return
+        result = service.upsert_order(
+            order_id=args.order_id,
+            raw_status=args.status,
+            session_id=args.session_id or "",
+            quote_snapshot={"total_fee": args.quote_fee} if args.quote_fee is not None else {},
+            item_type=args.item_type or "virtual",
+        )
+        _json_out(result)
+        return
+
+    if action == "deliver":
+        if not args.order_id:
+            _json_out({"error": "Specify --order-id"})
+            return
+        _json_out(service.deliver(order_id=args.order_id, dry_run=bool(args.dry_run)))
+        return
+
+    if action == "after-sales":
+        if not args.order_id:
+            _json_out({"error": "Specify --order-id"})
+            return
+        _json_out(service.create_after_sales_case(order_id=args.order_id, issue_type=args.issue_type or "delay"))
+        return
+
+    if action == "takeover":
+        if not args.order_id:
+            _json_out({"error": "Specify --order-id"})
+            return
+        _json_out({"order_id": args.order_id, "manual_takeover": service.set_manual_takeover(args.order_id, True)})
+        return
+
+    if action == "resume":
+        if not args.order_id:
+            _json_out({"error": "Specify --order-id"})
+            return
+        ok = service.set_manual_takeover(args.order_id, False)
+        _json_out({"order_id": args.order_id, "manual_takeover": False if ok else None, "success": ok})
+        return
+
+    if action == "trace":
+        if not args.order_id:
+            _json_out({"error": "Specify --order-id"})
+            return
+        _json_out(service.trace_order(args.order_id))
+        return
+
+    _json_out({"error": f"Unknown orders action: {action}"})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xianyu-cli",
@@ -316,6 +375,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workflow-db", default=None, help="workflow 数据库路径")
     p.add_argument("--window-minutes", type=int, default=1440, help="SLA 统计窗口（分钟）")
 
+    # orders
+    p = sub.add_parser("orders", help="订单履约")
+    p.add_argument(
+        "--action",
+        required=True,
+        choices=["upsert", "deliver", "after-sales", "takeover", "resume", "trace"],
+    )
+    p.add_argument("--order-id", help="订单 ID")
+    p.add_argument("--status", help="原始订单状态")
+    p.add_argument("--session-id", help="关联会话 ID")
+    p.add_argument("--item-type", choices=["virtual", "physical"], default="virtual", help="订单类型")
+    p.add_argument("--quote-fee", type=float, default=None, help="关联报价金额")
+    p.add_argument("--issue-type", default="delay", help="售后类型：delay/refund/quality")
+    p.add_argument("--db-path", default="data/orders.db", help="订单数据库路径")
+    p.add_argument("--dry-run", action="store_true", help="仅模拟执行")
+
     return parser
 
 
@@ -336,6 +411,7 @@ def main() -> None:
         "analytics": cmd_analytics,
         "accounts": cmd_accounts,
         "messages": cmd_messages,
+        "orders": cmd_orders,
     }
 
     handler = dispatch.get(args.command)

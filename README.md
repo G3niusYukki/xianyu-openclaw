@@ -67,6 +67,7 @@ AI: 📊 今日浏览 1,247 | 想要 89 | 成交 12 | 营收 ¥38,700
 | ✨ | **一键擦亮** | 一句话批量擦亮全部商品，模拟人工随机间隔 |
 | 💰 | **价格管理** | 单个调价、批量调价、智能定价策略 |
 | 💬 | **消息自动回复 + 自动报价** | 询价识别、缺参补问、结构化报价、失败降级与合规回复 |
+| 📦 | **订单履约闭环（MVP）** | 下单状态映射、虚拟/实物交付动作、售后模板、人工接管与追溯 |
 | ⚙️ | **常驻 Workflow Worker** | 7x24 轮询处理、幂等去重、崩溃恢复、人工接管跳过 |
 | 📈 | **运营 SLA 监控** | 首响 P95 / 报价成功率 / 报价回退率采集与阈值告警 |
 | 📊 | **数据分析** | 每日报告、趋势分析、CSV 导出 |
@@ -199,6 +200,9 @@ python -m src.cli accounts  --action list
 python -m src.cli messages  --action auto-reply --limit 20 --dry-run
 python -m src.cli messages  --action auto-workflow --dry-run
 python -m src.cli messages  --action workflow-stats --window-minutes 60
+python -m src.cli orders    --action upsert --order-id o1 --status 已付款 --session-id s1
+python -m src.cli orders    --action deliver --order-id o1 --item-type virtual
+python -m src.cli orders    --action trace --order-id o1
 python -m src.dashboard_server --port 8091
 ```
 
