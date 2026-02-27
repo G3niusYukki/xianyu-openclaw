@@ -112,6 +112,8 @@ python -m src.cli messages --action auto-workflow --limit 20 --dry-run
 python -m src.cli messages --action run-worker --limit 20 --interval-seconds 15
 python -m src.cli messages --action workflow-status
 python -m src.cli messages --action workflow-transition --session-id s1 --stage ORDERED --force-state
+python -m src.cli quote --action health
+python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
 ```
 
 Windows 可用批处理脚本：
@@ -122,6 +124,8 @@ scripts\windows\auto_workflow.bat 20 --dry-run
 scripts\windows\run_worker.bat 20 15
 scripts\windows\workflow_status.bat
 scripts\windows\workflow_transition.bat s1 ORDERED --force-state
+scripts\windows\quote_health.bat
+scripts\windows\quote_preview.bat "寄到上海 2kg 圆通 报价"
 scripts\windows\dashboard.bat 8091
 ```
 
@@ -238,6 +242,8 @@ python -m src.cli messages  --action auto-followup --limit 20 --dry-run
 python -m src.cli messages  --action auto-workflow --limit 20 --dry-run
 python -m src.cli messages  --action run-worker --limit 20 --interval-seconds 15
 python -m src.cli messages  --action workflow-status
+python -m src.cli quote --action health
+python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
 python -m src.dashboard_server --port 8091
 ```
 

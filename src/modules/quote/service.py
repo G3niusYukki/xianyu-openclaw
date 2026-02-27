@@ -6,6 +6,7 @@ Quote Service
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import math
 import re
 from typing import Any
@@ -72,6 +73,20 @@ class QuoteService:
             self.preferred_couriers = set()
 
         self.default_profile = self._normalize_profile(self.config.get("pricing_profile"))
+
+    def get_cost_table_stats(self, max_files: int = 20) -> dict[str, Any]:
+        files = self.cost_table_repo._collect_files()
+        self.cost_table_repo._reload_if_needed()
+
+        couriers = Counter(normalize_courier_name(item.courier) for item in self.cost_table_repo._records)
+        top_couriers = sorted(couriers.items(), key=lambda item: (-item[1], item[0]))
+        return {
+            "table_dir": str(self.cost_table_repo.table_dir),
+            "file_count": len(files),
+            "files": [path.name for path in files[:max(1, max_files)]],
+            "record_count": len(self.cost_table_repo._records),
+            "courier_record_counts": dict(top_couriers),
+        }
 
     def detect_quote_intent(self, message_text: str, item_title: str = "") -> bool:
         merged = f"{message_text or ''} {item_title or ''}".lower()

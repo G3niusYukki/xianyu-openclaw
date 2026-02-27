@@ -22,10 +22,13 @@
     python -m src.cli messages --action run-worker --limit 20 --interval-seconds 15
     python -m src.cli messages --action workflow-status
     python -m src.cli messages --action workflow-transition --session-id s1 --stage ORDERED --force-state
+    python -m src.cli quote --action health
+    python -m src.cli quote --action preview --message "寄到上海 2kg 圆通 报价"
 """
 
 import argparse
 import asyncio
+from dataclasses import asdict
 import json
 import sys
 from typing import Any
@@ -258,6 +261,85 @@ async def cmd_messages(args: argparse.Namespace) -> None:
         await client.disconnect()
 
 
+async def cmd_quote(args: argparse.Namespace) -> None:
+    from src.modules.quote.service import QuoteService
+
+    service = QuoteService()
+    action = args.action
+
+    if action == "health":
+        mode = str(service.config.get("mode", "rule_only"))
+        stats = service.get_cost_table_stats(max_files=30)
+        _json_out(
+            {
+                "mode": mode,
+                "origin_city": service.config.get("origin_city", "杭州"),
+                "pricing_profile": service.config.get("pricing_profile", "normal"),
+                "cost_table": stats,
+                "api_cost_ready": bool(str(service.config.get("cost_api_url", "")).strip()),
+                "remote_quote_ready": bool(str(service.config.get("remote_api_url", "")).strip()),
+            }
+        )
+        return
+
+    if action == "candidates":
+        if not args.origin_city or not args.destination_city:
+            _json_out({"error": "Specify --origin-city and --destination-city"})
+            return
+        records = service.cost_table_repo.find_candidates(
+            origin=args.origin_city,
+            destination=args.destination_city,
+            courier=args.courier,
+            limit=max(args.limit or 20, 1),
+        )
+        _json_out(
+            {
+                "total": len(records),
+                "origin_city": args.origin_city,
+                "destination_city": args.destination_city,
+                "courier": args.courier or "",
+                "candidates": [
+                    {
+                        "courier": item.courier,
+                        "origin": item.origin,
+                        "destination": item.destination,
+                        "first_cost": item.first_cost,
+                        "extra_cost": item.extra_cost,
+                        "throw_ratio": item.throw_ratio,
+                        "source_file": item.source_file,
+                        "source_sheet": item.source_sheet,
+                    }
+                    for item in records
+                ],
+            }
+        )
+        return
+
+    if action == "preview":
+        if not args.message:
+            _json_out({"error": "Specify --message"})
+            return
+
+        parsed = service.parse_quote_request(args.message, item_title=args.item_title or "")
+        quote, source = await service.compute_quote(parsed)
+        first_reply = service.build_first_reply(parsed)
+        quote_message = service.build_quote_message(quote, parsed.request) if quote else ""
+        _json_out(
+            {
+                "is_quote_intent": parsed.is_quote_intent,
+                "missing_fields": parsed.missing_fields,
+                "request": asdict(parsed.request),
+                "first_reply": first_reply,
+                "quote_source": source,
+                "quote_result": asdict(quote) if quote is not None else None,
+                "quote_message": quote_message,
+            }
+        )
+        return
+
+    _json_out({"error": f"Unknown quote action: {action}"})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xianyu-cli",
@@ -341,6 +423,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="worker 最大运行时长（仅 run-worker）",
     )
 
+    # quote
+    p = sub.add_parser("quote", help="自动报价诊断与预览")
+    p.add_argument("--action", required=True, choices=["health", "preview", "candidates"])
+    p.add_argument("--message", help="买家消息文本（preview 时必填）")
+    p.add_argument("--item-title", default="", help="商品标题（preview 可选）")
+    p.add_argument("--origin-city", help="始发地（candidates 时必填）")
+    p.add_argument("--destination-city", help="目的地（candidates 时必填）")
+    p.add_argument("--courier", help="快递公司（candidates 可选）")
+    p.add_argument("--limit", type=int, default=20, help="候选数量上限（candidates）")
+
     return parser
 
 
@@ -361,6 +453,7 @@ def main() -> None:
         "analytics": cmd_analytics,
         "accounts": cmd_accounts,
         "messages": cmd_messages,
+        "quote": cmd_quote,
     }
 
     handler = dispatch.get(args.command)
