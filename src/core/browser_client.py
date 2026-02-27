@@ -72,6 +72,7 @@ class BrowserClient:
         self.state = BrowserState.DISCONNECTED
         self._client: httpx.AsyncClient | None = None
         self._tabs: dict[str, str] = {}
+        self._active_tab_id: str | None = None
 
     def _apply_env(self) -> None:
         if v := os.environ.get("OPENCLAW_GATEWAY_HOST"):
@@ -150,6 +151,7 @@ class BrowserClient:
             await self._client.aclose()
             self._client = None
         self.state = BrowserState.DISCONNECTED
+        self._active_tab_id = None
         self.logger.info("Disconnected from OpenClaw browser")
 
     async def is_connected(self) -> bool:
@@ -180,6 +182,7 @@ class BrowserClient:
         data = resp.json()
         target_id = data.get("targetId", data.get("id", f"tab_{len(self._tabs)}"))
         self._tabs[target_id] = target_id
+        self._active_tab_id = None
         self.logger.debug(f"Opened tab: {target_id}")
         return target_id
 
@@ -190,15 +193,21 @@ class BrowserClient:
                 params=self._profile_params(),
             )
             self._tabs.pop(page_id, None)
+            if self._active_tab_id == page_id:
+                self._active_tab_id = None
             return True
         except Exception:
             return False
 
     async def _focus_tab(self, page_id: str) -> None:
-        await self._client.post(
+        if self._active_tab_id == page_id:
+            return
+        resp = await self._client.post(
             "/tabs/focus",
             params={**self._profile_params(), "targetId": page_id},
         )
+        if resp.is_success:
+            self._active_tab_id = page_id
 
     # ── navigation ──
 
