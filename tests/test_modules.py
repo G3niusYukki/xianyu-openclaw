@@ -99,6 +99,18 @@ def test_messages_generate_reply_for_online_fulfillment() -> None:
     assert "支持代下单服务" in reply
 
 
+def test_messages_extract_locations_non_greedy_origin() -> None:
+    origin, destination = MessagesService._extract_locations("从安徽寄到北京市朝阳区 2kg 多少钱")
+    assert origin == "安徽"
+    assert destination == "北京市朝阳区"
+
+
+def test_messages_extract_locations_with_from_by_prefix() -> None:
+    origin, destination = MessagesService._extract_locations("由杭州发到深圳市 1kg 报价")
+    assert origin == "杭州"
+    assert destination == "深圳市"
+
+
 @pytest.mark.asyncio
 async def test_messages_auto_reply_unread_dry_run(mock_controller) -> None:
     service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 5})

@@ -231,8 +231,12 @@ class MessagesService:
         text = message_text or ""
 
         patterns = [
-            r"从\s*([\u4e00-\u9fa5A-Za-z]{2,10})\s*(?:寄到|到)\s*([\u4e00-\u9fa5A-Za-z]{2,10})",
-            r"([\u4e00-\u9fa5A-Za-z]{2,10})\s*(?:寄到|到)\s*([\u4e00-\u9fa5A-Za-z]{2,10})",
+            (
+                r"(?:从|由)\s*([\u4e00-\u9fa5]{2,20}?)\s*"
+                r"(?:寄到|发到|送到|到)\s*"
+                r"([\u4e00-\u9fa5]{2,20}(?:省|市|区|县|自治区|特别行政区|自治州|地区)?)"
+            ),
+            r"([\u4e00-\u9fa5]{2,20}?)\s*(?:寄到|发到|送到|到)\s*([\u4e00-\u9fa5]{2,20})",
         ]
         for pattern in patterns:
             m = re.search(pattern, text)
@@ -240,12 +244,18 @@ class MessagesService:
                 return m.group(1), m.group(2)
 
         dest = None
-        dm = re.search(r"(?:寄到|到)\s*([\u4e00-\u9fa5A-Za-z]{2,10})", text)
+        dm = re.search(
+            r"(?:寄到|发到|送到|到)\s*([\u4e00-\u9fa5]{2,20}(?:省|市|区|县|自治区|特别行政区|自治州|地区)?)",
+            text,
+        )
         if dm:
             dest = dm.group(1)
 
         origin = None
-        om = re.search(r"(?:从|寄自)\s*([\u4e00-\u9fa5A-Za-z]{2,10})", text)
+        om = re.search(
+            r"(?:从|由|寄自|发自)\s*([\u4e00-\u9fa5]{2,20}(?:省|市|区|县|自治区|特别行政区|自治州|地区)?)",
+            text,
+        )
         if om:
             origin = om.group(1)
 
