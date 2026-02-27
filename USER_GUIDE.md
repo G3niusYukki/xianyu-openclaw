@@ -43,6 +43,7 @@ AI 助手会自动帮你在闲鱼上完成这些操作。
 | 能上网 | 需要连接互联网 |
 | 闲鱼账号 | 能正常登录的闲鱼账号 |
 | AI 服务密钥 | Anthropic、OpenAI 或 DeepSeek（任选一个，注册免费，使用按量付费） |
+| Python 3.10+ | 仅在本地运行脚本（如一键向导、可视化后台）时需要 |
 | Docker | 一个免费的软件，用来运行工具 |
 
 ---
@@ -128,7 +129,13 @@ XIANYU_COOKIE_1=你的闲鱼Cookie（下一步教你获取）
 不想手动改 `.env` 的话，直接运行：
 
 ```bash
-python -m src.setup_wizard
+python3 -m src.setup_wizard
+```
+
+Windows 用户也可以先执行（自动创建虚拟环境并安装依赖）：
+
+```bat
+scripts\windows\setup_windows.bat
 ```
 
 按提示一步一步输入：

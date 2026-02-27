@@ -214,6 +214,16 @@ class WorkflowStore:
     def set_manual_takeover(self, session_id: str, enabled: bool) -> bool:
         now = self._now()
         with self._connect() as conn:
+            row = conn.execute("SELECT 1 FROM session_tasks WHERE session_id=?", (session_id,)).fetchone()
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO session_tasks(session_id, state, manual_takeover, created_at, updated_at)
+                    VALUES (?, ?, 0, ?, ?)
+                    """,
+                    (session_id, WorkflowState.NEW.value, now, now),
+                )
+
             cur = conn.execute(
                 "UPDATE session_tasks SET manual_takeover=?, state=?, updated_at=? WHERE session_id=?",
                 (
@@ -282,6 +292,57 @@ class WorkflowStore:
                     (f"illegal_transition:{from_state}->{to_state.value}", now, session_id),
                 )
                 return False
+
+            return True
+
+    def force_state(
+        self,
+        session_id: str,
+        to_state: WorkflowState,
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """强制写入会话状态（用于人工介入纠偏场景）。"""
+
+        now = self._now()
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+
+        with self._connect() as conn:
+            row = conn.execute("SELECT state FROM session_tasks WHERE session_id=?", (session_id,)).fetchone()
+            from_state = WorkflowState.NEW.value if row is None else str(row["state"])
+
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO session_tasks(session_id, state, manual_takeover, created_at, updated_at)
+                    VALUES (?, ?, 0, ?, ?)
+                    """,
+                    (session_id, WorkflowState.NEW.value, now, now),
+                )
+
+            conn.execute(
+                "UPDATE session_tasks SET state=?, updated_at=?, last_error=NULL WHERE session_id=?",
+                (to_state.value, now, session_id),
+            )
+
+            conn.execute(
+                """
+                INSERT INTO session_state_transitions(
+                    session_id, from_state, to_state, status, reason, metadata, error, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    from_state,
+                    to_state.value,
+                    "forced",
+                    reason,
+                    metadata_json,
+                    None,
+                    now,
+                ),
+            )
 
             return True
 

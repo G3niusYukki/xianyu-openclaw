@@ -111,9 +111,15 @@ docker compose up -d
 如果你不想手动编辑 `.env`，可以直接运行交互式向导，按提示一步步输入 API Key、Cookie、密码并自动启动：
 
 ```bash
-python -m src.setup_wizard
+python3 -m src.setup_wizard
 # 或
 ./scripts/one_click_deploy.sh
+```
+
+Windows 可执行：
+
+```bat
+scripts\windows\setup_windows.bat
 ```
 
 ---
@@ -123,7 +129,7 @@ python -m src.setup_wizard
 项目内置了轻量后台页面（本地 Web）：
 
 ```bash
-python -m src.dashboard_server --port 8091
+python3 -m src.dashboard_server --port 8091
 ```
 
 打开 **http://localhost:8091** 可查看：

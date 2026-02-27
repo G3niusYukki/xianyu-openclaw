@@ -30,6 +30,32 @@ def _json_out(data: Any) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
+def _resolve_workflow_state(stage: str | None) -> Any:
+    if not stage:
+        return None
+
+    from src.modules.messages.workflow import WorkflowState
+
+    normalized = stage.strip().lower().replace("-", "_")
+    aliases = {
+        "new": WorkflowState.NEW,
+        "replied": WorkflowState.REPLIED,
+        "reply": WorkflowState.REPLIED,
+        "quoted": WorkflowState.QUOTED,
+        "quote": WorkflowState.QUOTED,
+        "followed": WorkflowState.FOLLOWED,
+        "followup": WorkflowState.FOLLOWED,
+        "follow_up": WorkflowState.FOLLOWED,
+        "ordered": WorkflowState.ORDERED,
+        "order": WorkflowState.ORDERED,
+        "closed": WorkflowState.CLOSED,
+        "close": WorkflowState.CLOSED,
+        "manual": WorkflowState.MANUAL,
+        "takeover": WorkflowState.MANUAL,
+    }
+    return aliases.get(normalized)
+
+
 async def cmd_publish(args: argparse.Namespace) -> None:
     from src.core.browser_client import create_browser_client
     from src.modules.listing.models import Listing
@@ -177,7 +203,7 @@ async def cmd_accounts(args: argparse.Namespace) -> None:
 async def cmd_messages(args: argparse.Namespace) -> None:
     action = args.action
 
-    if action == "workflow-stats":
+    if action in {"workflow-stats", "workflow-status"}:
         from src.modules.messages.workflow import WorkflowStore
 
         store = WorkflowStore(db_path=args.workflow_db)
@@ -185,6 +211,46 @@ async def cmd_messages(args: argparse.Namespace) -> None:
             {
                 "workflow": store.get_workflow_summary(),
                 "sla": store.get_sla_summary(window_minutes=args.window_minutes or 1440),
+            }
+        )
+        return
+
+    if action == "workflow-transition":
+        from src.modules.messages.workflow import WorkflowStore
+
+        if not args.session_id or not args.stage:
+            _json_out({"error": "Specify --session-id and --stage"})
+            return
+
+        target_state = _resolve_workflow_state(args.stage)
+        if target_state is None:
+            _json_out({"error": f"Unknown workflow stage: {args.stage}"})
+            return
+
+        store = WorkflowStore(db_path=args.workflow_db)
+        ok = store.transition_state(
+            session_id=args.session_id,
+            to_state=target_state,
+            reason="cli_workflow_transition",
+            metadata={"source": "cli", "requested_stage": args.stage},
+        )
+        forced = False
+        if not ok and bool(args.force_state):
+            ok = store.force_state(
+                session_id=args.session_id,
+                to_state=target_state,
+                reason="cli_workflow_transition_force",
+                metadata={"source": "cli", "requested_stage": args.stage, "force_state": True},
+            )
+            forced = bool(ok)
+
+        _json_out(
+            {
+                "session_id": args.session_id,
+                "target_state": target_state.value,
+                "success": bool(ok),
+                "forced": forced,
+                "session": store.get_session(args.session_id),
             }
         )
         return
@@ -584,11 +650,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--action",
         required=True,
-        choices=["list-unread", "reply", "auto-reply", "auto-workflow", "workflow-stats"],
+        choices=[
+            "list-unread",
+            "reply",
+            "auto-reply",
+            "auto-workflow",
+            "workflow-stats",
+            "workflow-status",
+            "workflow-transition",
+        ],
     )
     p.add_argument("--limit", type=int, default=20, help="最多处理会话数")
     p.add_argument("--session-id", help="会话 ID（reply 时必填）")
     p.add_argument("--text", help="回复内容（reply 时必填）")
+    p.add_argument("--stage", help="工作流目标阶段（workflow-transition 时必填）")
+    p.add_argument("--force-state", action="store_true", help="非法迁移时强制写入状态")
     p.add_argument("--dry-run", action="store_true", help="仅生成回复，不真正发送")
     p.add_argument("--daemon", action="store_true", help="常驻运行 workflow worker")
     p.add_argument("--max-loops", type=int, default=None, help="daemon 模式下最多循环次数")
