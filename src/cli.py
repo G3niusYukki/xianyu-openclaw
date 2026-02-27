@@ -5,6 +5,8 @@
 所有命令输出结构化 JSON，方便 Agent 解析结果。
 
 用法:
+    python -m src.cli automation --action setup --enable-feishu --feishu-webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+    python -m src.cli automation --action status
     python -m src.cli doctor --strict
     python -m src.cli publish --title "..." --price 5999 --images img1.jpg img2.jpg
     python -m src.cli polish --all --max 50
@@ -454,6 +456,51 @@ async def cmd_doctor(args: argparse.Namespace) -> None:
         raise SystemExit(2)
 
 
+async def cmd_automation(args: argparse.Namespace) -> None:
+    from src.modules.messages.notifications import FeishuNotifier
+    from src.modules.messages.setup import AutomationSetupService
+
+    action = args.action
+    setup_service = AutomationSetupService(config_path=args.config_path or "config/config.yaml")
+
+    if action == "status":
+        _json_out(setup_service.status())
+        return
+
+    if action == "setup":
+        feishu_enabled = bool(args.enable_feishu or str(args.feishu_webhook or "").strip())
+        result = setup_service.apply(
+            poll_interval_seconds=float(args.poll_interval or 5.0),
+            scan_limit=int(args.scan_limit or 20),
+            claim_limit=int(args.claim_limit or 10),
+            reply_target_seconds=float(args.reply_target_seconds or 3.0),
+            feishu_enabled=feishu_enabled,
+            feishu_webhook=str(args.feishu_webhook or "").strip(),
+            notify_on_start=bool(args.notify_on_start),
+            notify_on_alert=not bool(args.disable_notify_on_alert),
+            notify_recovery=not bool(args.disable_notify_recovery),
+            heartbeat_minutes=int(args.heartbeat_minutes or 30),
+        )
+        _json_out(result)
+        return
+
+    if action == "test-feishu":
+        webhook = str(args.feishu_webhook or "").strip() or setup_service.get_feishu_webhook()
+        if not webhook:
+            _json_out({"error": "No feishu webhook configured. Use --feishu-webhook or run automation setup first."})
+            raise SystemExit(2)
+
+        notifier = FeishuNotifier(webhook_url=webhook)
+        text = str(args.message or "【闲鱼自动化】飞书通知测试成功")
+        ok = await notifier.send_text(text)
+        _json_out({"success": ok, "message": text})
+        if not ok:
+            raise SystemExit(2)
+        return
+
+    _json_out({"error": f"Unknown automation action: {action}"})
+
+
 async def cmd_quote(args: argparse.Namespace) -> None:
     from src.core.config import get_config
     from src.modules.quote import CostTableRepository, QuoteSetupService
@@ -731,6 +778,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-quote", action="store_true", help="跳过自动报价成本源检查")
     p.add_argument("--strict", action="store_true", help="警告也按失败处理（返回非0）")
 
+    # automation
+    p = sub.add_parser("automation", help="自动化推进配置与飞书接入")
+    p.add_argument("--action", required=True, choices=["setup", "status", "test-feishu"])
+    p.add_argument("--config-path", default="config/config.yaml", help="配置文件路径")
+    p.add_argument("--poll-interval", type=float, default=5.0, help="workflow 轮询间隔（秒）")
+    p.add_argument("--scan-limit", type=int, default=20, help="每轮扫描会话数")
+    p.add_argument("--claim-limit", type=int, default=10, help="每轮最大认领任务数")
+    p.add_argument("--reply-target-seconds", type=float, default=3.0, help="自动首响目标时延（秒）")
+    p.add_argument("--enable-feishu", action="store_true", help="启用飞书 webhook 通知")
+    p.add_argument("--feishu-webhook", default="", help="飞书机器人 webhook URL")
+    p.add_argument("--notify-on-start", action="store_true", help="worker 启动时发送通知")
+    p.add_argument("--disable-notify-on-alert", action="store_true", help="关闭 SLA 告警通知")
+    p.add_argument("--disable-notify-recovery", action="store_true", help="关闭告警恢复通知")
+    p.add_argument("--heartbeat-minutes", type=int, default=30, help="心跳通知周期（分钟，0=关闭）")
+    p.add_argument("--message", default="【闲鱼自动化】飞书通知测试成功", help="test-feishu 测试消息")
+
     # quote
     p = sub.add_parser("quote", help="自动报价诊断与配置")
     p.add_argument("--action", required=True, choices=["health", "candidates", "setup"])
@@ -792,6 +855,7 @@ def main() -> None:
         "compliance": cmd_compliance,
         "ai": cmd_ai,
         "doctor": cmd_doctor,
+        "automation": cmd_automation,
         "quote": cmd_quote,
         "growth": cmd_growth,
     }

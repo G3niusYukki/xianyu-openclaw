@@ -13,8 +13,9 @@
 5. [启动工具](#5-启动工具)
 6. [怎么用？直接对话就行](#6-怎么用直接对话就行)
 7. [日常维护](#7-日常维护)
-8. [常见问题](#8-常见问题)
-9. [名词解释](#9-名词解释)
+8. [自动化推进与飞书通知](#8-自动化推进与飞书通知)
+9. [常见问题](#9-常见问题)
+10. [名词解释](#10-名词解释)
 
 ---
 
@@ -264,7 +265,27 @@ docker compose up -d
 
 ---
 
-## 8. 常见问题
+## 8. 自动化推进与飞书通知
+
+如果你希望系统自动持续处理询盘，并把告警推送到飞书，可以用下面命令：
+
+```bash
+python3 -m src.cli automation --action setup --enable-feishu --feishu-webhook "你的飞书webhook"
+python3 -m src.cli automation --action status
+python3 -m src.cli automation --action test-feishu
+```
+
+Windows 可以直接运行：
+
+```bat
+scripts\windows\automation_setup.bat 你的飞书webhook
+scripts\windows\feishu_test.bat
+scripts\windows\run_worker.bat 20 5
+```
+
+---
+
+## 9. 常见问题
 
 ### Q: 打不开 localhost:8080
 
@@ -286,7 +307,7 @@ docker compose logs -f
 
 ---
 
-## 9. 名词解释
+## 10. 名词解释
 
 | 名词 | 解释 |
 |------|------|

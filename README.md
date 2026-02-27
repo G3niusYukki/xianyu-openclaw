@@ -73,6 +73,7 @@ AI: 📊 今日浏览 1,247 | 想要 89 | 成交 12 | 营收 ¥38,700
 | 📈 | **运营 SLA 监控** | 首响 P95 / 报价成功率 / 报价回退率采集与阈值告警 |
 | 🧪 | **增长实验与漏斗** | A/B 分流、策略版本管理、漏斗统计、显著性检验 |
 | 💸 | **AI 降本治理** | `always/auto/minimal`、任务级开关、预算与缓存、调用成本统计 |
+| 🔔 | **飞书告警通知** | Workflow 启动/心跳/SLA 告警与恢复消息推送 |
 | 📊 | **数据分析** | 每日报告、趋势分析、CSV 导出 |
 | 👥 | **多账号管理** | 同时管理多个闲鱼账号，Cookie 加密存储 |
 | 🔒 | **安全优先** | AES 加密 Cookie、参数化 SQL、请求限速 |
@@ -220,6 +221,9 @@ python -m src.cli growth    --action assign --experiment-id exp_reply --subject-
 python -m src.cli growth    --action funnel --days 7 --bucket day
 python -m src.cli ai        --action cost-stats
 python -m src.cli doctor    --strict
+python -m src.cli automation --action setup --enable-feishu --feishu-webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+python -m src.cli automation --action status
+python -m src.cli automation --action test-feishu
 python -m src.dashboard_server --port 8091
 ```
 

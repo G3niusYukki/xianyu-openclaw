@@ -18,6 +18,15 @@ class DummyMessageService:
         return self._detail
 
 
+class DummyNotifier:
+    def __init__(self):
+        self.messages = []
+
+    async def send_text(self, text):
+        self.messages.append(str(text))
+        return True
+
+
 def test_workflow_state_machine_and_illegal_transition(temp_dir) -> None:
     store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
     store.ensure_session({"session_id": "s1", "last_message": "hello"})
@@ -123,3 +132,37 @@ async def test_workflow_worker_skips_manual_takeover(temp_dir) -> None:
 
     assert result["skipped_manual"] == 1
     assert result["success"] == 0
+
+
+@pytest.mark.asyncio
+async def test_workflow_worker_sends_feishu_alert_notification(temp_dir) -> None:
+    store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
+    notifier = DummyNotifier()
+    service = DummyMessageService(
+        sessions=[
+            {
+                "session_id": "s5",
+                "last_message": "在吗",
+                "peer_name": "D",
+                "item_title": "商品",
+            }
+        ],
+        detail={"sent": True, "is_quote": False, "quote_success": False, "quote_fallback": False},
+    )
+    worker = WorkflowWorker(
+        message_service=service,
+        store=store,
+        config={
+            "scan_limit": 5,
+            "claim_limit": 5,
+            "sla": {"window_minutes": 60, "min_samples": 1, "reply_p95_threshold_ms": -1},
+            "notifications": {"feishu": {"notify_on_alert": True}},
+        },
+        notifier=notifier,
+    )
+
+    result = await worker.run_once(dry_run=True)
+
+    assert result["alerts"]
+    assert notifier.messages
+    assert "SLA 告警" in notifier.messages[0]

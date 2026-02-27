@@ -15,6 +15,13 @@ from typing import Any
 
 from src.core.config import get_config
 from src.core.logger import get_logger
+from src.modules.messages.notifications import (
+    FeishuNotifier,
+    format_alert_message,
+    format_heartbeat_message,
+    format_recovery_message,
+    format_start_message,
+)
 
 
 class WorkflowState(str, Enum):
@@ -575,7 +582,13 @@ class WorkflowStore:
 class WorkflowWorker:
     """常驻工作流 Worker（轮询、去重、重试、崩溃恢复）。"""
 
-    def __init__(self, message_service: Any, store: WorkflowStore | None = None, config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        message_service: Any,
+        store: WorkflowStore | None = None,
+        config: dict[str, Any] | None = None,
+        notifier: Any | None = None,
+    ):
         self.message_service = message_service
         self.logger = get_logger()
 
@@ -593,6 +606,47 @@ class WorkflowWorker:
         self.max_attempts = int(self.config.get("max_attempts", 3))
         self.backoff_seconds = int(self.config.get("backoff_seconds", 2))
         self.sla_config = self.config.get("sla", {})
+        self._notifier = notifier
+        self._had_active_alert = False
+        self._last_heartbeat_ts = 0.0
+
+        notifications_cfg = self.config.get("notifications", {})
+        if not isinstance(notifications_cfg, dict):
+            notifications_cfg = {}
+        feishu_cfg = notifications_cfg.get("feishu", {})
+        if not isinstance(feishu_cfg, dict):
+            feishu_cfg = {}
+
+        self.notify_on_alert = bool(feishu_cfg.get("notify_on_alert", True))
+        self.notify_on_start = bool(feishu_cfg.get("notify_on_start", False))
+        self.notify_recovery = bool(feishu_cfg.get("notify_recovery", True))
+        self.heartbeat_minutes = max(0, int(feishu_cfg.get("heartbeat_minutes", 30)))
+
+        if self._notifier is None and bool(feishu_cfg.get("enabled", False)):
+            webhook = str(feishu_cfg.get("webhook", "")).strip()
+            if webhook:
+                self._notifier = FeishuNotifier(
+                    webhook_url=webhook,
+                    bot_name=str(feishu_cfg.get("bot_name", "闲鱼自动化助手")),
+                    timeout_seconds=float(feishu_cfg.get("timeout_seconds", 5.0)),
+                )
+
+    async def _send_notification(self, text: str) -> bool:
+        if self._notifier is None:
+            return False
+
+        send_text = getattr(self._notifier, "send_text", None)
+        if send_text is None:
+            return False
+
+        try:
+            result = send_text(text)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return bool(result)
+        except Exception as exc:
+            self.logger.warning(f"notification send failed: {exc}")
+            return False
 
     async def run_once(self, dry_run: bool = False) -> dict[str, Any]:
         recovered = self.store.recover_expired_jobs()
@@ -662,6 +716,17 @@ class WorkflowWorker:
         summary = self.store.get_workflow_summary()
         sla_summary = self.store.get_sla_summary(window_minutes=int(self.sla_config.get("window_minutes", 60)))
 
+        if alerts and self.notify_on_alert:
+            text = format_alert_message(alerts=alerts, sla=sla_summary, workflow=summary)
+            await self._send_notification(text)
+
+        if alerts:
+            self._had_active_alert = True
+        elif self._had_active_alert and self.notify_recovery:
+            text = format_recovery_message(sla=sla_summary, workflow=summary)
+            await self._send_notification(text)
+            self._had_active_alert = False
+
         return {
             "action": "auto_workflow",
             "dry_run": dry_run,
@@ -681,9 +746,20 @@ class WorkflowWorker:
         loops = 0
         last = {}
 
+        if self.notify_on_start:
+            await self._send_notification(format_start_message(self.poll_interval_seconds, dry_run=dry_run))
+            self._last_heartbeat_ts = time.time()
+
         while True:
             loops += 1
             last = await self.run_once(dry_run=dry_run)
+
+            if self.heartbeat_minutes > 0:
+                now = time.time()
+                if self._last_heartbeat_ts <= 0 or (now - self._last_heartbeat_ts) >= self.heartbeat_minutes * 60:
+                    await self._send_notification(format_heartbeat_message(last=last, loops=loops))
+                    self._last_heartbeat_ts = now
+
             if max_loops and loops >= max_loops:
                 break
             await asyncio.sleep(max(0.2, self.poll_interval_seconds))
