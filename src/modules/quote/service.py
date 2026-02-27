@@ -182,7 +182,7 @@ class QuoteService:
     def _extract_route(self, text: str) -> tuple[str | None, str | None]:
         text = text or ""
         pattern = (
-            r"(?:从|由)\s*([一-龥]{2,20}(?:省|市|区|县|自治区|特别行政区|自治州|地区)?)\s*"
+            r"(?:从|由)\s*([一-龥]{2,20}?)\s*"
             r"(?:寄到|发到|送到|到)\s*([一-龥]{2,20}(?:省|市|区|县|自治区|特别行政区|自治州|地区)?)"
         )
         matched = re.search(pattern, text)
