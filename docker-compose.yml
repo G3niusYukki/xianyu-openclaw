@@ -10,8 +10,14 @@ services:
       - ./config:/home/node/.openclaw/workspace/config
       - ./data:/home/node/.openclaw/workspace/data
       - ./requirements.txt:/home/node/.openclaw/workspace/requirements.txt
+      - ./skills:/data/workspace/skills
+      - ./src:/data/workspace/src
+      - ./config:/data/workspace/config
+      - ./data:/data/workspace/data
+      - ./requirements.txt:/data/workspace/requirements.txt
       - ./scripts/init.sh:/app/config/init.sh
       - openclaw-state:/home/node/.openclaw
+      - openclaw-state:/data/.openclaw
     env_file:
       - .env
     environment:
