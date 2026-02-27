@@ -370,8 +370,8 @@ async def cmd_ai(args: argparse.Namespace) -> None:
 
 
 async def cmd_quote(args: argparse.Namespace) -> None:
-    from src.modules.quote import CostTableRepository, QuoteSetupService
     from src.core.config import get_config
+    from src.modules.quote import CostTableRepository, QuoteSetupService
 
     action = args.action
     config = get_config()

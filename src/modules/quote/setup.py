@@ -11,7 +11,6 @@ from typing import Any
 
 import yaml
 
-
 DEFAULT_MARKUP_RULES: dict[str, dict[str, float]] = {
     "default": {
         "normal_first_add": 0.50,
