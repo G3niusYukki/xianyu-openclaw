@@ -5,6 +5,7 @@ Quote Service
 
 from __future__ import annotations
 
+import asyncio
 import math
 import re
 from typing import Any
@@ -167,6 +168,10 @@ class QuoteService:
             return local, "fallback_rule"
 
         if mode == "api_cost_plus_markup":
+            if self._is_api_parallel_fallback_enabled():
+                quote, source = await self._compute_api_cost_quote_with_fast_fallback(parsed.request)
+                if quote is not None:
+                    return quote, source
             api_quote = await self._compute_api_cost_markup_quote(parsed.request)
             if api_quote is not None:
                 return api_quote, "api_cost_markup"
@@ -178,6 +183,47 @@ class QuoteService:
 
         local = self._compute_rule_quote(parsed.request)
         return local, "rule"
+
+    async def _compute_api_cost_quote_with_fast_fallback(self, request: QuoteRequest) -> tuple[QuoteResult | None, str]:
+        """API 成本价优先，超时快速回退本地成本表。"""
+        wait_seconds = self._resolve_api_prefer_wait_seconds()
+        table_quote = self._compute_cost_table_quote(request)
+        api_task = asyncio.create_task(self._compute_api_cost_markup_quote(request))
+
+        timed_out = False
+        api_quote: QuoteResult | None = None
+        try:
+            api_quote = await asyncio.wait_for(asyncio.shield(api_task), timeout=wait_seconds)
+        except asyncio.TimeoutError:
+            timed_out = True
+        except Exception as exc:
+            self.logger.warning(f"API cost fast-path failed: {exc}")
+
+        if api_quote is not None:
+            return api_quote, "api_cost_markup"
+
+        if table_quote is not None:
+            if not api_task.done():
+                api_task.cancel()
+            return table_quote, "fallback_cost_table_fast" if timed_out else "fallback_cost_table"
+
+        if not api_task.done():
+            try:
+                api_quote = await api_task
+            except asyncio.CancelledError:
+                api_quote = None
+            except Exception as exc:
+                self.logger.warning(f"API cost fallback failed: {exc}")
+                api_quote = None
+        else:
+            try:
+                api_quote = api_task.result()
+            except Exception:
+                api_quote = None
+
+        if api_quote is not None:
+            return api_quote, "api_cost_markup"
+        return None, "api_cost_unavailable"
 
     def _extract_route(self, text: str) -> tuple[str | None, str | None]:
         text = text or ""
@@ -345,6 +391,17 @@ class QuoteService:
         if not quotes:
             return None
         return min(quotes, key=lambda item: item.total_fee)
+
+    def _is_api_parallel_fallback_enabled(self) -> bool:
+        return bool(self.config.get("api_fallback_to_table_parallel", True))
+
+    def _resolve_api_prefer_wait_seconds(self) -> float:
+        raw = self.config.get("api_prefer_max_wait_seconds", 1.2)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return 1.2
+        return max(0.1, min(value, 10.0))
 
     async def _fetch_remote_cost_candidates(self, request: QuoteRequest) -> list[CostRecord]:
         url = str(self.config.get("cost_api_url", "")).strip()

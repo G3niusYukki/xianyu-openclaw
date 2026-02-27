@@ -1,5 +1,6 @@
 """自动报价与双阶段回复测试。"""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -173,6 +174,58 @@ async def test_quote_service_compute_api_cost_plus_markup_success() -> None:
     assert source == "api_cost_markup"
     assert quote.courier == "韵达"
     assert quote.total_fee == pytest.approx(8.27, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_quote_service_compute_api_cost_plus_markup_fast_fallback_on_timeout(tmp_path: Path) -> None:
+    cost_file = tmp_path / "cost.csv"
+    cost_file.write_text(
+        "快递公司,始发地,目的地,首重,续重\n"
+        "圆通快递,安徽,上海,3.49,1.60\n",
+        encoding="utf-8",
+    )
+    service = QuoteService(
+        config={
+            "mode": "api_cost_plus_markup",
+            "origin_city": "安徽",
+            "pricing_profile": "normal",
+            "cost_table_dir": str(tmp_path),
+            "cost_table_patterns": ["*.csv"],
+            "cost_api_url": "https://example.com/cost",
+            "service_fee": 1.0,
+            "first_weight_kg": 1.0,
+            "api_fallback_to_table_parallel": True,
+            "api_prefer_max_wait_seconds": 0.1,
+            "markup_rules": {
+                "default": {"normal_first_add": 0.5, "normal_extra_add": 0.3},
+                "圆通": {"normal_first_add": 0.56, "normal_extra_add": 0.5},
+            },
+        }
+    )
+
+    async def _slow_api(_: object) -> list[CostRecord]:
+        await asyncio.sleep(0.2)
+        return [
+            CostRecord(
+                courier="圆通",
+                origin="安徽",
+                destination="上海",
+                first_cost=3.2,
+                extra_cost=1.5,
+                throw_ratio=8000,
+                source_file="api",
+                source_sheet="cost",
+            )
+        ]
+
+    service._fetch_remote_cost_candidates = _slow_api  # type: ignore[method-assign]
+
+    parsed = service.parse_quote_request("寄到上海 2kg 圆通 报价")
+    quote, source = await service.compute_quote(parsed)
+
+    assert quote is not None
+    assert source == "fallback_cost_table_fast"
+    assert quote.courier == "圆通"
 
 
 @pytest.mark.asyncio

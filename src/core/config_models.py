@@ -241,6 +241,16 @@ class QuoteConfig(BaseModel):
     cost_api_key: str = Field(default="", description="成本价接口密钥")
     cost_api_timeout_seconds: int = Field(default=3, ge=1, le=30, description="成本价接口超时（秒）")
     cost_api_headers: dict[str, str] = Field(default_factory=dict, description="成本价接口额外请求头")
+    api_fallback_to_table_parallel: bool = Field(
+        default=True,
+        description="API 报价时是否启用本地成本表并行快速回退",
+    )
+    api_prefer_max_wait_seconds: float = Field(
+        default=1.2,
+        ge=0.1,
+        le=10.0,
+        description="等待 API 报价的优先窗口（秒），超时后优先返回本地成本表报价",
+    )
     currency: str = Field(default="CNY", description="币种")
     first_weight_kg: float = Field(default=1.0, ge=0.1, le=10.0, description="首重公斤数")
     first_price: float = Field(default=8.0, ge=0, le=9999, description="首重价格")

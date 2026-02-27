@@ -239,6 +239,8 @@ quote:
   cost_api_key: "${QUOTE_COST_API_KEY}"
   cost_api_timeout_seconds: 3
   cost_api_headers: {}
+  api_fallback_to_table_parallel: true
+  api_prefer_max_wait_seconds: 1.2
   currency: "CNY"
   first_weight_kg: 1.0
   first_price: 8.0

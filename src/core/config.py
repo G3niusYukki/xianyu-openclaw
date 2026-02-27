@@ -268,6 +268,8 @@ class Config:
                 "cost_api_key": "",
                 "cost_api_timeout_seconds": 3,
                 "cost_api_headers": {},
+                "api_fallback_to_table_parallel": True,
+                "api_prefer_max_wait_seconds": 1.2,
                 "currency": "CNY",
                 "first_weight_kg": 1.0,
                 "first_price": 8.0,

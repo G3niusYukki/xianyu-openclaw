@@ -125,6 +125,20 @@ scripts\windows\workflow_transition.bat s1 ORDERED --force-state
 scripts\windows\dashboard.bat 8091
 ```
 
+自动报价建议使用两种生产模式（`config/config.yaml`）：
+
+```yaml
+quote:
+  # 1) 本地成本文档 + 加价规则
+  mode: "cost_table_plus_markup"
+  # 2) API 成本价 + 加价规则（失败回退本地成本表）
+  # mode: "api_cost_plus_markup"
+  cost_table_dir: "data/quote_costs"
+  cost_table_patterns: ["*.xlsx", "*.csv"]
+  api_fallback_to_table_parallel: true
+  api_prefer_max_wait_seconds: 1.2
+```
+
 ### 一键部署向导（推荐）
 
 如果你不想手动编辑 `.env`，可以直接运行交互式向导，按提示一步步输入 API Key、Cookie、密码并自动启动：
