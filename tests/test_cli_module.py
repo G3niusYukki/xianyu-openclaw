@@ -131,3 +131,40 @@ async def test_cmd_module_check_all_strict_exits_on_failure(monkeypatch) -> None
         await cmd_module(args)
 
     assert exc_info.value.code == 2
+
+
+@pytest.mark.asyncio
+async def test_cmd_module_start_all_requires_background(monkeypatch) -> None:
+    outputs: list[dict] = []
+    monkeypatch.setattr("src.cli._json_out", lambda data: outputs.append(data))
+
+    args = argparse.Namespace(action="start", target="all", background=False, mode="daemon")
+    with pytest.raises(SystemExit) as exc_info:
+        await cmd_module(args)
+
+    assert exc_info.value.code == 2
+    assert outputs
+    assert "requires --background" in str(outputs[-1].get("error", ""))
+
+
+@pytest.mark.asyncio
+async def test_cmd_module_start_all_dispatches_each_target(monkeypatch) -> None:
+    called: list[str] = []
+    outputs: list[dict] = []
+
+    def fake_start(target: str, args: argparse.Namespace) -> dict:
+        called.append(target)
+        return {"target": target, "started": True}
+
+    monkeypatch.setattr("src.cli._start_background_module", fake_start)
+    monkeypatch.setattr("src.cli._json_out", lambda data: outputs.append(data))
+
+    args = argparse.Namespace(action="start", target="all", background=True, mode="daemon")
+    await cmd_module(args)
+
+    assert called == ["presales", "operations", "aftersales"]
+    assert len(outputs) == 1
+    payload = outputs[0]
+    assert payload["target"] == "all"
+    assert payload["action"] == "start"
+    assert set(payload["modules"].keys()) == {"presales", "operations", "aftersales"}

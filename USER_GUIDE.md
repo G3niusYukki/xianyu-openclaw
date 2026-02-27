@@ -319,6 +319,7 @@ Windows 一键脚本：
 
 ```bat
 scripts\windows\launcher.bat
+scripts\windows\lite_quickstart.bat
 scripts\windows\module_check.bat
 scripts\windows\module_status.bat
 scripts\windows\start_all_lite.bat

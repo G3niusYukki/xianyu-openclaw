@@ -35,6 +35,7 @@ echo [INFO] Web UI: http://localhost:8080
 echo [INFO] Dashboard: run scripts\windows\dashboard.bat 8091
 echo [INFO] Workflow Worker: run scripts\windows\run_worker.bat 20 5
 echo [INFO] Lite setup: run scripts\windows\lite_setup.bat
+echo [INFO] Lite quickstart (recommended): run scripts\windows\lite_quickstart.bat
 echo [INFO] Start all lite modules: run scripts\windows\start_all_lite.bat
 echo [INFO] Module check: run scripts\windows\module_check.bat
 echo [INFO] Module status: run scripts\windows\module_status.bat
