@@ -13,8 +13,8 @@ class DummyMessageService:
     async def get_unread_sessions(self, limit=20):
         return self._sessions[:limit]
 
-    async def process_session(self, session, dry_run=False, page_id=None):
-        _ = (session, dry_run, page_id)
+    async def process_session(self, session, dry_run=False, page_id=None, actor=None):
+        _ = (session, dry_run, page_id, actor)
         return self._detail
 
 

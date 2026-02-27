@@ -306,6 +306,146 @@ async def cmd_orders(args: argparse.Namespace) -> None:
     _json_out({"error": f"Unknown orders action: {action}"})
 
 
+async def cmd_compliance(args: argparse.Namespace) -> None:
+    from src.modules.compliance.center import ComplianceCenter
+
+    center = ComplianceCenter(policy_path=args.policy_path, db_path=args.db_path)
+    action = args.action
+
+    if action == "reload":
+        center.reload()
+        _json_out({"success": True, "policy_path": args.policy_path})
+        return
+
+    if action == "check":
+        decision = center.evaluate_before_send(
+            args.content or "",
+            actor=args.actor or "cli",
+            account_id=args.account_id,
+            session_id=args.session_id,
+            action=args.audit_action or "message_send",
+        )
+        _json_out(decision.to_dict())
+        return
+
+    if action == "replay":
+        result = center.replay(
+            account_id=args.account_id,
+            session_id=args.session_id,
+            blocked_only=bool(args.blocked_only),
+            limit=args.limit or 50,
+        )
+        _json_out({"total": len(result), "events": result})
+        return
+
+    _json_out({"error": f"Unknown compliance action: {action}"})
+
+
+async def cmd_ai(args: argparse.Namespace) -> None:
+    from src.modules.content.service import ContentService
+
+    service = ContentService()
+    action = args.action
+
+    if action == "cost-stats":
+        _json_out(service.get_ai_cost_stats())
+        return
+
+    if action == "simulate-publish":
+        title = service.generate_title(
+            product_name=args.product_name or "iPhone 15 Pro",
+            features=["95新", "国行", "自用"],
+            category=args.category or "数码手机",
+        )
+        desc = service.generate_description(
+            product_name=args.product_name or "iPhone 15 Pro",
+            condition="95新",
+            reason="升级换机",
+            tags=["闲置", "自用"],
+        )
+        _json_out({"title": title, "description": desc, "stats": service.get_ai_cost_stats()})
+        return
+
+    _json_out({"error": f"Unknown ai action: {action}"})
+
+
+async def cmd_growth(args: argparse.Namespace) -> None:
+    from src.modules.growth.service import GrowthService
+
+    service = GrowthService(db_path=args.db_path or "data/growth.db")
+    action = args.action
+
+    if action == "set-strategy":
+        if not args.strategy_type or not args.version:
+            _json_out({"error": "Specify --strategy-type and --version"})
+            return
+        _json_out(
+            service.set_strategy_version(
+                strategy_type=args.strategy_type,
+                version=args.version,
+                active=bool(args.active),
+                baseline=bool(args.baseline),
+            )
+        )
+        return
+
+    if action == "rollback":
+        if not args.strategy_type:
+            _json_out({"error": "Specify --strategy-type"})
+            return
+        _json_out({"rolled_back": service.rollback_to_baseline(args.strategy_type)})
+        return
+
+    if action == "assign":
+        if not args.experiment_id or not args.subject_id:
+            _json_out({"error": "Specify --experiment-id and --subject-id"})
+            return
+        variants = tuple((args.variants or "A,B").split(","))
+        _json_out(
+            service.assign_variant(
+                experiment_id=args.experiment_id,
+                subject_id=args.subject_id,
+                variants=variants,
+                strategy_version=args.version,
+            )
+        )
+        return
+
+    if action == "event":
+        if not args.subject_id or not args.stage:
+            _json_out({"error": "Specify --subject-id and --stage"})
+            return
+        _json_out(
+            service.record_event(
+                subject_id=args.subject_id,
+                stage=args.stage,
+                experiment_id=args.experiment_id,
+                variant=args.variant,
+                strategy_version=args.version,
+            )
+        )
+        return
+
+    if action == "funnel":
+        _json_out(service.funnel_stats(days=args.days or 7, bucket=args.bucket or "day"))
+        return
+
+    if action == "compare":
+        if not args.experiment_id:
+            _json_out({"error": "Specify --experiment-id"})
+            return
+        _json_out(
+            service.compare_variants(
+                experiment_id=args.experiment_id,
+                from_stage=args.from_stage or "inquiry",
+                to_stage=args.to_stage or "ordered",
+            )
+        )
+        return
+
+    _json_out({"error": f"Unknown growth action: {action}"})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xianyu-cli",
@@ -391,6 +531,46 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db-path", default="data/orders.db", help="订单数据库路径")
     p.add_argument("--dry-run", action="store_true", help="仅模拟执行")
 
+    # compliance
+    p = sub.add_parser("compliance", help="合规策略中心")
+    p.add_argument("--action", required=True, choices=["reload", "check", "replay"])
+    p.add_argument("--policy-path", default="config/compliance_policies.yaml", help="策略配置路径")
+    p.add_argument("--db-path", default="data/compliance.db", help="合规审计库路径")
+    p.add_argument("--content", default="", help="待检查内容")
+    p.add_argument("--actor", default="cli", help="执行者标识")
+    p.add_argument("--account-id", default=None, help="账号ID")
+    p.add_argument("--session-id", default=None, help="会话ID")
+    p.add_argument("--audit-action", default="message_send", help="审计动作类型")
+    p.add_argument("--blocked-only", action="store_true", help="仅查看拦截事件")
+
+    # ai
+    p = sub.add_parser("ai", help="AI 调用降本与统计")
+    p.add_argument("--action", required=True, choices=["cost-stats", "simulate-publish"])
+    p.add_argument("--product-name", default="iPhone 15 Pro", help="模拟商品名")
+    p.add_argument("--category", default="数码手机", help="模拟商品分类")
+
+    # growth
+    p = sub.add_parser("growth", help="增长实验与漏斗")
+    p.add_argument(
+        "--action",
+        required=True,
+        choices=["set-strategy", "rollback", "assign", "event", "funnel", "compare"],
+    )
+    p.add_argument("--db-path", default="data/growth.db", help="增长数据库路径")
+    p.add_argument("--strategy-type", default=None, help="策略类型（reply/quote/followup）")
+    p.add_argument("--version", default=None, help="策略版本")
+    p.add_argument("--active", action="store_true", help="设置为当前生效版本")
+    p.add_argument("--baseline", action="store_true", help="标记为基线版本")
+    p.add_argument("--experiment-id", default=None, help="实验ID")
+    p.add_argument("--subject-id", default=None, help="主体ID（会话/用户）")
+    p.add_argument("--variants", default="A,B", help="变体列表，逗号分隔")
+    p.add_argument("--variant", default=None, help="事件所属变体")
+    p.add_argument("--stage", default=None, help="漏斗阶段")
+    p.add_argument("--days", type=int, default=7, help="漏斗窗口天数")
+    p.add_argument("--bucket", choices=["day", "week"], default="day", help="聚合粒度")
+    p.add_argument("--from-stage", default="inquiry", help="转化起始阶段")
+    p.add_argument("--to-stage", default="ordered", help="转化目标阶段")
+
     return parser
 
 
@@ -412,6 +592,9 @@ def main() -> None:
         "accounts": cmd_accounts,
         "messages": cmd_messages,
         "orders": cmd_orders,
+        "compliance": cmd_compliance,
+        "ai": cmd_ai,
+        "growth": cmd_growth,
     }
 
     handler = dispatch.get(args.command)

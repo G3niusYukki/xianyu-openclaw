@@ -40,11 +40,23 @@ try:
 except Exception:  # pragma: no cover - optional dependency/runtime environment
     OrderFulfillmentService = None
 
+try:
+    from .growth.service import GrowthService
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    GrowthService = None
+
+try:
+    from .compliance.center import ComplianceCenter
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    ComplianceCenter = None
+
 __all__ = [
     "AccountsService",
     "AnalyticsService",
     "AutoQuoteEngine",
+    "ComplianceCenter",
     "ContentService",
+    "GrowthService",
     "Listing",
     "ListingImage",
     "ListingService",

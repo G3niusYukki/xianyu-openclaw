@@ -6,6 +6,8 @@ Content Generation Service
 """
 
 import os
+import time
+from hashlib import sha1
 from typing import Any
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, OpenAI
@@ -41,9 +43,19 @@ class ContentService:
         self.timeout = self.config.get("timeout", 30)
         self.fallback_enabled = self.config.get("fallback_enabled", True)
         self.fallback_model = self.config.get("fallback_model", "gpt-3.5-turbo")
+        self.usage_mode = str(self.config.get("usage_mode", "minimal")).lower()
+        self.max_calls_per_run = int(self.config.get("max_calls_per_run", 20))
+        self.cache_ttl_seconds = int(self.config.get("cache_ttl_seconds", 900))
+        self.cache_max_entries = int(self.config.get("cache_max_entries", 200))
+        self.task_switches = self.config.get("task_switches", {})
 
         self.client: OpenAI | None = None
         self.async_client: AsyncOpenAI | None = None
+        self._response_cache: dict[str, tuple[float, str]] = {}
+        self._ai_calls = 0
+        self._cache_hits = 0
+        self._estimated_prompt_tokens = 0
+        self._estimated_response_tokens = 0
 
         self._init_client()
 
@@ -60,7 +72,7 @@ class ContentService:
         else:
             self.logger.warning("AI API Key not found. Content generation will use templates.")
 
-    def _call_ai(self, prompt: str, max_tokens: int | None = None) -> str | None:
+    def _call_ai(self, prompt: str, max_tokens: int | None = None, task: str = "generic") -> str | None:
         """
         调用AI生成内容
 
@@ -74,7 +86,21 @@ class ContentService:
         if not self.client:
             return None
 
+        if not self._should_call_ai(task, prompt):
+            return None
+
+        cached = self._cache_get(prompt, task)
+        if cached is not None:
+            self._cache_hits += 1
+            return cached
+
+        if self._ai_calls >= self.max_calls_per_run:
+            self.logger.warning(f"AI call budget exceeded for this run: {self.max_calls_per_run}")
+            return None
+
         try:
+            self._ai_calls += 1
+            estimated_prompt_tokens = max(1, len(prompt) // 4)
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
@@ -82,7 +108,11 @@ class ContentService:
                 max_tokens=max_tokens or self.max_tokens,
                 timeout=self.timeout,
             )
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content.strip()
+            self._estimated_prompt_tokens += estimated_prompt_tokens
+            self._estimated_response_tokens += max(1, len(content) // 4)
+            self._cache_set(prompt, task, content)
+            return content
         except APITimeoutError as e:
             self.logger.error(f"AI call timeout after {self.timeout}s: {e}")
             return None
@@ -92,6 +122,58 @@ class ContentService:
         except Exception as e:
             self.logger.error(f"Unexpected AI call error: {e}")
             return None
+
+    def _should_call_ai(self, task: str, prompt: str) -> bool:
+        if self.usage_mode == "always":
+            return True
+        enabled = bool(self.task_switches.get(task, False))
+        if self.usage_mode == "minimal":
+            return enabled
+        if self.usage_mode == "auto":
+            return enabled or len(prompt) > 320
+        return enabled
+
+    def _cache_key(self, prompt: str, task: str) -> str:
+        return sha1(f"{task}:{prompt}".encode()).hexdigest()
+
+    def _cache_get(self, prompt: str, task: str) -> str | None:
+        key = self._cache_key(prompt, task)
+        data = self._response_cache.get(key)
+        if not data:
+            return None
+        expires_at, content = data
+        if expires_at < time.time():
+            self._response_cache.pop(key, None)
+            return None
+        return content
+
+    def _cache_set(self, prompt: str, task: str, content: str) -> None:
+        if self.cache_max_entries <= 0:
+            return
+        if len(self._response_cache) >= self.cache_max_entries:
+            oldest_key = next(iter(self._response_cache.keys()))
+            self._response_cache.pop(oldest_key, None)
+        key = self._cache_key(prompt, task)
+        self._response_cache[key] = (time.time() + self.cache_ttl_seconds, content)
+
+    def get_ai_cost_stats(self) -> dict[str, Any]:
+        total_calls = self._ai_calls
+        total_tokens = self._estimated_prompt_tokens + self._estimated_response_tokens
+        avg_tokens = round(total_tokens / total_calls, 2) if total_calls else 0.0
+        monthly_estimated_cost_cny = round((total_tokens / 1000) * 0.02, 4)
+        return {
+            "usage_mode": self.usage_mode,
+            "max_calls_per_run": self.max_calls_per_run,
+            "ai_calls": total_calls,
+            "cache_hits": self._cache_hits,
+            "cache_hit_rate": round((self._cache_hits / (self._cache_hits + total_calls)), 4)
+            if (self._cache_hits + total_calls)
+            else 0.0,
+            "estimated_prompt_tokens": self._estimated_prompt_tokens,
+            "estimated_response_tokens": self._estimated_response_tokens,
+            "avg_tokens_per_call": avg_tokens,
+            "estimated_monthly_cost_cny": monthly_estimated_cost_cny,
+        }
 
     def generate_title(self, product_name: str, features: list[str], category: str = "General") -> str:
         """
@@ -124,7 +206,7 @@ class ContentService:
         4. 真实感强，不要过于广告腔
         5. 可以使用符号增加吸引力，如【】、🔥、💰等
         """
-        result = self._call_ai(prompt, max_tokens=60)
+        result = self._call_ai(prompt, max_tokens=60, task="title")
 
         if result and len(result) <= 30:
             return result
@@ -189,7 +271,7 @@ class ContentService:
         5. 100-200字为宜
         6. 不要使用过多emoji，适度使用
         """
-        result = self._call_ai(prompt, max_tokens=300)
+        result = self._call_ai(prompt, max_tokens=300, task="description")
 
         if result and len(result) >= 50:
             return result
@@ -275,7 +357,7 @@ class ContentService:
         请直接返回优化后的标题，不需要额外说明。
         """
 
-        result = self._call_ai(prompt, max_tokens=50)
+        result = self._call_ai(prompt, max_tokens=50, task="optimize_title")
 
         if result and len(result) >= 5 and len(result) <= 30:
             return result
@@ -303,7 +385,7 @@ class ContentService:
         只需要返回关键词列表，用逗号分隔。
         """
 
-        result = self._call_ai(prompt, max_tokens=100)
+        result = self._call_ai(prompt, max_tokens=100, task="seo_keywords")
 
         if result:
             keywords = [k.strip() for k in result.split(",")]

@@ -558,7 +558,11 @@ class WorkflowWorker:
                     continue
 
                 start = time.perf_counter()
-                detail = await self.message_service.process_session(job.payload, dry_run=dry_run)
+                detail = await self.message_service.process_session(
+                    job.payload,
+                    dry_run=dry_run,
+                    actor="workflow_worker",
+                )
                 latency_ms = int((time.perf_counter() - start) * 1000)
 
                 if not detail.get("sent", False):

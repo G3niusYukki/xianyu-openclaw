@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `src/modules/orders/service.py`：订单履约闭环 MVP（状态映射、交付动作、售后模板、人工接管、订单追溯）。
 - CLI 新增 `orders` 命令：`upsert/deliver/after-sales/takeover/resume/trace`。
 - 新增测试 `tests/test_orders.py`，覆盖订单状态同步、交付、售后与追溯能力。
+- `src/modules/compliance/center.py`：分级合规策略中心（global/account/session 覆盖）、发送前拦截、审计落库与回放查询。
+- 策略样例文件 `config/compliance_policies.yaml`，支持热更新与高风险词默认阻断。
+- CLI 新增 `compliance` 命令：`reload/check/replay`。
+- `src/modules/growth/service.py`：A/B 分流、策略版本管理、漏斗统计、显著性最小实现（z-test）。
+- CLI 新增 `growth` 命令：`set-strategy/rollback/assign/event/funnel/compare`。
+- AI 降本治理能力：
+  - `AIConfig` 新增 `usage_mode`、`max_calls_per_run`、`task_switches`、缓存参数
+  - `ContentService` 新增任务级 AI 开关、调用预算、本地缓存、调用成本统计
+  - CLI 新增 `ai` 命令：`cost-stats/simulate-publish`
+- 新增测试：
+  - `tests/test_compliance_center.py`
+  - `tests/test_growth.py`
+  - `tests/test_ai_cost_control.py`
 
 ### Changed
 - `QuoteRequest.cache_key()` 升级为分层缓存 key：`origin + destination + courier + weight_bucket + service_level`。
@@ -23,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - fallback 失败分类（`timeout/transient/unavailable/provider_error`）
   - 回退结果追加标准化路由可观测字段
 - CI workflow 调整为严格失败策略：测试步骤不再 `continue-on-error`。
+- `MessagesService` 在外发前接入合规策略中心检查，并写入消息级审计轨迹。
 
 ## [4.4.0] - 2026-02-27
 

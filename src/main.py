@@ -25,7 +25,9 @@ async def main():
     try:
         from src.modules.accounts.service import AccountsService  # noqa: F401
         from src.modules.analytics.service import AnalyticsService  # noqa: F401
+        from src.modules.compliance.center import ComplianceCenter  # noqa: F401
         from src.modules.content.service import ContentService  # noqa: F401
+        from src.modules.growth.service import GrowthService  # noqa: F401
         from src.modules.listing.service import ListingService  # noqa: F401
         from src.modules.media.service import MediaService  # noqa: F401
         from src.modules.messages.service import MessagesService  # noqa: F401

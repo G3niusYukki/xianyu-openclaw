@@ -177,6 +177,16 @@ class Config:
                 "temperature": 0.7,
                 "max_tokens": 1000,
                 "fallback_enabled": True,
+                "usage_mode": "minimal",
+                "max_calls_per_run": 20,
+                "cache_ttl_seconds": 900,
+                "cache_max_entries": 200,
+                "task_switches": {
+                    "title": False,
+                    "description": False,
+                    "optimize_title": False,
+                    "seo_keywords": False,
+                },
             },
             "database": {
                 "type": "sqlite",

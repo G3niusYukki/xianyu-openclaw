@@ -41,6 +41,19 @@ class AIConfig(BaseModel):
     fallback_enabled: bool = Field(default=True, description="是否启用降级策略")
     fallback_api_key: str | None = Field(default=None, description="备用API密钥")
     fallback_model: str = Field(default="gpt-3.5-turbo", description="备用模型")
+    usage_mode: str = Field(default="minimal", description="AI调用模式：always|auto|minimal")
+    max_calls_per_run: int = Field(default=20, ge=1, le=500, description="单次运行最大AI调用数")
+    cache_ttl_seconds: int = Field(default=900, ge=30, le=86400, description="本地响应缓存TTL")
+    cache_max_entries: int = Field(default=200, ge=10, le=5000, description="本地响应缓存容量")
+    task_switches: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "title": False,
+            "description": False,
+            "optimize_title": False,
+            "seo_keywords": False,
+        },
+        description="任务级AI开关",
+    )
 
 
 class DatabaseConfig(BaseModel):

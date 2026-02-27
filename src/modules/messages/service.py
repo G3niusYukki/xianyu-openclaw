@@ -16,6 +16,7 @@ from src.core.compliance import get_compliance_guard
 from src.core.config import get_config
 from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
+from src.modules.compliance.center import ComplianceCenter
 from src.modules.messages.reply_engine import ReplyStrategyEngine
 from src.modules.quote.engine import AutoQuoteEngine
 from src.modules.quote.models import QuoteRequest
@@ -115,6 +116,7 @@ class MessagesService:
         )
 
         self.compliance_guard = get_compliance_guard()
+        self.compliance_center = ComplianceCenter()
         self.high_risk_keywords = [
             "加微信",
             "vx",
@@ -475,6 +477,8 @@ class MessagesService:
         session: dict[str, Any],
         dry_run: bool = False,
         page_id: str | None = None,
+        account_id: str | None = None,
+        actor: str = "messages_service",
     ) -> dict[str, Any]:
         """处理单个会话（供批处理与 worker 复用）。"""
         session_start = perf_counter()
@@ -483,9 +487,20 @@ class MessagesService:
         item_title = str(session.get("item_title", ""))
 
         reply_text, quote_meta = await self._generate_reply_with_quote(msg, item_title=item_title)
+        decision = self.compliance_center.evaluate_before_send(
+            reply_text,
+            actor=actor,
+            account_id=account_id,
+            session_id=session_id,
+            action="message_send",
+        )
 
         sent = False
-        if dry_run:
+        blocked_by_policy = bool(decision.blocked)
+        if blocked_by_policy:
+            sent = False
+            reply_text = self.safe_fallback_reply
+        elif dry_run:
             sent = True
         elif session_id:
             sent = await self.reply_to_session(session_id, reply_text, page_id=page_id)
@@ -499,6 +514,9 @@ class MessagesService:
             "last_message": msg,
             "reply": reply_text,
             "sent": sent,
+            "blocked_by_policy": blocked_by_policy,
+            "policy_reason": decision.reason,
+            "policy_scope": decision.policy_scope,
             "latency_seconds": round(latency_seconds, 3),
             "within_target": within_target,
             **quote_meta,

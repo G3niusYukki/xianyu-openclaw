@@ -4,7 +4,7 @@
 # 应用配置
 app:
   name: "xianyu-openclaw"
-  version: "4.4.0"
+  version: "4.5.0"
   debug: false
   log_level: "INFO"
   data_dir: "data"
@@ -25,6 +25,15 @@ ai:
   max_tokens: 1000
   fallback_enabled: true
   fallback_model: "gpt-3.5-turbo"
+  usage_mode: "minimal" # always | auto | minimal
+  max_calls_per_run: 20
+  cache_ttl_seconds: 900
+  cache_max_entries: 200
+  task_switches:
+    title: false
+    description: false
+    optimize_title: false
+    seo_keywords: false
 
 # 数据库配置
 database:
