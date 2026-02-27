@@ -13,7 +13,9 @@ from src.modules.quote.setup import QuoteSetupService
 
 def _prompt(text: str, default: str | None = None, required: bool = False, secret: bool = False) -> str:
     while True:
-        hint = f" [{default}]" if default else ""
+        hint = ""
+        if default:
+            hint = " [已设置]" if secret else f" [{default}]"
         raw = getpass.getpass(f"{text}{hint}: ") if secret else input(f"{text}{hint}: ")
         value = raw.strip()
         if not value and default is not None:
@@ -155,7 +157,12 @@ def run_setup() -> int:
     existing = _read_existing_env(env_path)
 
     provider_key, provider_hint = _choose_provider()
-    api_key = _prompt(f"请输入 {provider_key}", default=existing.get(provider_key, provider_hint), required=True)
+    api_key = _prompt(
+        f"请输入 {provider_key}",
+        default=existing.get(provider_key, provider_hint),
+        required=True,
+        secret=True,
+    )
 
     token = _prompt("设置 OPENCLAW_GATEWAY_TOKEN", default=existing.get("OPENCLAW_GATEWAY_TOKEN"), required=True)
     password = _prompt(

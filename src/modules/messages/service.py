@@ -513,7 +513,9 @@ class MessagesService:
 
                 if is_quote_intent:
                     quote_followup_total += 1
-                    if parsed_quote.missing_fields:
+                    if not first_reply_sent:
+                        quote_source = "skipped_first_reply_failed"
+                    elif parsed_quote.missing_fields:
                         quote_source = "pending_fields"
                     else:
                         if dry_run:

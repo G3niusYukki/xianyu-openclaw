@@ -257,3 +257,37 @@ async def test_messages_auto_reply_quote_two_stage_dry_run(mock_controller) -> N
     assert result["quote_followup_success"] == 1
     assert result["details"][0]["is_quote_intent"] is True
     assert "报价结果" in result["details"][0]["quote_reply"]
+
+
+@pytest.mark.asyncio
+async def test_messages_skip_quote_followup_when_first_reply_not_sent(mock_controller) -> None:
+    service = MessagesService(
+        controller=mock_controller,
+        config={
+            "max_replies_per_run": 5,
+            "followup_quote_enabled": True,
+            "outbound_compliance_enabled": True,
+            "outbound_block_keywords": ["收到"],
+        },
+    )
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "s1",
+                "peer_name": "买家A",
+                "item_title": "同城快递",
+                "last_message": "寄到上海 2kg 多少钱",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.auto_reply_unread(limit=10, dry_run=False)
+
+    assert result["total"] == 1
+    assert result["success"] == 0
+    assert result["quote_followup_total"] == 1
+    assert result["quote_followup_success"] == 0
+    assert result["details"][0]["first_reply_sent"] is False
+    assert result["details"][0]["quote_source"] == "skipped_first_reply_failed"
+    assert result["details"][0]["quote_sent"] is False
