@@ -30,6 +30,11 @@ try:
 except Exception:  # pragma: no cover - optional dependency/runtime environment
     AccountsService = None
 
+try:
+    from .quote.service import QuoteService
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    QuoteService = None
+
 __all__ = [
     "AccountsService",
     "AnalyticsService",
@@ -41,4 +46,5 @@ __all__ = [
     "MessagesService",
     "OperationsService",
     "PublishResult",
+    "QuoteService",
 ]

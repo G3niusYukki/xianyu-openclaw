@@ -106,6 +106,26 @@ class MessagesConfig(BaseModel):
 
     enabled: bool = Field(default=False, description="是否启用消息自动回复")
     max_replies_per_run: int = Field(default=10, ge=1, le=200, description="单次最多自动回复数量")
+    fast_first_reply_enabled: bool = Field(default=True, description="是否启用快速首响")
+    first_reply_target_seconds: float = Field(default=3.0, ge=0.5, le=30, description="首响目标时延（秒）")
+    reuse_message_page: bool = Field(default=True, description="是否复用消息页以降低时延")
+    first_reply_delay_seconds: list[float] = Field(
+        default_factory=lambda: [0.25, 0.8],
+        description="首响前随机延迟区间（秒）",
+    )
+    inter_reply_delay_seconds: list[float] = Field(
+        default_factory=lambda: [0.4, 1.2],
+        description="多会话回复间隔区间（秒）",
+    )
+    send_confirm_delay_seconds: list[float] = Field(
+        default_factory=lambda: [0.15, 0.35],
+        description="发送后确认等待区间（秒）",
+    )
+    followup_quote_enabled: bool = Field(default=True, description="是否启用询价二阶段回复")
+    followup_quote_delay_seconds: list[float] = Field(
+        default_factory=lambda: [0.6, 1.5],
+        description="首响后报价补充消息延迟区间（秒）",
+    )
     reply_prefix: str = Field(default="", description="回复前缀")
     default_reply: str = Field(default="您好，宝贝在的，感兴趣可以直接拍下。", description="默认回复文案")
     virtual_default_reply: str = Field(
@@ -115,6 +135,40 @@ class MessagesConfig(BaseModel):
     virtual_product_keywords: list[str] = Field(default_factory=list, description="虚拟商品识别关键词")
     intent_rules: list[dict[str, Any]] = Field(default_factory=list, description="意图规则列表")
     keyword_replies: dict[str, str] = Field(default_factory=dict, description="关键词回复模板")
+
+
+class QuoteConfig(BaseModel):
+    """自动报价配置模型"""
+
+    enabled: bool = Field(default=True, description="是否启用自动报价")
+    mode: str = Field(default="rule_only", description="报价模式: rule_only | remote_then_rule")
+    origin_city: str = Field(default="杭州", description="默认寄件城市")
+    currency: str = Field(default="CNY", description="币种")
+    first_weight_kg: float = Field(default=1.0, ge=0.1, le=10.0, description="首重公斤数")
+    first_price: float = Field(default=8.0, ge=0, le=9999, description="首重价格")
+    extra_per_kg: float = Field(default=2.5, ge=0, le=9999, description="续重每公斤价格")
+    service_fee: float = Field(default=1.0, ge=0, le=9999, description="服务费")
+    urgency_fee: float = Field(default=4.0, ge=0, le=9999, description="加急附加费")
+    inter_city_extra: float = Field(default=2.0, ge=-9999, le=9999, description="跨城附加费")
+    remote_extra: float = Field(default=6.0, ge=0, le=9999, description="偏远地区附加费")
+    remote_keywords: list[str] = Field(
+        default_factory=lambda: ["新疆", "西藏", "青海", "甘肃", "内蒙古", "海南"],
+        description="偏远地区关键词",
+    )
+    eta_same_city_minutes: int = Field(default=90, ge=10, le=1440, description="同城预计时效（分钟）")
+    eta_inter_city_minutes: int = Field(default=360, ge=30, le=10080, description="跨城预计时效（分钟）")
+    valid_minutes: int = Field(default=15, ge=1, le=1440, description="报价有效期（分钟）")
+    remote_api_url: str = Field(default="", description="远端报价接口 URL")
+    remote_api_key: str = Field(default="", description="远端报价接口密钥")
+    timeout_seconds: int = Field(default=3, ge=1, le=30, description="远端报价接口超时（秒）")
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        valid_modes = {"rule_only", "remote_then_rule"}
+        if v not in valid_modes:
+            raise ValueError(f"mode must be one of {sorted(valid_modes)}, got {v}")
+        return v
 
 
 class AppConfig(BaseModel):
@@ -150,6 +204,7 @@ class ConfigModel(BaseModel):
     content: ContentConfig = Field(default_factory=ContentConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
     messages: MessagesConfig = Field(default_factory=MessagesConfig)
+    quote: QuoteConfig = Field(default_factory=QuoteConfig)
 
     @field_validator("default_account")
     @classmethod

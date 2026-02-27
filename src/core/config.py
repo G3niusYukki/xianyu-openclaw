@@ -193,12 +193,40 @@ class Config:
             "messages": {
                 "enabled": False,
                 "max_replies_per_run": 10,
+                "fast_first_reply_enabled": True,
+                "first_reply_target_seconds": 3.0,
+                "reuse_message_page": True,
+                "first_reply_delay_seconds": [0.25, 0.8],
+                "inter_reply_delay_seconds": [0.4, 1.2],
+                "send_confirm_delay_seconds": [0.15, 0.35],
+                "followup_quote_enabled": True,
+                "followup_quote_delay_seconds": [0.6, 1.5],
                 "reply_prefix": "",
                 "default_reply": "您好，宝贝在的，感兴趣可以直接拍下。",
                 "virtual_default_reply": "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。",
                 "virtual_product_keywords": [],
                 "intent_rules": [],
                 "keyword_replies": {},
+            },
+            "quote": {
+                "enabled": True,
+                "mode": "rule_only",
+                "origin_city": "杭州",
+                "currency": "CNY",
+                "first_weight_kg": 1.0,
+                "first_price": 8.0,
+                "extra_per_kg": 2.5,
+                "service_fee": 1.0,
+                "urgency_fee": 4.0,
+                "inter_city_extra": 2.0,
+                "remote_extra": 6.0,
+                "remote_keywords": ["新疆", "西藏", "青海", "甘肃", "内蒙古", "海南"],
+                "eta_same_city_minutes": 90,
+                "eta_inter_city_minutes": 360,
+                "valid_minutes": 15,
+                "remote_api_url": "",
+                "remote_api_key": "",
+                "timeout_seconds": 3,
             },
         }
 
@@ -289,6 +317,11 @@ class Config:
     def messages(self) -> dict[str, Any]:
         """消息自动回复配置"""
         return self.get_section("messages", {})
+
+    @property
+    def quote(self) -> dict[str, Any]:
+        """自动报价配置"""
+        return self.get_section("quote", {})
 
     def reload(self, config_path: str | None = None) -> None:
         """
