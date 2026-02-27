@@ -132,6 +132,10 @@ messages:
   read_no_reply_stop_keywords: ["不用", "不需要", "先不", "别发了", "勿扰", "拉黑", "举报"]
   followup_state_path: "data/messages_followup_state.json"
   followup_state_max_sessions: 5000
+  # 会话状态机（NEW/REPLIED/QUOTED/FOLLOWED/ORDERED/CLOSED）
+  workflow_state_enabled: true
+  workflow_state_path: "data/message_workflow_state.json"
+  workflow_state_max_sessions: 5000
   # 常驻 worker（7x24 轮询执行 auto-workflow）
   worker_enabled: false
   worker_interval_seconds: 15

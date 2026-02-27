@@ -172,6 +172,9 @@ class MessagesConfig(BaseModel):
         description="会话跟进状态存储文件",
     )
     followup_state_max_sessions: int = Field(default=5000, ge=100, le=200000, description="跟进状态最大保留会话数")
+    workflow_state_enabled: bool = Field(default=True, description="是否启用会话工作流状态机")
+    workflow_state_path: str = Field(default="data/message_workflow_state.json", description="状态机存储文件路径")
+    workflow_state_max_sessions: int = Field(default=5000, ge=100, le=200000, description="状态机最大保留会话数")
     worker_enabled: bool = Field(default=False, description="是否启用常驻消息工作流 worker")
     worker_interval_seconds: float = Field(default=15.0, ge=0.01, le=3600, description="worker 轮询间隔（秒）")
     worker_jitter_seconds: float = Field(default=1.5, ge=0, le=60, description="worker 轮询抖动（秒）")

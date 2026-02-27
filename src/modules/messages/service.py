@@ -17,6 +17,7 @@ from src.core.logger import get_logger
 from src.modules.messages.followup_policy import ReadNoReplyFollowupPolicy
 from src.modules.messages.followup_store import FollowupStateStore
 from src.modules.messages.reply_engine import ReplyStrategyEngine
+from src.modules.messages.workflow_state import WorkflowStage, WorkflowStateStore
 from src.modules.quote.service import QuoteService
 
 
@@ -87,6 +88,13 @@ class MessagesService:
             default=5000,
             max_value=200000,
         )
+        self.workflow_state_enabled = bool(self.config.get("workflow_state_enabled", True))
+        self.workflow_state_path = str(self.config.get("workflow_state_path", "data/message_workflow_state.json"))
+        self.workflow_state_max_sessions = self._resolve_positive_int(
+            "workflow_state_max_sessions",
+            default=5000,
+            max_value=200000,
+        )
 
         self.keyword_replies: dict[str, str] = {
             "还在": "在的，商品还在，直接拍就可以。",
@@ -118,6 +126,14 @@ class MessagesService:
         self.followup_store = FollowupStateStore(
             path=self.followup_state_path,
             max_sessions=self.followup_state_max_sessions,
+        )
+        self.workflow_state_store = (
+            WorkflowStateStore(
+                path=self.workflow_state_path,
+                max_sessions=self.workflow_state_max_sessions,
+            )
+            if self.workflow_state_enabled
+            else None
         )
         self.selectors = MessageSelectors()
         self._message_page_id: str | None = None
@@ -421,6 +437,12 @@ class MessagesService:
 
                 if not dry_run and session_id:
                     self.followup_store.record_inbound(session_id, msg)
+                    if self.workflow_state_store is not None:
+                        self.workflow_state_store.transition(
+                            session_id,
+                            WorkflowStage.NEW,
+                            metadata={"event": "inbound_message", "last_message": msg},
+                        )
 
                 parsed_quote = self.quote_service.parse_quote_request(msg, item_title=item_title)
                 is_quote_intent = bool(self.followup_quote_enabled and parsed_quote.is_quote_intent)
@@ -452,6 +474,12 @@ class MessagesService:
                         first_reply_within_target += 1
                     if not dry_run and session_id:
                         self.followup_store.record_first_reply(session_id, first_reply_text, item_title=item_title)
+                        if self.workflow_state_store is not None:
+                            self.workflow_state_store.transition(
+                                session_id,
+                                WorkflowStage.REPLIED,
+                                metadata={"event": "first_reply_sent"},
+                            )
 
                 quote_reply = ""
                 quote_source = ""
@@ -483,6 +511,12 @@ class MessagesService:
                         quote_followup_success += 1
                         if not dry_run and session_id:
                             self.followup_store.record_outbound(session_id, quote_reply, item_title=item_title)
+                            if self.workflow_state_store is not None:
+                                self.workflow_state_store.transition(
+                                    session_id,
+                                    WorkflowStage.QUOTED,
+                                    metadata={"event": "quote_sent", "quote_source": quote_source},
+                                )
 
                 details.append(
                     {
@@ -558,6 +592,13 @@ class MessagesService:
                 allow_send, decision = self.followup_policy.evaluate(session, state)
                 if decision == "stop_keyword_hit" and not dry_run and session_id:
                     state = self.followup_store.mark_opt_out(session_id)
+                    if self.workflow_state_store is not None:
+                        self.workflow_state_store.transition(
+                            session_id,
+                            WorkflowStage.CLOSED,
+                            metadata={"event": "followup_stopped_by_keyword"},
+                            force=True,
+                        )
 
                 followup_text = ""
                 followup_sent = False
@@ -584,6 +625,12 @@ class MessagesService:
                                 followup_text,
                                 item_title=item_title,
                             )
+                            if self.workflow_state_store is not None:
+                                self.workflow_state_store.transition(
+                                    session_id,
+                                    WorkflowStage.FOLLOWED,
+                                    metadata={"event": "followup_sent"},
+                                )
 
                 details.append(
                     {
