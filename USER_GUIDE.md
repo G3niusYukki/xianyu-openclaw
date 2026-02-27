@@ -42,7 +42,7 @@ AI 助手会自动帮你在闲鱼上完成这些操作。
 | 一台电脑或服务器 | Windows、macOS 或 Linux |
 | 能上网 | 需要连接互联网 |
 | 闲鱼账号 | 能正常登录的闲鱼账号 |
-| AI 服务密钥 | Anthropic、OpenAI 或 DeepSeek（任选一个，注册免费，使用按量付费） |
+| AI 服务密钥 | 网关模型（Anthropic/OpenAI/Kimi/MiniMax/智谱ZAI 任选一个）+ 业务文案模型（DeepSeek/百炼/火山/智谱等可选） |
 | Docker | 一个免费的软件，用来运行工具 |
 
 ---
@@ -73,7 +73,10 @@ AI 助手会自动帮你在闲鱼上完成这些操作。
 
 ### 3.3 获取 AI 密钥
 
-工具需要一个 AI 服务来理解你说的话。推荐用 Anthropic（效果最好）或 DeepSeek（最便宜）。
+工具需要 AI 服务来理解你的指令。建议分成两类：
+
+- 网关模型（必填）：Anthropic / OpenAI / Moonshot(Kimi) / MiniMax / ZAI（智谱）
+- 业务文案模型（可选）：DeepSeek / 阿里百炼 / 火山方舟 / MiniMax / 智谱
 
 **Anthropic（推荐）：**
 1. 打开 https://console.anthropic.com/
@@ -128,7 +131,7 @@ XIANYU_COOKIE_1=你的闲鱼Cookie（下一步教你获取）
 不想手动改 `.env` 的话，直接运行：
 
 ```bash
-python -m src.setup_wizard
+python3 -m src.setup_wizard
 ```
 
 按提示一步一步输入：
@@ -163,7 +166,7 @@ http://localhost:8080
 如果你想看图表和操作日志，可单独启动后台页面：
 
 ```bash
-python -m src.dashboard_server --port 8091
+python3 -m src.dashboard_server --port 8091
 ```
 
 浏览器打开 `http://localhost:8091`，可看到趋势图、商品表现和最近操作记录。
@@ -253,6 +256,20 @@ docker compose up -d
 
 确认 Docker Desktop 是否在运行（图标是绿色的），执行 `docker compose ps` 看容器是否正常。
 
+### Q: 页面提示 `pairing required`
+
+这是首次设备配对，执行：
+
+```bash
+docker compose exec -it openclaw-gateway openclaw devices list
+docker compose exec -it openclaw-gateway openclaw devices approve <requestId>
+```
+
+### Q: 报错 `At least one AI provider API key env var is required`
+
+说明网关没有读到可识别的 Key。请在 `.env` 至少填写一个：
+`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `MOONSHOT_API_KEY` / `MINIMAX_API_KEY` / `ZAI_API_KEY`。
+
 ### Q: AI 不回复
 
 检查 `.env` 中的 AI 密钥是否正确，确认账户有余额。
@@ -292,4 +309,4 @@ docker compose logs -f
 
 ---
 
-**版本**: v4.0.0 | **更新日期**: 2026-02-23
+**版本**: v4.6.0 | **更新日期**: 2026-02-27

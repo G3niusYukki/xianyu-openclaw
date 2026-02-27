@@ -17,6 +17,10 @@ class Provider(str, Enum):
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
     CLAUDE = "claude"
+    ALIYUN_BAILIAN = "aliyun_bailian"
+    VOLCENGINE_ARK = "volcengine_ark"
+    MINIMAX = "minimax"
+    ZHIPU = "zhipu"
 
 
 class OpenClawConfig(BaseModel):

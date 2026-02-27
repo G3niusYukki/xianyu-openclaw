@@ -27,14 +27,13 @@
 
 ---
 
-## 4.5.0 更新摘要（2026-02-27）
+## 4.6.0 更新摘要（2026-02-27）
 
-- 合规策略中心上线：支持 `global/account/session` 分级覆盖、发送前拦截、审计回放查询。
-- 报价鲁棒性增强：路由标准化、远程 provider 熔断降级、失败分类与分层缓存 key。
-- 订单履约闭环 MVP：下单状态映射、虚拟/实物交付接口、售后模板、人工接管与追溯。
-- 增长闭环基础能力：A/B 分流、策略版本管理、漏斗统计与显著性最小实现。
-- AI 降本治理：`always/auto/minimal` 模式、任务级开关、调用预算、缓存与成本统计。
-- CI workflow 修复：测试步骤强制失败，不再 `continue-on-error`。
+- 一站式部署向导升级：网关 AI 与业务文案 AI 分离配置，自动生成 token 与启动后健康检查。
+- 修复部署目录错配：`/data/workspace` 与 `/data/.openclaw` 挂载增强，避免状态目录分裂。
+- 新增国产模型 API 接入：DeepSeek、阿里百炼、火山方舟、MiniMax、智谱（OpenAI 兼容模式）。
+- `ContentService` 支持 `AI_PROVIDER/AI_API_KEY/AI_BASE_URL/AI_MODEL` 统一配置链路。
+- 文档补齐首启配对与网关鉴权故障排查，降低首次部署失败率。
 
 ## 为什么做这个？
 
@@ -86,7 +85,8 @@ AI: 📊 今日浏览 1,247 | 想要 89 | 成交 12 | 营收 ¥38,700
 ### 准备工作
 
 - [Docker](https://docs.docker.com/get-docker/)（20.10+）
-- AI API 密钥 — [Anthropic](https://console.anthropic.com/)（推荐）/ [OpenAI](https://platform.openai.com/) / [DeepSeek](https://platform.deepseek.com/)（最便宜）
+- 网关 AI Key（必填，支持 Anthropic / OpenAI / Moonshot(Kimi) / MiniMax / ZAI）
+- 业务文案 AI Key（可选，支持 DeepSeek / 阿里百炼 / 火山方舟 / MiniMax / 智谱）
 - 闲鱼账号 Cookie（[获取方法](#获取闲鱼-cookie)）
 
 ### 三步启动
@@ -108,10 +108,10 @@ docker compose up -d
 
 ### 一键部署向导（推荐）
 
-如果你不想手动编辑 `.env`，可以直接运行交互式向导，按提示一步步输入 API Key、Cookie、密码并自动启动：
+如果你不想手动编辑 `.env`，可以直接运行交互式向导。向导会分开配置「网关模型」和「业务文案模型」，并做启动后健康检查：
 
 ```bash
-python -m src.setup_wizard
+python3 -m src.setup_wizard
 # 或
 ./scripts/one_click_deploy.sh
 ```
@@ -123,7 +123,7 @@ python -m src.setup_wizard
 项目内置了轻量后台页面（本地 Web）：
 
 ```bash
-python -m src.dashboard_server --port 8091
+python3 -m src.dashboard_server --port 8091
 ```
 
 打开 **http://localhost:8091** 可查看：
@@ -316,9 +316,12 @@ quote:
 
 | 变量名 | 必填 | 说明 |
 |--------|------|------|
-| `ANTHROPIC_API_KEY` | 三选一 | Anthropic API 密钥 |
-| `OPENAI_API_KEY` | 三选一 | OpenAI API 密钥 |
-| `DEEPSEEK_API_KEY` | 三选一 | DeepSeek API 密钥（最便宜） |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `MOONSHOT_API_KEY` / `MINIMAX_API_KEY` / `ZAI_API_KEY` | 五选一 | 网关启动所需 AI Key（至少一个） |
+| `AI_PROVIDER` | 否 | 业务文案模型供应商（如 `deepseek` / `aliyun_bailian` / `volcengine_ark`） |
+| `AI_API_KEY` | 否 | 业务文案模型 API Key |
+| `AI_BASE_URL` | 否 | 业务文案模型 Base URL（OpenAI 兼容） |
+| `AI_MODEL` | 否 | 业务文案模型名 |
+| `DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` / `ARK_API_KEY` / `ZHIPU_API_KEY` | 否 | 国产模型供应商专用 Key（可按需填写） |
 | `OPENCLAW_GATEWAY_TOKEN` | 是 | Gateway 认证令牌（随便设一个） |
 | `AUTH_PASSWORD` | 是 | Web 界面登录密码 |
 | `XIANYU_COOKIE_1` | 是 | 闲鱼会话 Cookie |
@@ -419,6 +422,13 @@ ruff check src/
 
 ```bash
 docker compose pull && docker compose up -d
+```
+
+若首次访问出现 `pairing required`：
+
+```bash
+docker compose exec -it openclaw-gateway openclaw devices list
+docker compose exec -it openclaw-gateway openclaw devices approve <requestId>
 ```
 
 闲鱼业务逻辑不受影响。

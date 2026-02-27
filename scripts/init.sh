@@ -4,7 +4,11 @@
 
 set -e
 
-WORKSPACE="/home/node/.openclaw/workspace"
+# OpenClaw 新镜像默认使用 /data/workspace；旧布局仍可能是 /home/node/.openclaw/workspace
+WORKSPACE="/data/workspace"
+if [ ! -d "$WORKSPACE" ]; then
+    WORKSPACE="/home/node/.openclaw/workspace"
+fi
 
 echo "[init] Installing Python environment for xianyu-openclaw..."
 
@@ -34,20 +38,7 @@ export PATH="$VENV_PATH/bin:$PATH"
 # 创建数据目录
 mkdir -p "$WORKSPACE/data" "$WORKSPACE/data/processed_images" "$WORKSPACE/logs"
 
-# 写入 OpenClaw 浏览器配置（如果不存在）
-OPENCLAW_CONFIG="/home/node/.openclaw/openclaw.json"
-if [ ! -f "$OPENCLAW_CONFIG" ]; then
-    echo "[init] Writing default OpenClaw browser config..."
-    cat > "$OPENCLAW_CONFIG" << 'EOCFG'
-{
-  "browser": {
-    "enabled": true,
-    "defaultProfile": "openclaw",
-    "headless": true
-  }
-}
-EOCFG
-fi
+# 不在此处创建 openclaw.json，避免与镜像入口脚本的状态目录(/data/.openclaw)冲突
 
 # 创建一个 wrapper 脚本使 skills 中的 python 命令使用 venv
 WRAPPER="$WORKSPACE/.venv/bin/python-wrapper"

@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-02-27
+
 ### Added
+- 一站式部署增强：
+  - `setup_wizard` 升级为双通道配置（Gateway AI 与业务文案 AI 分离）
+  - 自动生成 `OPENCLAW_GATEWAY_TOKEN` 默认值
+  - 启动后自动执行容器健康检查与常见故障提示
+- 国产大模型接入（OpenAI 兼容模式）：
+  - DeepSeek（`DEEPSEEK_API_KEY`）
+  - 阿里云百炼（`DASHSCOPE_API_KEY`）
+  - 火山方舟（`ARK_API_KEY`）
+  - MiniMax（`MINIMAX_API_KEY`）
+  - 智谱（`ZHIPU_API_KEY`）
+- 新增统一业务 AI 环境变量：`AI_PROVIDER`、`AI_API_KEY`、`AI_BASE_URL`、`AI_MODEL`
+
+### Changed
+- `scripts/init.sh`：兼容 `/data/workspace` 与旧路径，避免写入错误状态目录导致配置分裂。
+- `docker-compose.yml`：增加 `/data/workspace` 与 `/data/.openclaw` 挂载，减少镜像内状态目录不一致问题。
+- `ContentService`：支持多供应商 API key/base_url/model 解析，优先读取 `AI_*` 变量。
+- 配置模型扩展 provider 枚举：`aliyun_bailian`、`volcengine_ark`、`minimax`、`zhipu`。
+- `README.md` / `USER_GUIDE.md` / `.env.example`：更新为新部署流程与国产模型配置说明。
+
+### Added (carry-over)
 - `src/modules/quote/route.py`：地理路由标准化组件，支持省/市/自治区别名与后缀容错。
 - `quote` 配置新增熔断参数：`circuit_fail_threshold`、`circuit_open_seconds`。
 - 自动报价新增测试：路由标准化缓存命中、远程 provider 熔断打开后自动降级。

@@ -17,6 +17,34 @@ from src.core.config import get_config
 from src.core.logger import get_logger
 
 
+PROVIDER_KEY_MAP = {
+    "openai": "OPENAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "aliyun_bailian": "DASHSCOPE_API_KEY",
+    "volcengine_ark": "ARK_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
+    "zhipu": "ZHIPU_API_KEY",
+}
+
+PROVIDER_BASE_URL_MAP = {
+    "openai": "https://api.openai.com/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "aliyun_bailian": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "volcengine_ark": "https://ark.cn-beijing.volces.com/api/v3",
+    "minimax": "https://api.minimaxi.com/v1",
+    "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+}
+
+PROVIDER_MODEL_MAP = {
+    "openai": "gpt-4o-mini",
+    "deepseek": "deepseek-chat",
+    "aliyun_bailian": "qwen-plus-latest",
+    "volcengine_ark": "doubao-1.5-pro-32k-250115",
+    "minimax": "MiniMax-Text-01",
+    "zhipu": "glm-4-plus",
+}
+
+
 class ContentService:
     """
     内容生成服务
@@ -35,9 +63,26 @@ class ContentService:
         self.logger = get_logger()
         self.compliance = get_compliance_guard()
 
-        self.api_key = self.config.get("api_key") or os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
-        self.base_url = self.config.get("base_url") or os.getenv("OPENAI_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL")
-        self.model = self.config.get("model", "deepseek-chat")
+        self.provider = str(self.config.get("provider") or os.getenv("AI_PROVIDER") or "deepseek").lower()
+        provider_key_env = PROVIDER_KEY_MAP.get(self.provider, "")
+
+        resolved_api_key = (
+            os.getenv("AI_API_KEY")
+            or (os.getenv(provider_key_env) if provider_key_env else None)
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("DEEPSEEK_API_KEY")
+        )
+        resolved_base_url = (
+            os.getenv("AI_BASE_URL")
+            or PROVIDER_BASE_URL_MAP.get(self.provider)
+            or os.getenv("OPENAI_BASE_URL")
+            or os.getenv("DEEPSEEK_BASE_URL")
+        )
+        resolved_model = os.getenv("AI_MODEL") or PROVIDER_MODEL_MAP.get(self.provider, "deepseek-chat")
+
+        self.api_key = self.config.get("api_key") or resolved_api_key
+        self.base_url = self.config.get("base_url") or resolved_base_url
+        self.model = self.config.get("model") or resolved_model
         self.temperature = self.config.get("temperature", 0.7)
         self.max_tokens = self.config.get("max_tokens", 1000)
         self.timeout = self.config.get("timeout", 30)
