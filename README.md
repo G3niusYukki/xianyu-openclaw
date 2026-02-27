@@ -100,6 +100,27 @@ docker compose up -d
 
 打开 **http://localhost:8080** ，开始跟你的闲鱼 AI 助手对话。
 
+### 轻量运行（不启 Docker）
+
+如果你只需要“消息自动化 + 报价 + 看板”，可直接用 Python CLI 运行，资源占用更低：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m src.cli messages --action auto-workflow --limit 20 --dry-run
+python -m src.cli messages --action run-worker --limit 20 --interval-seconds 15
+```
+
+Windows 可用批处理脚本：
+
+```bat
+scripts\windows\setup_windows.bat
+scripts\windows\auto_workflow.bat 20 --dry-run
+scripts\windows\run_worker.bat 20 15
+scripts\windows\dashboard.bat 8091
+```
+
 ### 一键部署向导（推荐）
 
 如果你不想手动编辑 `.env`，可以直接运行交互式向导，按提示一步步输入 API Key、Cookie、密码并自动启动：
@@ -195,6 +216,9 @@ python -m src.cli relist   --id item_123
 python -m src.cli analytics --action dashboard
 python -m src.cli accounts  --action list
 python -m src.cli messages  --action auto-reply --limit 20 --dry-run
+python -m src.cli messages  --action auto-followup --limit 20 --dry-run
+python -m src.cli messages  --action auto-workflow --limit 20 --dry-run
+python -m src.cli messages  --action run-worker --limit 20 --interval-seconds 15
 python -m src.dashboard_server --port 8091
 ```
 
@@ -218,6 +242,21 @@ messages:
       priority: 20
       keywords: ["代下单", "代拍", "代充", "代购", "代订"]
       reply: "支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。"
+ai:
+  usage_mode: "minimal"
+  max_calls_per_run: 20
+  cache_enabled: true
+  task_ai_enabled:
+    title: false
+    description: false
+    optimize_title: true
+    seo_keywords: true
+  read_no_reply_followup_enabled: false
+  read_no_reply_min_elapsed_seconds: 300
+  read_no_reply_min_interval_seconds: 1800
+  read_no_reply_max_per_session: 1
+  read_no_reply_templates:
+    - "看到你已读啦，我先把这个方案给你留着。需要我按你的重量和地区再精确算一次吗？"
 ```
 
 ---

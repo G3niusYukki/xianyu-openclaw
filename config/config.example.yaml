@@ -25,6 +25,18 @@ ai:
   max_tokens: 1000
   fallback_enabled: true
   fallback_model: "gpt-3.5-turbo"
+  # 成本优先：仅必要环节接入 AI
+  usage_mode: "minimal"   # always | auto | minimal
+  max_calls_per_run: 20
+  cache_enabled: true
+  cache_path: "data/ai_response_cache.json"
+  cache_ttl_seconds: 86400
+  cache_max_entries: 2000
+  task_ai_enabled:
+    title: false
+    description: false
+    optimize_title: true
+    seo_keywords: true
 
 # 数据库配置
 database:
@@ -108,6 +120,25 @@ messages:
   send_confirm_delay_seconds: [0.15, 0.35]
   followup_quote_enabled: true
   followup_quote_delay_seconds: [0.6, 1.5]
+  # 已读未回合规跟进（默认关闭，建议先 dry-run 观察）
+  read_no_reply_followup_enabled: false
+  read_no_reply_limit_per_run: 20
+  read_no_reply_min_elapsed_seconds: 300
+  read_no_reply_min_interval_seconds: 1800
+  read_no_reply_max_per_session: 1
+  read_no_reply_templates:
+    - "看到你已读啦，我先把这个方案给你留着。需要我按你的重量和地区再精确算一次吗？"
+    - "如果你还在比较寄件方案，我可以按你的预算再给一个更省的选项，需要的话直接回我“继续报价”就行。"
+  read_no_reply_stop_keywords: ["不用", "不需要", "先不", "别发了", "勿扰", "拉黑", "举报"]
+  followup_state_path: "data/messages_followup_state.json"
+  followup_state_max_sessions: 5000
+  # 常驻 worker（7x24 轮询执行 auto-workflow）
+  worker_enabled: false
+  worker_interval_seconds: 15
+  worker_jitter_seconds: 1.5
+  worker_backoff_seconds: 5
+  worker_max_backoff_seconds: 120
+  worker_state_path: "data/workflow_worker_state.json"
   reply_prefix: ""
   default_reply: "您好，宝贝在的，感兴趣可以直接拍下。"
   virtual_default_reply: "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。"

@@ -5,7 +5,12 @@ Content Generation Service
 提供AI驱动的商品标题和描述生成功能
 """
 
+import hashlib
+import json
 import os
+import time
+from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, OpenAI
@@ -42,6 +47,40 @@ class ContentService:
         self.fallback_enabled = self.config.get("fallback_enabled", True)
         self.fallback_model = self.config.get("fallback_model", "gpt-3.5-turbo")
 
+        self.usage_mode = self._normalize_usage_mode(str(self.config.get("usage_mode", "minimal")))
+        self.max_calls_per_run = self._safe_int(self.config.get("max_calls_per_run", 20), default=20, minimum=1)
+        self.cache_enabled = bool(self.config.get("cache_enabled", True))
+        self.cache_ttl_seconds = self._safe_int(
+            self.config.get("cache_ttl_seconds", 86400),
+            default=86400,
+            minimum=60,
+        )
+        self.cache_max_entries = self._safe_int(
+            self.config.get("cache_max_entries", 2000),
+            default=2000,
+            minimum=100,
+        )
+        self.cache_path = Path(str(self.config.get("cache_path", "data/ai_response_cache.json")))
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self._cache_lock = Lock()
+        self._ai_calls_made = 0
+
+        default_task_ai_enabled = {
+            "title": False,
+            "description": False,
+            "optimize_title": True,
+            "seo_keywords": True,
+        }
+        configured_task_flags = self.config.get("task_ai_enabled", {})
+        if isinstance(configured_task_flags, dict):
+            merged_task_flags = {
+                **default_task_ai_enabled,
+                **{str(k): bool(v) for k, v in configured_task_flags.items()},
+            }
+        else:
+            merged_task_flags = default_task_ai_enabled
+        self.task_ai_enabled = merged_task_flags
+
         self.client: OpenAI | None = None
         self.async_client: AsyncOpenAI | None = None
 
@@ -60,26 +99,159 @@ class ContentService:
         else:
             self.logger.warning("AI API Key not found. Content generation will use templates.")
 
-    def _call_ai(self, prompt: str, max_tokens: int | None = None) -> str | None:
-        """
-        调用AI生成内容
+    @staticmethod
+    def _normalize_usage_mode(value: str) -> str:
+        mode = (value or "").strip().lower()
+        return mode if mode in {"always", "auto", "minimal"} else "minimal"
 
-        Args:
-            prompt: 提示词
-            max_tokens: 最大token数
+    @staticmethod
+    def _safe_int(value: Any, default: int, minimum: int) -> int:
+        try:
+            parsed = int(value)
+            if parsed < minimum:
+                return default
+            return parsed
+        except (TypeError, ValueError):
+            return default
 
-        Returns:
-            生成的内容，失败返回None
-        """
+    def _is_task_ai_enabled(self, task: str) -> bool:
+        return bool(self.task_ai_enabled.get(task, False))
+
+    def _is_necessary_title_generation(self, product_name: str, features: list[str]) -> bool:
+        if len(str(product_name).strip()) >= 12:
+            return True
+        if len(features) >= 3:
+            return True
+        return any(len(str(item).strip()) >= 8 for item in features)
+
+    def _is_necessary_description_generation(
+        self,
+        condition: str,
+        tags: list[str],
+        extra_info: str | None,
+    ) -> bool:
+        condition_text = str(condition or "")
+        risk_terms = ["瑕疵", "拆修", "进水", "磕碰", "暗病", "异常"]
+        if any(term in condition_text for term in risk_terms):
+            return True
+        if len(tags) >= 4:
+            return True
+        if extra_info and len(str(extra_info).strip()) >= 8:
+            return True
+        return False
+
+    def _should_use_ai(self, task: str, payload: dict[str, Any] | None = None) -> bool:
+        if not self.client:
+            return False
+
+        if self._ai_calls_made >= self.max_calls_per_run:
+            self.logger.warning(
+                f"AI call budget exhausted in current run: {self._ai_calls_made}/{self.max_calls_per_run}. Using templates."
+            )
+            return False
+
+        mode = self.usage_mode
+        if mode == "always":
+            return True
+
+        if not self._is_task_ai_enabled(task):
+            return False
+
+        payload = payload or {}
+        if task in {"optimize_title", "seo_keywords"}:
+            return True
+
+        if task == "title":
+            return self._is_necessary_title_generation(
+                str(payload.get("product_name", "")),
+                payload.get("features", []) if isinstance(payload.get("features", []), list) else [],
+            )
+
+        if task == "description":
+            return self._is_necessary_description_generation(
+                condition=str(payload.get("condition", "")),
+                tags=payload.get("tags", []) if isinstance(payload.get("tags", []), list) else [],
+                extra_info=payload.get("extra_info"),
+            )
+
+        return mode == "auto"
+
+    def _build_cache_key(self, task: str, prompt: str, max_tokens: int) -> str:
+        raw = f"{self.model}|{task}|{max_tokens}|{prompt}"
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+    def _read_cache_locked(self) -> dict[str, Any]:
+        if not self.cache_path.exists():
+            return {}
+        try:
+            content = self.cache_path.read_text(encoding="utf-8").strip()
+            if not content:
+                return {}
+            data = json.loads(content)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _write_cache_locked(self, data: dict[str, Any]) -> None:
+        temp_path = self.cache_path.with_suffix(f"{self.cache_path.suffix}.tmp")
+        temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(self.cache_path)
+
+    def _cache_get(self, cache_key: str) -> str | None:
+        if not self.cache_enabled:
+            return None
+
+        now = time.time()
+        with self._cache_lock:
+            data = self._read_cache_locked()
+            entry = data.get(cache_key)
+            if not isinstance(entry, dict):
+                return None
+
+            ts = float(entry.get("ts") or 0)
+            if ts <= 0 or now - ts > self.cache_ttl_seconds:
+                data.pop(cache_key, None)
+                self._write_cache_locked(data)
+                return None
+
+            value = entry.get("value")
+            if isinstance(value, str) and value.strip():
+                return value
+            return None
+
+    def _cache_set(self, cache_key: str, value: str) -> None:
+        if not self.cache_enabled or not value:
+            return
+
+        now = time.time()
+        with self._cache_lock:
+            data = self._read_cache_locked()
+            data[cache_key] = {"value": value, "ts": now}
+
+            if len(data) > self.cache_max_entries:
+                sorted_items = sorted(
+                    data.items(),
+                    key=lambda item: float(item[1].get("ts") or 0) if isinstance(item[1], dict) else 0,
+                    reverse=True,
+                )
+                data = dict(sorted_items[: self.cache_max_entries])
+
+            self._write_cache_locked(data)
+
+    def _call_ai_once(self, *, model: str, prompt: str, max_tokens: int) -> str | None:
         if not self.client:
             return None
 
+        if self._ai_calls_made >= self.max_calls_per_run:
+            return None
+
+        self._ai_calls_made += 1
         try:
             response = self.client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
-                max_tokens=max_tokens or self.max_tokens,
+                max_tokens=max_tokens,
                 timeout=self.timeout,
             )
             return response.choices[0].message.content.strip()
@@ -93,6 +265,43 @@ class ContentService:
             self.logger.error(f"Unexpected AI call error: {e}")
             return None
 
+    def _call_ai(
+        self,
+        prompt: str,
+        max_tokens: int | None = None,
+        *,
+        task: str = "generic",
+    ) -> str | None:
+        """
+        调用AI生成内容（带预算控制与缓存）
+
+        Args:
+            prompt: 提示词
+            max_tokens: 最大token数
+            task: 任务名，用于缓存与策略
+
+        Returns:
+            生成的内容，失败返回None
+        """
+        if not self.client:
+            return None
+
+        token_limit = int(max_tokens or self.max_tokens)
+        cache_key = self._build_cache_key(task=task, prompt=prompt, max_tokens=token_limit)
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+        result = self._call_ai_once(model=self.model, prompt=prompt, max_tokens=token_limit)
+
+        if not result and self.fallback_enabled and self.fallback_model and self.fallback_model != self.model:
+            result = self._call_ai_once(model=self.fallback_model, prompt=prompt, max_tokens=token_limit)
+
+        if result:
+            self._cache_set(cache_key, result)
+
+        return result
+
     def generate_title(self, product_name: str, features: list[str], category: str = "General") -> str:
         """
         生成闲鱼商品标题
@@ -105,31 +314,26 @@ class ContentService:
         Returns:
             生成的标题
         """
-        if not self.client:
-            return self._default_title(product_name, features)
+        default_title = self._default_title(product_name, features)
+
+        if not self._should_use_ai(
+            "title",
+            payload={"product_name": product_name, "features": features},
+        ):
+            return default_title
 
         keywords = self._get_category_keywords(category)
-        prompt = f"""
-        请为闲鱼（二手交易平台）商品生成一个吸引人的标题。
+        prompt = (
+            "你是闲鱼文案助手。生成1条15-25字中文标题，真实自然，避免夸张。"
+            f"商品:{product_name};特点:{', '.join(features)};分类:{category};"
+            f"关键词:{', '.join(keywords[:3])};只输出标题。"
+        )
+        result = self._call_ai(prompt, max_tokens=40, task="title")
 
-        商品名称: {product_name}
-        商品特点: {", ".join(features)}
-        商品分类: {category}
-        推荐关键词: {", ".join(keywords[:5])}
-
-        要求:
-        1. 15-25字以内
-        2. 包含1-2个热搜关键词提高搜索曝光
-        3. 突出商品卖点或性价比
-        4. 真实感强，不要过于广告腔
-        5. 可以使用符号增加吸引力，如【】、🔥、💰等
-        """
-        result = self._call_ai(prompt, max_tokens=60)
-
-        if result and len(result) <= 30:
+        if result and 5 <= len(result) <= 30:
             return result
 
-        return self._default_title(product_name, features)
+        return default_title
 
     def _default_title(self, product_name: str, features: list[str]) -> str:
         """生成默认标题"""
@@ -154,7 +358,12 @@ class ContentService:
         return self._get_category_keywords(category)
 
     def generate_description(
-        self, product_name: str, condition: str, reason: str, tags: list[str], extra_info: str | None = None
+        self,
+        product_name: str,
+        condition: str,
+        reason: str,
+        tags: list[str],
+        extra_info: str | None = None,
     ) -> str:
         """
         生成闲鱼商品描述文案
@@ -169,32 +378,30 @@ class ContentService:
         Returns:
             生成的描述文案
         """
-        if not self.client:
-            return self._default_description(product_name, condition, reason, tags)
+        default_desc = self._default_description(product_name, condition, reason, tags)
 
-        prompt = f"""
-        请写一段闲鱼商品的详细描述文案。
+        if not self._should_use_ai(
+            "description",
+            payload={
+                "condition": condition,
+                "tags": tags,
+                "extra_info": extra_info,
+            },
+        ):
+            return default_desc
 
-        商品名称: {product_name}
-        商品成色: {condition}
-        转手原因: {reason}
-        标签: {", ".join(tags)}
-        额外信息: {extra_info or "无"}
-
-        要求:
-        1. 语气亲切自然，营造真实个人卖家感
-        2. 开头引入，说明商品来源或特点
-        3. 中间详细描述成色、使用情况、瑕疵（如有）
-        4. 结尾说明交易方式，引导私聊
-        5. 100-200字为宜
-        6. 不要使用过多emoji，适度使用
-        """
-        result = self._call_ai(prompt, max_tokens=300)
+        prompt = (
+            "写一段100-180字闲鱼商品描述，语气真实，包含成色、使用/瑕疵、交易说明。"
+            f"商品:{product_name};成色:{condition};原因:{reason};"
+            f"标签:{', '.join(tags)};补充:{extra_info or '无'}。"
+            "输出正文，不要分点编号。"
+        )
+        result = self._call_ai(prompt, max_tokens=220, task="description")
 
         if result and len(result) >= 50:
             return result
 
-        return self._default_description(product_name, condition, reason, tags)
+        return default_desc
 
     def _default_description(self, product_name: str, condition: str, reason: str, tags: list[str]) -> str:
         """生成默认描述"""
@@ -257,27 +464,19 @@ class ContentService:
         Returns:
             优化后的标题
         """
+        if not self._should_use_ai("optimize_title", payload={"title": current_title, "category": category}):
+            return current_title
+
         keywords = self._get_category_keywords(category)
+        prompt = (
+            "优化闲鱼标题，保持核心信息不变，15-25字，真实自然。"
+            f"原标题:{current_title};分类:{category};关键词:{', '.join(keywords[:4])};"
+            "只输出优化后标题。"
+        )
 
-        prompt = f"""
-        请优化以下闲鱼商品标题，提高搜索曝光和吸引力。
+        result = self._call_ai(prompt, max_tokens=32, task="optimize_title")
 
-        当前标题: {current_title}
-        分类: {category}
-        推荐关键词: {", ".join(keywords)}
-
-        要求:
-        1. 保持标题核心信息不变
-        2. 适当添加热搜关键词
-        3. 15-25字以内
-        4. 不要过于广告化
-
-        请直接返回优化后的标题，不需要额外说明。
-        """
-
-        result = self._call_ai(prompt, max_tokens=50)
-
-        if result and len(result) >= 5 and len(result) <= 30:
+        if result and 5 <= len(result) <= 30:
             return result
 
         return current_title
@@ -293,20 +492,21 @@ class ContentService:
         Returns:
             关键词列表
         """
-        prompt = f"""
-        为闲鱼商品生成SEO关键词。
+        if not self._should_use_ai("seo_keywords", payload={"product_name": product_name, "category": category}):
+            return self._get_category_keywords(category)
 
-        商品: {product_name}
-        分类: {category}
+        prompt = (
+            "给出5-8个闲鱼搜索关键词，按热度排序，用逗号分隔。"
+            f"商品:{product_name};分类:{category}。"
+        )
 
-        请生成5-8个相关热搜关键词，按热度排序。
-        只需要返回关键词列表，用逗号分隔。
-        """
-
-        result = self._call_ai(prompt, max_tokens=100)
+        result = self._call_ai(prompt, max_tokens=60, task="seo_keywords")
 
         if result:
-            keywords = [k.strip() for k in result.split(",")]
-            return [k for k in keywords if k][:8]
+            normalized = result.replace("，", ",")
+            keywords = [k.strip() for k in normalized.split(",")]
+            cleaned = [k for k in keywords if k]
+            if cleaned:
+                return cleaned[:8]
 
         return self._get_category_keywords(category)

@@ -14,6 +14,8 @@ from typing import Any
 from src.core.config import get_config
 from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
+from src.modules.messages.followup_policy import ReadNoReplyFollowupPolicy
+from src.modules.messages.followup_store import FollowupStateStore
 from src.modules.messages.reply_engine import ReplyStrategyEngine
 from src.modules.quote.service import QuoteService
 
@@ -73,6 +75,18 @@ class MessagesService:
             "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。",
         )
         self.max_replies_per_run = int(self.config.get("max_replies_per_run", 10))
+        self.read_no_reply_followup_enabled = bool(self.config.get("read_no_reply_followup_enabled", False))
+        self.read_no_reply_limit_per_run = self._resolve_positive_int(
+            "read_no_reply_limit_per_run",
+            default=20,
+            max_value=200,
+        )
+        self.followup_state_path = str(self.config.get("followup_state_path", "data/messages_followup_state.json"))
+        self.followup_state_max_sessions = self._resolve_positive_int(
+            "followup_state_max_sessions",
+            default=5000,
+            max_value=200000,
+        )
 
         self.keyword_replies: dict[str, str] = {
             "还在": "在的，商品还在，直接拍就可以。",
@@ -100,6 +114,11 @@ class MessagesService:
         )
 
         self.quote_service = QuoteService()
+        self.followup_policy = ReadNoReplyFollowupPolicy(self.config)
+        self.followup_store = FollowupStateStore(
+            path=self.followup_state_path,
+            max_sessions=self.followup_state_max_sessions,
+        )
         self.selectors = MessageSelectors()
         self._message_page_id: str | None = None
 
@@ -114,6 +133,16 @@ class MessagesService:
             except (TypeError, ValueError):
                 pass
         return default
+
+    def _resolve_positive_int(self, key: str, default: int, max_value: int) -> int:
+        raw = self.config.get(key, default)
+        try:
+            parsed = int(raw)
+            if parsed <= 0:
+                return default
+            return min(parsed, max_value)
+        except (TypeError, ValueError):
+            return default
 
     def _random_between(self, delay_range: tuple[float, float]) -> float:
         return random.uniform(delay_range[0], delay_range[1])
@@ -201,6 +230,84 @@ class MessagesService:
       item_title: lines.length > 2 ? lines[1] : "",
       last_message: lines[lines.length - 1] || "",
       unread_count: unreadCount,
+    }});
+
+    if (result.length >= {max(limit, 1)}) break;
+  }}
+
+  return result;
+}})();
+"""
+            data = await self.controller.execute_script(page_id, script)
+            if isinstance(data, list):
+                return data
+            return []
+        finally:
+            if own_page and page_id:
+                await self.controller.close_page(page_id)
+
+    async def get_read_no_reply_sessions(
+        self,
+        limit: int = 20,
+        *,
+        reuse_page: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        """读取“已读未回”会话（用于二次合规跟进）。"""
+        if not self.controller:
+            raise BrowserError("Browser controller is not initialized. Cannot fetch sessions.")
+
+        should_reuse = self.reuse_message_page if reuse_page is None else bool(reuse_page)
+
+        page_id: str | None = None
+        own_page = False
+        try:
+            if should_reuse:
+                page_id = await self._ensure_message_page()
+            else:
+                own_page = True
+                page_id = await self.controller.new_page()
+                await self.controller.navigate(page_id, self.selectors.MESSAGE_PAGE)
+                await asyncio.sleep(self._random_delay(1.5, 2.5))
+
+            script = f"""
+(() => {{
+  const nodes = Array.from(
+    document.querySelectorAll("[data-session-id], [class*='session'], [class*='conversation'], li")
+  );
+  const result = [];
+
+  for (const node of nodes) {{
+    const text = (node.innerText || "").trim();
+    if (!text) continue;
+
+    const unreadEl = node.querySelector("[class*='unread'], [class*='badge'], [class*='count']");
+    const unreadText = (unreadEl?.innerText || "").trim();
+    const unreadCount = Number((unreadText.match(/\\d+/) || ["0"])[0]);
+    if (unreadCount > 0) continue;
+
+    const lines = text.split("\\n").map(s => s.trim()).filter(Boolean);
+    if (!lines.length) continue;
+
+    const hasReadMarker = lines.some(line => /已读/.test(line));
+    if (!hasReadMarker) continue;
+
+    const tail = lines[lines.length - 1] || "";
+    const lastMessage = /已读/.test(tail) && lines.length >= 2
+      ? lines[lines.length - 2]
+      : tail;
+
+    const sessionId = node.getAttribute("data-session-id")
+      || node.dataset?.sessionId
+      || node.getAttribute("data-id")
+      || `session_${{result.length + 1}}`;
+
+    result.push({{
+      session_id: sessionId,
+      peer_name: lines[0] || "买家",
+      item_title: lines.length > 2 ? lines[1] : "",
+      last_message: lastMessage || "",
+      unread_count: 0,
+      has_read_marker: true,
     }});
 
     if (result.length >= {max(limit, 1)}) break;
@@ -312,6 +419,9 @@ class MessagesService:
                 msg = str(session.get("last_message", ""))
                 item_title = str(session.get("item_title", ""))
 
+                if not dry_run and session_id:
+                    self.followup_store.record_inbound(session_id, msg)
+
                 parsed_quote = self.quote_service.parse_quote_request(msg, item_title=item_title)
                 is_quote_intent = bool(self.followup_quote_enabled and parsed_quote.is_quote_intent)
 
@@ -340,6 +450,8 @@ class MessagesService:
                     success += 1
                     if first_reply_latency is not None and first_reply_latency <= self.first_reply_target_seconds:
                         first_reply_within_target += 1
+                    if not dry_run and session_id:
+                        self.followup_store.record_first_reply(session_id, first_reply_text, item_title=item_title)
 
                 quote_reply = ""
                 quote_source = ""
@@ -369,6 +481,8 @@ class MessagesService:
 
                     if quote_sent:
                         quote_followup_success += 1
+                        if not dry_run and session_id:
+                            self.followup_store.record_outbound(session_id, quote_reply, item_title=item_title)
 
                 details.append(
                     {
@@ -407,3 +521,119 @@ class MessagesService:
         finally:
             if page_id:
                 await self.close_message_page()
+
+    async def auto_followup_read_no_reply(self, limit: int = 20, dry_run: bool = False) -> dict[str, Any]:
+        """合规处理“已读未回”会话。"""
+        if not self.read_no_reply_followup_enabled:
+            return {
+                "action": "auto_followup_read_no_reply",
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "enabled": False,
+                "dry_run": dry_run,
+                "total": 0,
+                "eligible": 0,
+                "success": 0,
+                "failed": 0,
+                "skipped_reason": "read_no_reply_followup_disabled",
+                "details": [],
+            }
+
+        page_id: str | None = None
+        if self.reuse_message_page and not dry_run:
+            page_id = await self._ensure_message_page()
+
+        try:
+            effective_limit = min(max(limit, 1), self.read_no_reply_limit_per_run)
+            sessions = await self.get_read_no_reply_sessions(limit=effective_limit, reuse_page=bool(page_id))
+
+            details: list[dict[str, Any]] = []
+            eligible = 0
+            success = 0
+
+            for idx, session in enumerate(sessions):
+                session_id = str(session.get("session_id", ""))
+                item_title = str(session.get("item_title", ""))
+
+                state = self.followup_store.get(session_id) if session_id else {}
+                allow_send, decision = self.followup_policy.evaluate(session, state)
+                if decision == "stop_keyword_hit" and not dry_run and session_id:
+                    state = self.followup_store.mark_opt_out(session_id)
+
+                followup_text = ""
+                followup_sent = False
+
+                if allow_send:
+                    eligible += 1
+                    followup_text = self.followup_policy.build_followup_message(session, state)
+
+                    if dry_run:
+                        followup_sent = True
+                    elif session_id:
+                        followup_sent = await self.reply_to_session(
+                            session_id,
+                            followup_text,
+                            page_id=page_id,
+                            close_page=False,
+                        )
+
+                    if followup_sent:
+                        success += 1
+                        if not dry_run and session_id:
+                            state = self.followup_store.record_followup_sent(
+                                session_id,
+                                followup_text,
+                                item_title=item_title,
+                            )
+
+                details.append(
+                    {
+                        "session_id": session_id,
+                        "peer_name": session.get("peer_name", ""),
+                        "item_title": item_title,
+                        "last_message": session.get("last_message", ""),
+                        "has_read_marker": bool(session.get("has_read_marker", True)),
+                        "decision": decision,
+                        "eligible": allow_send,
+                        "followup_text": followup_text,
+                        "followup_sent": followup_sent,
+                        "followup_sent_count": int((state or {}).get("followup_sent_count") or 0),
+                    }
+                )
+
+                if not dry_run and idx < len(sessions) - 1:
+                    await asyncio.sleep(self._random_between(self.inter_reply_delay_range))
+
+            return {
+                "action": "auto_followup_read_no_reply",
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "enabled": True,
+                "dry_run": dry_run,
+                "total": len(sessions),
+                "eligible": eligible,
+                "success": success,
+                "failed": eligible - success,
+                "details": details,
+            }
+        finally:
+            if page_id:
+                await self.close_message_page()
+
+    async def auto_workflow(self, limit: int = 20, dry_run: bool = False) -> dict[str, Any]:
+        """全流程：未读首响 + 询价补充 + 已读未回跟进。"""
+        first_stage = await self.auto_reply_unread(limit=limit, dry_run=dry_run)
+        second_stage = await self.auto_followup_read_no_reply(limit=limit, dry_run=dry_run)
+
+        return {
+            "action": "auto_workflow",
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "dry_run": dry_run,
+            "stages": {
+                "auto_reply_unread": first_stage,
+                "auto_followup_read_no_reply": second_stage,
+            },
+            "summary": {
+                "replied_sessions": int(first_stage.get("success", 0)),
+                "quote_followup_success": int(first_stage.get("quote_followup_success", 0)),
+                "read_no_reply_followup_success": int(second_stage.get("success", 0)),
+            },
+        }

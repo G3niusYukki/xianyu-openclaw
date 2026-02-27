@@ -41,6 +41,30 @@ class AIConfig(BaseModel):
     fallback_enabled: bool = Field(default=True, description="是否启用降级策略")
     fallback_api_key: str | None = Field(default=None, description="备用API密钥")
     fallback_model: str = Field(default="gpt-3.5-turbo", description="备用模型")
+    usage_mode: str = Field(default="minimal", description="AI调用策略: always | auto | minimal")
+    max_calls_per_run: int = Field(default=20, ge=1, le=1000, description="单次运行最多AI调用次数")
+    cache_enabled: bool = Field(default=True, description="是否启用AI响应缓存")
+    cache_path: str = Field(default="data/ai_response_cache.json", description="AI缓存文件路径")
+    cache_ttl_seconds: int = Field(default=86400, ge=60, le=2592000, description="AI缓存有效期（秒）")
+    cache_max_entries: int = Field(default=2000, ge=100, le=200000, description="缓存最大条目数")
+    task_ai_enabled: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "title": False,
+            "description": False,
+            "optimize_title": True,
+            "seo_keywords": True,
+        },
+        description="各任务是否允许AI（minimal/auto 模式下生效）",
+    )
+
+    @field_validator("usage_mode")
+    @classmethod
+    def validate_usage_mode(cls, v: str) -> str:
+        value = (v or "").strip().lower()
+        valid_modes = {"always", "auto", "minimal"}
+        if value not in valid_modes:
+            raise ValueError(f"usage_mode must be one of {sorted(valid_modes)}, got {v}")
+        return value
 
 
 class DatabaseConfig(BaseModel):
@@ -126,6 +150,34 @@ class MessagesConfig(BaseModel):
         default_factory=lambda: [0.6, 1.5],
         description="首响后报价补充消息延迟区间（秒）",
     )
+    read_no_reply_followup_enabled: bool = Field(default=False, description="是否启用已读未回合规跟进")
+    read_no_reply_limit_per_run: int = Field(default=20, ge=1, le=200, description="单次最多处理已读未回会话")
+    read_no_reply_min_elapsed_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=86400,
+        description="首响后达到该时长才允许跟进（秒）",
+    )
+    read_no_reply_min_interval_seconds: int = Field(
+        default=1800,
+        ge=30,
+        le=86400,
+        description="同会话两次跟进最小间隔（秒）",
+    )
+    read_no_reply_max_per_session: int = Field(default=1, ge=1, le=5, description="单会话最多跟进次数")
+    read_no_reply_templates: list[str] = Field(default_factory=list, description="已读未回跟进话术模板")
+    read_no_reply_stop_keywords: list[str] = Field(default_factory=list, description="触发停发的关键词")
+    followup_state_path: str = Field(
+        default="data/messages_followup_state.json",
+        description="会话跟进状态存储文件",
+    )
+    followup_state_max_sessions: int = Field(default=5000, ge=100, le=200000, description="跟进状态最大保留会话数")
+    worker_enabled: bool = Field(default=False, description="是否启用常驻消息工作流 worker")
+    worker_interval_seconds: float = Field(default=15.0, ge=0.01, le=3600, description="worker 轮询间隔（秒）")
+    worker_jitter_seconds: float = Field(default=1.5, ge=0, le=60, description="worker 轮询抖动（秒）")
+    worker_backoff_seconds: float = Field(default=5.0, ge=0.01, le=600, description="worker 失败退避基数（秒）")
+    worker_max_backoff_seconds: float = Field(default=120.0, ge=0.01, le=3600, description="worker 最大退避（秒）")
+    worker_state_path: str = Field(default="data/workflow_worker_state.json", description="worker 状态文件路径")
     reply_prefix: str = Field(default="", description="回复前缀")
     default_reply: str = Field(default="您好，宝贝在的，感兴趣可以直接拍下。", description="默认回复文案")
     virtual_default_reply: str = Field(
