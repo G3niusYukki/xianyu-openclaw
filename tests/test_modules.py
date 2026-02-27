@@ -1,6 +1,7 @@
 """核心模块行为测试。"""
 
 from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 import pytest
 
@@ -8,6 +9,7 @@ from src.core.error_handler import BrowserError
 from src.modules.listing.service import ListingService, XianyuSelectors
 from src.modules.media.service import MediaService
 from src.modules.messages.service import MessagesService
+from src.modules.compliance.center import ComplianceDecision
 from src.modules.operations.service import OperationsService
 
 
@@ -145,17 +147,14 @@ async def test_messages_auto_reply_unread_dry_run(mock_controller) -> None:
 
 @pytest.mark.asyncio
 async def test_messages_quote_request_generates_quote(mock_controller) -> None:
-    service = MessagesService(
-        controller=mock_controller,
-        config={"max_replies_per_run": 3, "fast_reply_enabled": True, "two_stage_enabled": False},
-    )
+    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "fast_reply_enabled": True})
     service.get_unread_sessions = AsyncMock(
         return_value=[
             {
                 "session_id": "q1",
                 "peer_name": "买家Q",
                 "item_title": "快递服务",
-                "last_message": "从上海寄到杭州 3kg 多少钱",
+                "last_message": "从上海寄到杭州 2kg 多少钱",
                 "unread_count": 1,
             }
         ]
@@ -191,3 +190,37 @@ async def test_messages_quote_request_missing_fields_returns_followup_question(m
     assert detail["is_quote"] is True
     assert detail["quote_success"] is False
     assert "请补充" in detail["reply"]
+
+
+@pytest.mark.asyncio
+async def test_messages_quote_blocked_by_policy_not_counted_as_quote_success(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3})
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "q3",
+                "peer_name": "买家B",
+                "item_title": "快递服务",
+                "last_message": "从上海寄到杭州 2kg 多少钱",
+                "unread_count": 1,
+            }
+        ]
+    )
+    service.compliance_center.evaluate_before_send = Mock(
+        return_value=ComplianceDecision(
+            allowed=False,
+            blocked=True,
+            reason="high_risk_stop_word",
+            hits=["站外"],
+            policy_scope="global",
+        )
+    )
+
+    result = await service.auto_reply_unread(limit=5, dry_run=False)
+    detail = result["details"][0]
+
+    assert detail["is_quote"] is True
+    assert detail["blocked_by_policy"] is True
+    assert detail["quote_success"] is False
+    assert detail["quote_blocked_by_policy"] is True
+    assert result["quote_success_rate"] == 0.0

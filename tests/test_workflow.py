@@ -18,6 +18,15 @@ class DummyMessageService:
         return self._detail
 
 
+class DummyNotifier:
+    def __init__(self):
+        self.messages = []
+
+    async def send_text(self, text):
+        self.messages.append(str(text))
+        return True
+
+
 def test_workflow_state_machine_and_illegal_transition(temp_dir) -> None:
     store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
     store.ensure_session({"session_id": "s1", "last_message": "hello"})
@@ -31,6 +40,33 @@ def test_workflow_state_machine_and_illegal_transition(temp_dir) -> None:
     transitions = store.get_transitions("s1")
     assert transitions[0]["status"] == "rejected"
     assert transitions[0]["error"] == "illegal_transition"
+
+
+def test_workflow_force_state_bypasses_transition_rule(temp_dir) -> None:
+    store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
+    store.ensure_session({"session_id": "s_force", "last_message": "hello"})
+    assert store.transition_state("s_force", WorkflowState.REPLIED, reason="normal") is True
+    assert store.transition_state("s_force", WorkflowState.NEW, reason="illegal") is False
+
+    forced = store.force_state("s_force", WorkflowState.NEW, reason="force_cli")
+    assert forced is True
+
+    session = store.get_session("s_force")
+    assert session is not None
+    assert session["state"] == WorkflowState.NEW.value
+
+    transitions = store.get_transitions("s_force")
+    assert transitions[0]["status"] == "forced"
+    assert transitions[0]["reason"] == "force_cli"
+
+
+def test_workflow_manual_takeover_auto_creates_session(temp_dir) -> None:
+    store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
+    assert store.set_manual_takeover("s_new", True) is True
+    session = store.get_session("s_new")
+    assert session is not None
+    assert int(session["manual_takeover"]) == 1
+    assert session["state"] == WorkflowState.MANUAL.value
 
 
 def test_workflow_job_dedupe_and_retry_to_dead(temp_dir) -> None:
@@ -96,3 +132,37 @@ async def test_workflow_worker_skips_manual_takeover(temp_dir) -> None:
 
     assert result["skipped_manual"] == 1
     assert result["success"] == 0
+
+
+@pytest.mark.asyncio
+async def test_workflow_worker_sends_feishu_alert_notification(temp_dir) -> None:
+    store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
+    notifier = DummyNotifier()
+    service = DummyMessageService(
+        sessions=[
+            {
+                "session_id": "s5",
+                "last_message": "在吗",
+                "peer_name": "D",
+                "item_title": "商品",
+            }
+        ],
+        detail={"sent": True, "is_quote": False, "quote_success": False, "quote_fallback": False},
+    )
+    worker = WorkflowWorker(
+        message_service=service,
+        store=store,
+        config={
+            "scan_limit": 5,
+            "claim_limit": 5,
+            "sla": {"window_minutes": 60, "min_samples": 1, "reply_p95_threshold_ms": -1},
+            "notifications": {"feishu": {"notify_on_alert": True}},
+        },
+        notifier=notifier,
+    )
+
+    result = await worker.run_once(dry_run=True)
+
+    assert result["alerts"]
+    assert notifier.messages
+    assert "SLA 告警" in notifier.messages[0]

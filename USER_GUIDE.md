@@ -13,8 +13,9 @@
 5. [启动工具](#5-启动工具)
 6. [怎么用？直接对话就行](#6-怎么用直接对话就行)
 7. [日常维护](#7-日常维护)
-8. [常见问题](#8-常见问题)
-9. [名词解释](#9-名词解释)
+8. [自动化推进与飞书通知](#8-自动化推进与飞书通知)
+9. [常见问题](#9-常见问题)
+10. [名词解释](#10-名词解释)
 
 ---
 
@@ -43,6 +44,7 @@ AI 助手会自动帮你在闲鱼上完成这些操作。
 | 能上网 | 需要连接互联网 |
 | 闲鱼账号 | 能正常登录的闲鱼账号 |
 | AI 服务密钥 | 网关模型（Anthropic/OpenAI/Kimi/MiniMax/智谱ZAI 任选一个）+ 业务文案模型（DeepSeek/百炼/火山/智谱等可选） |
+| Python 3.10+ | 仅在本地运行脚本（如一键向导、可视化后台）时需要 |
 | Docker | 一个免费的软件，用来运行工具 |
 
 ---
@@ -134,6 +136,14 @@ XIANYU_COOKIE_1=你的闲鱼Cookie（下一步教你获取）
 python3 -m src.setup_wizard
 ```
 
+Windows 用户也可以先执行（自动创建虚拟环境并安装依赖）：
+
+```bat
+scripts\windows\setup_windows.bat
+# 一键安装 + 自检 + 启动
+scripts\windows\quickstart.bat
+```
+
 按提示一步一步输入：
 - AI API Key
 - OpenClaw 登录密码
@@ -170,6 +180,14 @@ python3 -m src.dashboard_server --port 8091
 ```
 
 浏览器打开 `http://localhost:8091`，可看到趋势图、商品表现和最近操作记录。
+
+### 启动前自检（推荐）
+
+先执行 doctor，自动检查 Python、Cookie、数据库、网关连通性和首响配置：
+
+```bash
+python3 -m src.cli doctor --strict
+```
 
 ### 关闭
 
@@ -250,7 +268,69 @@ docker compose up -d
 
 ---
 
-## 8. 常见问题
+## 8. 自动化推进与飞书通知
+
+如果你希望系统自动持续处理询盘，并把告警推送到飞书，可以用下面命令：
+
+```bash
+python3 -m src.cli automation --action setup --enable-feishu --feishu-webhook "你的飞书webhook"
+python3 -m src.cli automation --action status
+python3 -m src.cli automation --action test-feishu
+```
+
+Windows 可以直接运行：
+
+```bat
+scripts\windows\automation_setup.bat 你的飞书webhook
+scripts\windows\feishu_test.bat
+scripts\windows\run_worker.bat 20 5
+```
+
+### 三大模块单独启动（售前/运营/售后）
+
+如果你只想开某一部分能力，可以按模块启动：
+
+```bash
+# 1) 售前客服（自动首响 + 自动报价）
+python3 -m src.cli module --action start --target presales --mode daemon --limit 20 --interval 5
+
+# 2) 闲鱼运营（擦亮/数据采集调度）
+python3 -m src.cli module --action start --target operations --mode daemon --init-default-tasks --interval 30
+
+# 3) 售后客服（售后订单跟进）
+python3 -m src.cli module --action start --target aftersales --mode daemon --limit 20 --interval 15 --issue-type delay
+```
+
+启动前建议先做模块检查：
+
+```bash
+python3 -m src.cli module --action check --target all --strict
+```
+
+查看运行状态：
+
+```bash
+python3 -m src.cli module --action status --target all --window-minutes 60
+python3 -m src.cli module --action logs --target all --tail-lines 80
+python3 -m src.cli module --action stop --target all
+```
+
+Windows 一键脚本：
+
+```bat
+scripts\windows\launcher.bat
+scripts\windows\lite_quickstart.bat
+scripts\windows\module_check.bat
+scripts\windows\module_status.bat
+scripts\windows\start_all_lite.bat
+scripts\windows\start_presales.bat daemon 20 5
+scripts\windows\start_operations.bat daemon 30
+scripts\windows\start_aftersales.bat daemon 20 15 delay
+```
+
+---
+
+## 9. 常见问题
 
 ### Q: 打不开 localhost:8080
 
@@ -286,7 +366,7 @@ docker compose logs -f
 
 ---
 
-## 9. 名词解释
+## 10. 名词解释
 
 | 名词 | 解释 |
 |------|------|

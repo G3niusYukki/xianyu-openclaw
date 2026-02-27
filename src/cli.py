@@ -5,6 +5,9 @@
 所有命令输出结构化 JSON，方便 Agent 解析结果。
 
 用法:
+    python -m src.cli automation --action setup --enable-feishu --feishu-webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+    python -m src.cli automation --action status
+    python -m src.cli doctor --strict
     python -m src.cli publish --title "..." --price 5999 --images img1.jpg img2.jpg
     python -m src.cli polish --all --max 50
     python -m src.cli polish --id item_123456
@@ -17,14 +20,17 @@
     python -m src.cli accounts --action list
     python -m src.cli accounts --action health --id account_1
     python -m src.cli messages --action auto-reply --limit 20 --dry-run
-    python -m src.cli doctor
-    python -m src.cli followup --action check --session-id s1
 """
 
 import argparse
 import asyncio
 import json
+import os
+import signal
+import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import Any
 
 
@@ -32,86 +38,279 @@ def _json_out(data: Any) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
-def cmd_doctor(args: argparse.Namespace) -> None:
-    from src.core.startup_checks import generate_doctor_report, print_startup_report, run_all_checks
+_MODULE_TARGETS = ("presales", "operations", "aftersales")
 
-    if args.json:
-        report = generate_doctor_report()
-        _json_out(report)
+
+def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[str, Any]:
+    from src.core.startup_checks import resolve_runtime_mode
+
+    runtime = resolve_runtime_mode()
+    checks = doctor_report.get("checks", [])
+    check_map = {str(item.get("name", "")): item for item in checks}
+
+    required_names = {"Python版本", "数据库", "配置文件", "闲鱼Cookie"}
+    if target == "presales":
+        required_names.add("消息首响SLA")
+
+    required_checks = [check_map[name] for name in required_names if name in check_map]
+    blockers = [item for item in required_checks if not bool(item.get("passed", False))]
+
+    gateway_item = check_map.get("OpenClaw Gateway")
+    lite_item = check_map.get("Lite 浏览器驱动")
+
+    if runtime == "pro":
+        if gateway_item is not None:
+            required_checks.append(gateway_item)
+            if not bool(gateway_item.get("passed", False)):
+                blockers.append(gateway_item)
+    elif runtime == "lite":
+        if lite_item is not None:
+            required_checks.append(lite_item)
+            if not bool(lite_item.get("passed", False)):
+                blockers.append(lite_item)
     else:
-        results = run_all_checks(skip_browser=args.skip_browser, include_docker=not args.skip_docker)
-        passed = print_startup_report(results)
-        if not passed:
-            sys.exit(1)
-
-
-async def cmd_followup(args: argparse.Namespace) -> None:
-    from src.modules.followup.service import FollowUpEngine, FollowUpPolicy
-
-    policy = FollowUpPolicy(
-        max_touches_per_day=args.max_touches or 2,
-        min_interval_hours=args.min_interval or 4.0,
-    )
-    engine = FollowUpEngine(policy=policy, db_path=args.db_path or "data/followup.db")
-    action = args.action
-
-    if action == "check":
-        if not args.session_id:
-            _json_out({"error": "Specify --session-id"})
-            return
-        eligible, reason = engine.check_eligibility(
-            session_id=args.session_id,
-            account_id=args.account_id,
-            last_read_at=args.last_read_at,
-            last_reply_at=args.last_reply_at,
+        # auto: gateway/lite 任一可用即通过，二者都不可用才阻塞。
+        browser_ready = bool(gateway_item and gateway_item.get("passed", False)) or bool(
+            lite_item and lite_item.get("passed", False)
         )
-        _json_out({"session_id": args.session_id, "eligible": eligible, "reason": reason})
-        return
+        if gateway_item is not None:
+            required_checks.append(gateway_item)
+        if lite_item is not None:
+            required_checks.append(lite_item)
+        if not browser_ready:
+            blockers.append(
+                {
+                    "name": "浏览器运行时",
+                    "passed": False,
+                    "critical": True,
+                    "message": "auto 模式下 OpenClaw Gateway 与 Lite 驱动均不可用",
+                    "suggestion": (
+                        "启动 Gateway（docker compose up -d）或安装 Playwright"
+                        "（pip install playwright && playwright install chromium）。"
+                    ),
+                    "meta": {"runtime": runtime},
+                }
+            )
 
-    if action == "process":
-        if not args.session_id:
-            _json_out({"error": "Specify --session-id"})
-            return
-        result = engine.process_session(
-            session_id=args.session_id,
-            account_id=args.account_id,
-            last_read_at=args.last_read_at,
-            last_reply_at=args.last_reply_at,
-            dry_run=bool(args.dry_run),
-        )
-        _json_out(result)
-        return
+    return {
+        "target": target,
+        "runtime": runtime,
+        "ready": len(blockers) == 0,
+        "required_checks": required_checks,
+        "blockers": blockers,
+        "next_steps": doctor_report.get("next_steps", []),
+        "doctor_summary": doctor_report.get("summary", {}),
+    }
 
-    if action == "dnd-add":
-        if not args.session_id:
-            _json_out({"error": "Specify --session-id"})
-            return
-        engine.add_dnd(args.session_id, reason=args.reason or "user_reject")
-        _json_out({"session_id": args.session_id, "added_to_dnd": True})
-        return
 
-    if action == "dnd-remove":
-        if not args.session_id:
-            _json_out({"error": "Specify --session-id"})
-            return
-        removed = engine.remove_dnd(args.session_id)
-        _json_out({"session_id": args.session_id, "removed_from_dnd": removed})
-        return
+_MODULE_RUNTIME_DIR = Path("data/module_runtime")
 
-    if action == "audit":
-        events = engine.get_audit_log(
-            session_id=args.session_id,
-            account_id=args.account_id,
-            limit=args.limit or 50,
-        )
-        _json_out({"total": len(events), "events": events})
-        return
 
-    if action == "stats":
-        _json_out(engine.get_stats())
-        return
+def _module_state_path(target: str) -> Path:
+    _MODULE_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    return _MODULE_RUNTIME_DIR / f"{target}.json"
 
-    _json_out({"error": f"Unknown followup action: {action}"})
+
+def _module_log_path(target: str) -> Path:
+    _MODULE_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    return _MODULE_RUNTIME_DIR / f"{target}.log"
+
+
+def _read_module_state(target: str) -> dict[str, Any]:
+    path = _module_state_path(target)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_module_state(target: str, data: dict[str, Any]) -> None:
+    path = _module_state_path(target)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _build_module_start_command(target: str, args: argparse.Namespace) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "src.cli",
+        "module",
+        "--action",
+        "start",
+        "--target",
+        target,
+        "--mode",
+        "daemon",
+    ]
+
+    if args.max_loops:
+        cmd.extend(["--max-loops", str(args.max_loops)])
+    if args.interval:
+        cmd.extend(["--interval", str(args.interval)])
+
+    if target == "presales":
+        cmd.extend(["--limit", str(args.limit), "--claim-limit", str(args.claim_limit)])
+        if args.workflow_db:
+            cmd.extend(["--workflow-db", str(args.workflow_db)])
+        if bool(args.dry_run):
+            cmd.append("--dry-run")
+    elif target == "operations":
+        if bool(args.init_default_tasks):
+            cmd.append("--init-default-tasks")
+        if bool(args.skip_polish):
+            cmd.append("--skip-polish")
+        if bool(args.skip_metrics):
+            cmd.append("--skip-metrics")
+        if args.polish_max_items:
+            cmd.extend(["--polish-max-items", str(args.polish_max_items)])
+        if args.polish_cron:
+            cmd.extend(["--polish-cron", str(args.polish_cron)])
+        if args.metrics_cron:
+            cmd.extend(["--metrics-cron", str(args.metrics_cron)])
+    else:
+        cmd.extend(["--limit", str(args.limit), "--issue-type", str(args.issue_type or "delay")])
+        if args.orders_db:
+            cmd.extend(["--orders-db", str(args.orders_db)])
+        if bool(args.include_manual):
+            cmd.append("--include-manual")
+        if bool(args.dry_run):
+            cmd.append("--dry-run")
+
+    return cmd
+
+
+def _start_background_module(target: str, args: argparse.Namespace) -> dict[str, Any]:
+    state = _read_module_state(target)
+    old_pid = int(state.get("pid", 0) or 0)
+    if old_pid > 0 and _process_alive(old_pid):
+        return {
+            "target": target,
+            "started": False,
+            "reason": "already_running",
+            "pid": old_pid,
+            "log_file": str(_module_log_path(target)),
+        }
+
+    cmd = _build_module_start_command(target=target, args=args)
+    log_file = _module_log_path(target)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(log_file, "a", encoding="utf-8")
+    handle.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] start target={target} cmd={' '.join(cmd)}\n")
+    handle.flush()
+
+    popen_kwargs: dict[str, Any] = {
+        "stdout": handle,
+        "stderr": handle,
+        "cwd": os.getcwd(),
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+    else:
+        popen_kwargs["preexec_fn"] = os.setsid
+
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    handle.close()
+    state = {
+        "target": target,
+        "pid": proc.pid,
+        "log_file": str(log_file),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "command": cmd,
+    }
+    _write_module_state(target, state)
+    return {"target": target, "started": True, "pid": proc.pid, "log_file": str(log_file)}
+
+
+def _stop_background_module(target: str, timeout_seconds: float = 6.0) -> dict[str, Any]:
+    state = _read_module_state(target)
+    pid = int(state.get("pid", 0) or 0)
+    if pid <= 0:
+        return {"target": target, "stopped": False, "reason": "not_running"}
+    if not _process_alive(pid):
+        return {"target": target, "stopped": False, "reason": "pid_not_alive", "pid": pid}
+
+    try:
+        if os.name == "nt":
+            os.kill(pid, signal.SIGTERM)
+        else:
+            os.killpg(pid, signal.SIGTERM)
+    except Exception as exc:
+        return {"target": target, "stopped": False, "reason": f"signal_failed: {exc}", "pid": pid}
+
+    start = time.time()
+    while time.time() - start <= timeout_seconds:
+        if not _process_alive(pid):
+            return {"target": target, "stopped": True, "pid": pid}
+        time.sleep(0.2)
+
+    try:
+        if os.name == "nt":
+            os.kill(pid, signal.SIGKILL)
+        else:
+            os.killpg(pid, signal.SIGKILL)
+    except Exception:
+        pass
+
+    return {"target": target, "stopped": not _process_alive(pid), "pid": pid, "forced": True}
+
+
+def _module_process_status(target: str) -> dict[str, Any]:
+    state = _read_module_state(target)
+    pid = int(state.get("pid", 0) or 0)
+    alive = _process_alive(pid) if pid > 0 else False
+    return {
+        "pid": pid if pid > 0 else None,
+        "alive": alive,
+        "log_file": state.get("log_file", str(_module_log_path(target))),
+        "started_at": state.get("started_at", ""),
+    }
+
+
+def _module_logs(target: str, tail_lines: int = 80) -> dict[str, Any]:
+    log_file = _module_log_path(target)
+    if not log_file.exists():
+        return {"target": target, "log_file": str(log_file), "lines": []}
+
+    lines = log_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+    return {"target": target, "log_file": str(log_file), "lines": lines[-max(int(tail_lines), 1) :]}
+
+
+def _resolve_workflow_state(stage: str | None) -> Any:
+    if not stage:
+        return None
+
+    from src.modules.messages.workflow import WorkflowState
+
+    normalized = stage.strip().lower().replace("-", "_")
+    aliases = {
+        "new": WorkflowState.NEW,
+        "replied": WorkflowState.REPLIED,
+        "reply": WorkflowState.REPLIED,
+        "quoted": WorkflowState.QUOTED,
+        "quote": WorkflowState.QUOTED,
+        "followed": WorkflowState.FOLLOWED,
+        "followup": WorkflowState.FOLLOWED,
+        "follow_up": WorkflowState.FOLLOWED,
+        "ordered": WorkflowState.ORDERED,
+        "order": WorkflowState.ORDERED,
+        "closed": WorkflowState.CLOSED,
+        "close": WorkflowState.CLOSED,
+        "manual": WorkflowState.MANUAL,
+        "takeover": WorkflowState.MANUAL,
+    }
+    return aliases.get(normalized)
 
 
 async def cmd_publish(args: argparse.Namespace) -> None:
@@ -261,7 +460,7 @@ async def cmd_accounts(args: argparse.Namespace) -> None:
 async def cmd_messages(args: argparse.Namespace) -> None:
     action = args.action
 
-    if action == "workflow-stats":
+    if action in {"workflow-stats", "workflow-status"}:
         from src.modules.messages.workflow import WorkflowStore
 
         store = WorkflowStore(db_path=args.workflow_db)
@@ -269,6 +468,46 @@ async def cmd_messages(args: argparse.Namespace) -> None:
             {
                 "workflow": store.get_workflow_summary(),
                 "sla": store.get_sla_summary(window_minutes=args.window_minutes or 1440),
+            }
+        )
+        return
+
+    if action == "workflow-transition":
+        from src.modules.messages.workflow import WorkflowStore
+
+        if not args.session_id or not args.stage:
+            _json_out({"error": "Specify --session-id and --stage"})
+            return
+
+        target_state = _resolve_workflow_state(args.stage)
+        if target_state is None:
+            _json_out({"error": f"Unknown workflow stage: {args.stage}"})
+            return
+
+        store = WorkflowStore(db_path=args.workflow_db)
+        ok = store.transition_state(
+            session_id=args.session_id,
+            to_state=target_state,
+            reason="cli_workflow_transition",
+            metadata={"source": "cli", "requested_stage": args.stage},
+        )
+        forced = False
+        if not ok and bool(args.force_state):
+            ok = store.force_state(
+                session_id=args.session_id,
+                to_state=target_state,
+                reason="cli_workflow_transition_force",
+                metadata={"source": "cli", "requested_stage": args.stage, "force_state": True},
+            )
+            forced = bool(ok)
+
+        _json_out(
+            {
+                "session_id": args.session_id,
+                "target_state": target_state.value,
+                "success": bool(ok),
+                "forced": forced,
+                "session": store.get_session(args.session_id),
             }
         )
         return
@@ -453,6 +692,562 @@ async def cmd_ai(args: argparse.Namespace) -> None:
     _json_out({"error": f"Unknown ai action: {action}"})
 
 
+async def cmd_doctor(args: argparse.Namespace) -> None:
+    from src.core.doctor import run_doctor
+
+    report = run_doctor(skip_gateway=bool(args.skip_gateway), skip_quote=bool(args.skip_quote))
+    strict = bool(args.strict)
+    strict_ready = bool(report.get("ready", False)) and report.get("summary", {}).get("warning_failed", 0) == 0
+
+    output = {
+        **report,
+        "strict": strict,
+        "strict_ready": strict_ready,
+    }
+    _json_out(output)
+
+    if not output["ready"] or (strict and not strict_ready):
+        raise SystemExit(2)
+
+
+async def cmd_automation(args: argparse.Namespace) -> None:
+    from src.modules.messages.notifications import FeishuNotifier
+    from src.modules.messages.setup import AutomationSetupService
+
+    action = args.action
+    setup_service = AutomationSetupService(config_path=args.config_path or "config/config.yaml")
+
+    if action == "status":
+        _json_out(setup_service.status())
+        return
+
+    if action == "setup":
+        feishu_enabled = bool(args.enable_feishu or str(args.feishu_webhook or "").strip())
+        result = setup_service.apply(
+            poll_interval_seconds=float(args.poll_interval or 5.0),
+            scan_limit=int(args.scan_limit or 20),
+            claim_limit=int(args.claim_limit or 10),
+            reply_target_seconds=float(args.reply_target_seconds or 3.0),
+            feishu_enabled=feishu_enabled,
+            feishu_webhook=str(args.feishu_webhook or "").strip(),
+            notify_on_start=bool(args.notify_on_start),
+            notify_on_alert=not bool(args.disable_notify_on_alert),
+            notify_recovery=not bool(args.disable_notify_recovery),
+            heartbeat_minutes=int(args.heartbeat_minutes or 30),
+        )
+        _json_out(result)
+        return
+
+    if action == "test-feishu":
+        webhook = str(args.feishu_webhook or "").strip() or setup_service.get_feishu_webhook()
+        if not webhook:
+            _json_out({"error": "No feishu webhook configured. Use --feishu-webhook or run automation setup first."})
+            raise SystemExit(2)
+
+        notifier = FeishuNotifier(webhook_url=webhook)
+        text = str(args.message or "【闲鱼自动化】飞书通知测试成功")
+        ok = await notifier.send_text(text)
+        _json_out({"success": ok, "message": text})
+        if not ok:
+            raise SystemExit(2)
+        return
+
+    _json_out({"error": f"Unknown automation action: {action}"})
+
+
+async def cmd_followup(args: argparse.Namespace) -> None:
+    from src.modules.followup.service import FollowUpEngine, FollowUpPolicy
+
+    policy = FollowUpPolicy(
+        max_touches_per_day=args.max_touches or 2,
+        min_interval_hours=args.min_interval or 4.0,
+    )
+    engine = FollowUpEngine(policy=policy, db_path=args.db_path or "data/followup.db")
+    action = args.action
+
+    if action == "check":
+        if not args.session_id:
+            _json_out({"error": "Specify --session-id"})
+            return
+        eligible, reason = engine.check_eligibility(
+            session_id=args.session_id,
+            account_id=args.account_id,
+            last_read_at=args.last_read_at,
+            last_reply_at=args.last_reply_at,
+        )
+        _json_out({"session_id": args.session_id, "eligible": eligible, "reason": reason})
+        return
+
+    if action == "process":
+        if not args.session_id:
+            _json_out({"error": "Specify --session-id"})
+            return
+        result = engine.process_session(
+            session_id=args.session_id,
+            account_id=args.account_id,
+            last_read_at=args.last_read_at,
+            last_reply_at=args.last_reply_at,
+            dry_run=bool(args.dry_run),
+        )
+        _json_out(result)
+        return
+
+    if action == "dnd-add":
+        if not args.session_id:
+            _json_out({"error": "Specify --session-id"})
+            return
+        engine.add_dnd(args.session_id, reason=args.reason or "user_reject")
+        _json_out({"session_id": args.session_id, "added_to_dnd": True})
+        return
+
+    if action == "dnd-remove":
+        if not args.session_id:
+            _json_out({"error": "Specify --session-id"})
+            return
+        removed = engine.remove_dnd(args.session_id)
+        _json_out({"session_id": args.session_id, "removed_from_dnd": removed})
+        return
+
+    if action == "audit":
+        events = engine.get_audit_log(
+            session_id=args.session_id,
+            account_id=args.account_id,
+            limit=args.limit or 50,
+        )
+        _json_out({"total": len(events), "events": events})
+        return
+
+    if action == "stats":
+        _json_out(engine.get_stats())
+        return
+
+    _json_out({"error": f"Unknown followup action: {action}"})
+
+
+async def _start_presales_module(args: argparse.Namespace) -> dict[str, Any]:
+    from src.core.browser_client import create_browser_client
+    from src.modules.messages.service import MessagesService
+    from src.modules.messages.workflow import WorkflowWorker
+
+    client = await create_browser_client()
+    try:
+        service = MessagesService(controller=client)
+        worker = WorkflowWorker(
+            message_service=service,
+            config={
+                "db_path": args.workflow_db,
+                "poll_interval_seconds": args.interval,
+                "scan_limit": args.limit,
+                "claim_limit": args.claim_limit,
+            },
+        )
+        if args.mode == "daemon":
+            result = await worker.run_forever(
+                dry_run=bool(args.dry_run),
+                max_loops=args.max_loops,
+            )
+        else:
+            result = await worker.run_once(dry_run=bool(args.dry_run))
+        return {"target": "presales", "mode": args.mode, "result": result}
+    finally:
+        await client.disconnect()
+
+
+def _init_default_operation_tasks(args: argparse.Namespace) -> dict[str, Any]:
+    from src.core.config import get_config
+    from src.modules.accounts.scheduler import Scheduler, TaskType
+
+    scheduler = Scheduler()
+    created: list[dict[str, Any]] = []
+
+    if not bool(args.init_default_tasks):
+        return {"scheduler": scheduler, "created": created}
+
+    tasks = scheduler.list_tasks()
+    has_polish = any(t.task_type == TaskType.POLISH for t in tasks)
+    has_metrics = any(t.task_type == TaskType.METRICS for t in tasks)
+
+    cfg = get_config().get_section("scheduler", {})
+    polish_cfg = cfg.get("polish", {}) if isinstance(cfg.get("polish"), dict) else {}
+    metrics_cfg = cfg.get("metrics", {}) if isinstance(cfg.get("metrics"), dict) else {}
+
+    if not args.skip_polish and not has_polish:
+        cron_expr = str(args.polish_cron or polish_cfg.get("cron") or "0 9 * * *")
+        task = scheduler.create_polish_task(cron_expression=cron_expr, max_items=int(args.polish_max_items or 50))
+        created.append({"task_id": task.task_id, "task_type": task.task_type, "name": task.name})
+
+    if not args.skip_metrics and not has_metrics:
+        cron_expr = str(args.metrics_cron or metrics_cfg.get("cron") or "0 */4 * * *")
+        task = scheduler.create_metrics_task(cron_expression=cron_expr)
+        created.append({"task_id": task.task_id, "task_type": task.task_type, "name": task.name})
+
+    return {"scheduler": scheduler, "created": created}
+
+
+async def _start_operations_module(args: argparse.Namespace) -> dict[str, Any]:
+    from src.modules.accounts.scheduler import TaskType
+
+    setup = _init_default_operation_tasks(args)
+    scheduler = setup["scheduler"]
+    created = setup["created"]
+
+    if args.mode == "once":
+        task_results = []
+        for task in scheduler.list_tasks(enabled_only=True):
+            if args.skip_polish and task.task_type == TaskType.POLISH:
+                continue
+            if args.skip_metrics and task.task_type == TaskType.METRICS:
+                continue
+            task_results.append(await scheduler.execute_task(task))
+
+        success = sum(1 for item in task_results if bool(item.get("success", False)))
+        return {
+            "target": "operations",
+            "mode": "once",
+            "created_tasks": created,
+            "executed_tasks": len(task_results),
+            "success_tasks": success,
+            "failed_tasks": len(task_results) - success,
+            "results": task_results,
+        }
+
+    await scheduler.start()
+    loops = 0
+    try:
+        while True:
+            loops += 1
+            if args.max_loops and loops >= args.max_loops:
+                break
+            await asyncio.sleep(max(1.0, float(args.interval or 30.0)))
+    finally:
+        await scheduler.stop()
+
+    return {
+        "target": "operations",
+        "mode": "daemon",
+        "loops": loops,
+        "created_tasks": created,
+        "status": scheduler.get_scheduler_status(),
+    }
+
+
+async def _run_aftersales_once(args: argparse.Namespace, message_service: Any | None = None) -> dict[str, Any]:
+    from src.modules.orders.service import OrderFulfillmentService
+
+    service = OrderFulfillmentService(db_path=args.orders_db or "data/orders.db")
+    cases = service.list_orders(
+        status="after_sales",
+        limit=max(int(args.limit or 20), 1),
+        include_manual=bool(args.include_manual),
+    )
+
+    details: list[dict[str, Any]] = []
+    for case in cases:
+        order_id = str(case.get("order_id", ""))
+        session_id = str(case.get("session_id", ""))
+        issue_type = str(args.issue_type or "delay")
+        reply_text = service.generate_after_sales_reply(issue_type=issue_type)
+
+        sent = False
+        reason = ""
+        if not session_id:
+            reason = "missing_session_id"
+        elif bool(args.dry_run):
+            sent = True
+            reason = "dry_run"
+        elif message_service is None:
+            reason = "message_service_unavailable"
+        else:
+            sent = await message_service.reply_to_session(session_id, reply_text)
+            reason = "sent" if sent else "send_failed"
+
+        service.record_after_sales_followup(
+            order_id=order_id,
+            issue_type=issue_type,
+            reply_text=reply_text,
+            sent=sent,
+            dry_run=bool(args.dry_run),
+            reason=reason,
+            session_id=session_id,
+        )
+        details.append(
+            {
+                "order_id": order_id,
+                "session_id": session_id,
+                "manual_takeover": bool(case.get("manual_takeover", False)),
+                "issue_type": issue_type,
+                "reply_template": reply_text,
+                "sent": sent,
+                "reason": reason,
+            }
+        )
+
+    success = sum(1 for item in details if bool(item.get("sent", False)))
+    return {
+        "target": "aftersales",
+        "total_cases": len(cases),
+        "success_cases": success,
+        "failed_cases": len(cases) - success,
+        "dry_run": bool(args.dry_run),
+        "details": details,
+    }
+
+
+async def _start_aftersales_module(args: argparse.Namespace) -> dict[str, Any]:
+    from src.core.browser_client import create_browser_client
+    from src.modules.messages.service import MessagesService
+    from src.modules.orders.service import OrderFulfillmentService
+
+    service = OrderFulfillmentService(db_path=args.orders_db or "data/orders.db")
+    if args.mode == "once":
+        if bool(args.dry_run):
+            result = await _run_aftersales_once(args, message_service=None)
+        else:
+            client = await create_browser_client()
+            try:
+                message_service = MessagesService(controller=client)
+                result = await _run_aftersales_once(args, message_service=message_service)
+            finally:
+                await client.disconnect()
+
+        return {
+            "target": "aftersales",
+            "mode": "once",
+            "result": result,
+            "summary": service.get_summary(),
+        }
+
+    loops = 0
+    batches: list[dict[str, Any]] = []
+    if bool(args.dry_run):
+        while True:
+            loops += 1
+            batch = await _run_aftersales_once(args, message_service=None)
+            batches.append(
+                {
+                    "loop": loops,
+                    "total_cases": batch.get("total_cases", 0),
+                    "success_cases": batch.get("success_cases", 0),
+                    "failed_cases": batch.get("failed_cases", 0),
+                }
+            )
+            if args.max_loops and loops >= args.max_loops:
+                break
+            await asyncio.sleep(max(1.0, float(args.interval or 30.0)))
+    else:
+        client = await create_browser_client()
+        try:
+            message_service = MessagesService(controller=client)
+            while True:
+                loops += 1
+                batch = await _run_aftersales_once(args, message_service=message_service)
+                batches.append(
+                    {
+                        "loop": loops,
+                        "total_cases": batch.get("total_cases", 0),
+                        "success_cases": batch.get("success_cases", 0),
+                        "failed_cases": batch.get("failed_cases", 0),
+                    }
+                )
+                if args.max_loops and loops >= args.max_loops:
+                    break
+                await asyncio.sleep(max(1.0, float(args.interval or 30.0)))
+        finally:
+            await client.disconnect()
+
+    return {
+        "target": "aftersales",
+        "mode": "daemon",
+        "loops": loops,
+        "batches": batches,
+        "summary": service.get_summary(),
+    }
+
+
+async def cmd_module(args: argparse.Namespace) -> None:
+    from src.core.doctor import run_doctor
+    from src.modules.accounts.scheduler import Scheduler
+    from src.modules.messages.workflow import WorkflowStore
+    from src.modules.orders.service import OrderFulfillmentService
+
+    action = args.action
+    target = args.target
+
+    def _status_payload(single_target: str) -> dict[str, Any]:
+        if single_target == "presales":
+            store = WorkflowStore(db_path=args.workflow_db)
+            return {
+                "target": single_target,
+                "process": _module_process_status(single_target),
+                "workflow": store.get_workflow_summary(),
+                "sla": store.get_sla_summary(window_minutes=args.window_minutes or 1440),
+            }
+
+        if single_target == "aftersales":
+            service = OrderFulfillmentService(db_path=args.orders_db or "data/orders.db")
+            preview = service.list_orders(
+                status="after_sales",
+                limit=max(int(args.limit or 20), 1),
+                include_manual=True,
+            )
+            return {
+                "target": single_target,
+                "process": _module_process_status(single_target),
+                "summary": service.get_summary(),
+                "recent_after_sales_cases": [
+                    {
+                        "order_id": item.get("order_id"),
+                        "session_id": item.get("session_id"),
+                        "manual_takeover": bool(item.get("manual_takeover", False)),
+                        "updated_at": item.get("updated_at", ""),
+                    }
+                    for item in preview
+                ],
+            }
+
+        scheduler = Scheduler()
+        return {
+            "target": single_target,
+            "process": _module_process_status(single_target),
+            "scheduler": scheduler.get_scheduler_status(),
+        }
+
+    if action == "check":
+        report = run_doctor(
+            skip_gateway=bool(args.skip_gateway),
+            skip_quote=(target not in {"presales", "all"}),
+        )
+
+        if target == "all":
+            modules = {name: _module_check_summary(target=name, doctor_report=report) for name in _MODULE_TARGETS}
+            blockers: list[dict[str, Any]] = []
+            for name, item in modules.items():
+                for blocker in item.get("blockers", []):
+                    payload = dict(blocker)
+                    payload["target"] = name
+                    blockers.append(payload)
+            result = {
+                "target": "all",
+                "runtime": next(iter(modules.values())).get("runtime", "auto"),
+                "ready": all(bool(item.get("ready", False)) for item in modules.values()),
+                "modules": modules,
+                "blockers": blockers,
+                "next_steps": report.get("next_steps", []),
+                "doctor_summary": report.get("summary", {}),
+            }
+            _json_out(result)
+            if bool(args.strict) and not result["ready"]:
+                raise SystemExit(2)
+            return
+
+        summary = _module_check_summary(target=target, doctor_report=report)
+        _json_out(summary)
+        if bool(args.strict) and not bool(summary.get("ready", False)):
+            raise SystemExit(2)
+        return
+
+    if action == "status":
+        if target == "all":
+            modules = {name: _status_payload(name) for name in _MODULE_TARGETS}
+            alive_count = sum(1 for item in modules.values() if bool(item.get("process", {}).get("alive", False)))
+            _json_out(
+                {
+                    "target": "all",
+                    "modules": modules,
+                    "alive_count": alive_count,
+                    "total_modules": len(modules),
+                }
+            )
+            return
+
+        _json_out(_status_payload(target))
+        return
+
+    if action == "start":
+        if target == "all":
+            if not bool(args.background):
+                _json_out({"error": "start --target all requires --background to avoid blocking"})
+                raise SystemExit(2)
+            if args.mode != "daemon":
+                _json_out({"error": "start --target all only supports --mode daemon"})
+                raise SystemExit(2)
+            _json_out(
+                {
+                    "target": "all",
+                    "action": "start",
+                    "modules": {name: _start_background_module(target=name, args=args) for name in _MODULE_TARGETS},
+                }
+            )
+            return
+
+        if bool(args.background):
+            if args.mode != "daemon":
+                _json_out({"error": "background start only supports --mode daemon"})
+                raise SystemExit(2)
+            _json_out(_start_background_module(target=target, args=args))
+            return
+
+        if target == "presales":
+            result = await _start_presales_module(args)
+        elif target == "operations":
+            result = await _start_operations_module(args)
+        else:
+            result = await _start_aftersales_module(args)
+        _json_out(result)
+        return
+
+    if action == "stop":
+        if target == "all":
+            _json_out(
+                {
+                    "target": "all",
+                    "action": "stop",
+                    "modules": {
+                        name: _stop_background_module(target=name, timeout_seconds=float(args.stop_timeout or 6.0))
+                        for name in _MODULE_TARGETS
+                    },
+                }
+            )
+            return
+
+        _json_out(_stop_background_module(target=target, timeout_seconds=float(args.stop_timeout or 6.0)))
+        return
+
+    if action == "restart":
+        if target == "all":
+            results: dict[str, Any] = {}
+            for name in _MODULE_TARGETS:
+                stopped = _stop_background_module(target=name, timeout_seconds=float(args.stop_timeout or 6.0))
+                started = _start_background_module(target=name, args=args)
+                results[name] = {"target": name, "stopped": stopped, "started": started}
+            _json_out({"target": "all", "action": "restart", "modules": results})
+            return
+
+        stopped = _stop_background_module(target=target, timeout_seconds=float(args.stop_timeout or 6.0))
+        started = _start_background_module(target=target, args=args)
+        _json_out({"target": target, "stopped": stopped, "started": started})
+        return
+
+    if action == "logs":
+        if target == "all":
+            _json_out(
+                {
+                    "target": "all",
+                    "action": "logs",
+                    "modules": {
+                        name: _module_logs(target=name, tail_lines=int(args.tail_lines or 80))
+                        for name in _MODULE_TARGETS
+                    },
+                }
+            )
+            return
+
+        _json_out(_module_logs(target=target, tail_lines=int(args.tail_lines or 80)))
+        return
+
+    _json_out({"error": f"Unknown module action: {action}"})
+
+
 async def cmd_quote(args: argparse.Namespace) -> None:
     from src.core.config import get_config
     from src.modules.quote import CostTableRepository, QuoteSetupService
@@ -463,8 +1258,8 @@ async def cmd_quote(args: argparse.Namespace) -> None:
 
     if action == "health":
         repo = CostTableRepository(
-            cost_table_dir=quote_cfg.get("cost_table_dir", "data/quote_costs"),
-            patterns=quote_cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
+            table_dir=quote_cfg.get("cost_table_dir", "data/quote_costs"),
+            include_patterns=quote_cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
         )
         stats = repo.get_stats(max_files=30)
         _json_out(
@@ -481,8 +1276,8 @@ async def cmd_quote(args: argparse.Namespace) -> None:
             _json_out({"error": "Specify --origin-city and --destination-city"})
             return
         repo = CostTableRepository(
-            cost_table_dir=quote_cfg.get("cost_table_dir", "data/quote_costs"),
-            patterns=quote_cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
+            table_dir=quote_cfg.get("cost_table_dir", "data/quote_costs"),
+            include_patterns=quote_cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
         )
         records = repo.find_candidates(
             origin=args.origin_city,
@@ -668,11 +1463,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--action",
         required=True,
-        choices=["list-unread", "reply", "auto-reply", "auto-workflow", "workflow-stats"],
+        choices=[
+            "list-unread",
+            "reply",
+            "auto-reply",
+            "auto-workflow",
+            "workflow-stats",
+            "workflow-status",
+            "workflow-transition",
+        ],
     )
     p.add_argument("--limit", type=int, default=20, help="最多处理会话数")
     p.add_argument("--session-id", help="会话 ID（reply 时必填）")
     p.add_argument("--text", help="回复内容（reply 时必填）")
+    p.add_argument("--stage", help="工作流目标阶段（workflow-transition 时必填）")
+    p.add_argument("--force-state", action="store_true", help="非法迁移时强制写入状态")
     p.add_argument("--dry-run", action="store_true", help="仅生成回复，不真正发送")
     p.add_argument("--daemon", action="store_true", help="常驻运行 workflow worker")
     p.add_argument("--max-loops", type=int, default=None, help="daemon 模式下最多循环次数")
@@ -714,6 +1519,55 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--product-name", default="iPhone 15 Pro", help="模拟商品名")
     p.add_argument("--category", default="数码手机", help="模拟商品分类")
 
+    # doctor
+    p = sub.add_parser("doctor", help="运行系统自检并输出修复建议")
+    p.add_argument("--skip-gateway", action="store_true", help="跳过 OpenClaw Gateway 连通性检查")
+    p.add_argument("--skip-quote", action="store_true", help="跳过自动报价成本源检查")
+    p.add_argument("--strict", action="store_true", help="警告也按失败处理（返回非0）")
+
+    # automation
+    p = sub.add_parser("automation", help="自动化推进配置与飞书接入")
+    p.add_argument("--action", required=True, choices=["setup", "status", "test-feishu"])
+    p.add_argument("--config-path", default="config/config.yaml", help="配置文件路径")
+    p.add_argument("--poll-interval", type=float, default=5.0, help="workflow 轮询间隔（秒）")
+    p.add_argument("--scan-limit", type=int, default=20, help="每轮扫描会话数")
+    p.add_argument("--claim-limit", type=int, default=10, help="每轮最大认领任务数")
+    p.add_argument("--reply-target-seconds", type=float, default=3.0, help="自动首响目标时延（秒）")
+    p.add_argument("--enable-feishu", action="store_true", help="启用飞书 webhook 通知")
+    p.add_argument("--feishu-webhook", default="", help="飞书机器人 webhook URL")
+    p.add_argument("--notify-on-start", action="store_true", help="worker 启动时发送通知")
+    p.add_argument("--disable-notify-on-alert", action="store_true", help="关闭 SLA 告警通知")
+    p.add_argument("--disable-notify-recovery", action="store_true", help="关闭告警恢复通知")
+    p.add_argument("--heartbeat-minutes", type=int, default=30, help="心跳通知周期（分钟，0=关闭）")
+    p.add_argument("--message", default="【闲鱼自动化】飞书通知测试成功", help="test-feishu 测试消息")
+
+    # module
+    p = sub.add_parser("module", help="模块化可用性检查与启动（售前/运营/售后）")
+    p.add_argument("--action", required=True, choices=["check", "status", "start", "stop", "restart", "logs"])
+    p.add_argument("--target", required=True, choices=["presales", "operations", "aftersales", "all"])
+    p.add_argument("--strict", action="store_true", help="check 未通过时返回非0")
+    p.add_argument("--mode", choices=["once", "daemon"], default="once", help="start 运行模式")
+    p.add_argument("--background", action="store_true", help="start 时后台运行（仅 daemon）")
+    p.add_argument("--skip-gateway", action="store_true", help="check 时跳过网关连通性")
+    p.add_argument("--window-minutes", type=int, default=1440, help="status 时 SLA 统计窗口（分钟）")
+    p.add_argument("--workflow-db", default=None, help="presales workflow 数据库路径")
+    p.add_argument("--orders-db", default="data/orders.db", help="aftersales 订单数据库路径")
+    p.add_argument("--limit", type=int, default=20, help="presales 扫描会话数 / aftersales 处理工单数")
+    p.add_argument("--claim-limit", type=int, default=10, help="presales 每轮认领任务数")
+    p.add_argument("--interval", type=float, default=5.0, help="轮询间隔（秒）")
+    p.add_argument("--dry-run", action="store_true", help="presales/aftersales 仅生成回复不发送")
+    p.add_argument("--issue-type", default="delay", help="aftersales 售后类型：delay/refund/quality")
+    p.add_argument("--include-manual", action="store_true", help="aftersales 包含人工接管订单")
+    p.add_argument("--max-loops", type=int, default=None, help="daemon 模式下最多循环次数")
+    p.add_argument("--init-default-tasks", action="store_true", help="operations 自动初始化默认任务")
+    p.add_argument("--skip-polish", action="store_true", help="operations 跳过擦亮任务")
+    p.add_argument("--skip-metrics", action="store_true", help="operations 跳过数据任务")
+    p.add_argument("--polish-max-items", type=int, default=50, help="默认擦亮任务最大数量")
+    p.add_argument("--polish-cron", default="", help="默认擦亮任务 cron")
+    p.add_argument("--metrics-cron", default="", help="默认数据任务 cron")
+    p.add_argument("--tail-lines", type=int, default=80, help="logs 返回行数")
+    p.add_argument("--stop-timeout", type=float, default=6.0, help="stop/restart 等待进程退出超时（秒）")
+
     # quote
     p = sub.add_parser("quote", help="自动报价诊断与配置")
     p.add_argument("--action", required=True, choices=["health", "candidates", "setup"])
@@ -751,29 +1605,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-stage", default="inquiry", help="转化起始阶段")
     p.add_argument("--to-stage", default="ordered", help="转化目标阶段")
 
-    # doctor
-    p = sub.add_parser("doctor", help="环境诊断")
-    p.add_argument("--json", action="store_true", help="输出 JSON 格式")
-    p.add_argument("--skip-browser", action="store_true", help="跳过浏览器检查")
-    p.add_argument("--skip-docker", action="store_true", help="跳过 Docker 检查")
-
     # followup
     p = sub.add_parser("followup", help="跟进引擎")
-    p.add_argument(
-        "--action",
-        required=True,
-        choices=["check", "process", "dnd-add", "dnd-remove", "audit", "stats"],
-    )
+    p.add_argument("--action", required=True, choices=["check", "process", "dnd-add", "dnd-remove", "audit", "stats"])
     p.add_argument("--session-id", default=None, help="会话ID")
     p.add_argument("--account-id", default=None, help="账号ID")
+    p.add_argument("--last-read-at", default=None, help="最后已读时间")
+    p.add_argument("--last-reply-at", default=None, help="最后回复时间")
+    p.add_argument("--dry-run", action="store_true", help="仅模拟不执行")
+    p.add_argument("--reason", default=None, help="dnd-add 原因")
+    p.add_argument("--limit", type=int, default=50, help="audit 返回数量")
+    p.add_argument("--max-touches", type=int, default=2, help="每日最大跟进次数")
+    p.add_argument("--min-interval", type=float, default=4.0, help="最小跟进间隔（小时）")
     p.add_argument("--db-path", default="data/followup.db", help="跟进数据库路径")
-    p.add_argument("--dry-run", action="store_true", help="仅模拟")
-    p.add_argument("--max-touches", type=int, default=2, help="每日最大触达次数")
-    p.add_argument("--min-interval", type=float, default=4.0, help="最小间隔（小时）")
-    p.add_argument("--last-read-at", type=int, default=None, help="最后已读时间戳")
-    p.add_argument("--last-reply-at", type=int, default=None, help="最后回复时间戳")
-    p.add_argument("--reason", default=None, help="DND 原因")
-    p.add_argument("--limit", type=int, default=50, help="审计日志数量")
 
     return parser
 
@@ -798,9 +1642,11 @@ def main() -> None:
         "orders": cmd_orders,
         "compliance": cmd_compliance,
         "ai": cmd_ai,
+        "doctor": cmd_doctor,
+        "automation": cmd_automation,
+        "module": cmd_module,
         "quote": cmd_quote,
         "growth": cmd_growth,
-        "doctor": cmd_doctor,
         "followup": cmd_followup,
     }
 
@@ -810,10 +1656,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        if asyncio.iscoroutinefunction(handler):
-            asyncio.run(handler(args))
-        else:
-            handler(args)
+        asyncio.run(handler(args))
     except KeyboardInterrupt:
         pass
     except Exception as e:

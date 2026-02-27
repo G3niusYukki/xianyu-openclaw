@@ -27,6 +27,16 @@
 
 ---
 
+## 4.8.0 更新摘要（2026-02-27）
+
+- **Lite 运行时**：支持 Playwright 本地浏览器，无需 OpenClaw Gateway 即可运行（`runtime: lite`）。
+- **模块化启动**：`module` 命令支持按模块独立启动（售前/运营/售后），后台运行与状态管理。
+- **飞书告警通知**：Workflow 启动/心跳/SLA 告警与恢复消息推送到飞书机器人。
+- **自检增强**：`doctor --strict` 严格模式，支持 `skip-gateway`/`skip-quote` 跳过特定检查。
+- **自动化配置**：`automation` 命令一键配置轮询参数与飞书 webhook。
+- **Windows 一键脚本**：新增 16 个 `.bat` 脚本，支持 launcher 菜单、lite 快速启动、模块管理。
+- **报价 KPI 修复**：被合规拦截的报价不计入成功，新增 `quote_blocked_by_policy` 追溯字段。
+
 ## 4.7.0 更新摘要（2026-02-27）
 
 - **两阶段报价工作流**：询价消息先发快速确认（1-3s 内），再异步发送精确报价，保证首响 SLA。
@@ -222,10 +232,21 @@ python -m src.cli compliance --action replay --blocked-only --limit 20
 python -m src.cli growth    --action assign --experiment-id exp_reply --subject-id s1 --variants A,B
 python -m src.cli growth    --action funnel --days 7 --bucket day
 python -m src.cli ai        --action cost-stats
-python -m src.cli doctor    # 一键环境诊断
+python -m src.cli doctor    --strict
 python -m src.cli followup  --action check --session-id s1
 python -m src.cli followup  --action dnd-add --session-id s1 --reason "user_reject"
 python -m src.cli followup  --action audit --limit 20
+python -m src.cli automation --action setup --enable-feishu --feishu-webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+python -m src.cli automation --action status
+python -m src.cli automation --action test-feishu
+python -m src.cli module --action check  --target all --strict
+python -m src.cli module --action status --target all --window-minutes 60
+python -m src.cli module --action start  --target presales   --mode daemon --limit 20 --interval 5
+python -m src.cli module --action start  --target operations --mode daemon --init-default-tasks --interval 30
+python -m src.cli module --action start  --target aftersales --mode daemon --limit 20 --interval 15 --issue-type delay
+python -m src.cli module --action start  --target all --mode daemon --background
+python -m src.cli module --action stop   --target all
+python -m src.cli module --action logs   --target all --tail-lines 80
 python -m src.dashboard_server --port 8091
 ```
 

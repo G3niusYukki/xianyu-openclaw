@@ -557,9 +557,87 @@ class BrowserClient:
 
 
 async def create_browser_client(config: dict[str, Any] | None = None) -> "BrowserClient":
-    """创建并连接浏览器客户端"""
+    """创建并连接浏览器客户端（支持 auto/lite/pro 运行时）。"""
+    runtime = _resolve_runtime(config)
+    if runtime == "pro":
+        return await _create_gateway_client(config)
+    if runtime == "lite":
+        return await _create_lite_client(config)
+
+    # auto: 网关可用优先 Pro，不可用回退 Lite。
+    gateway_ready = await _probe_gateway_available(config=config)
+    if gateway_ready:
+        try:
+            return await _create_gateway_client(config)
+        except Exception as exc:  # pragma: no cover - defensive path
+            get_logger().warning(f"Gateway runtime unavailable, fallback to lite: {exc}")
+
+    return await _create_lite_client(config)
+
+
+def _resolve_runtime(config: dict[str, Any] | None = None) -> str:
+    raw = str(os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
+    if raw in {"auto", "lite", "pro"}:
+        return raw
+
+    if isinstance(config, dict):
+        runtime_value = str(config.get("runtime", "")).strip().lower()
+        if runtime_value in {"auto", "lite", "pro"}:
+            return runtime_value
+
+    try:
+        from src.core.config import get_config
+
+        runtime_cfg = str(get_config().get("app.runtime", "auto")).strip().lower()
+        if runtime_cfg in {"auto", "lite", "pro"}:
+            return runtime_cfg
+    except Exception:
+        pass
+
+    return "auto"
+
+
+async def _probe_gateway_available(config: dict[str, Any] | None = None) -> bool:
+    # 复用 BrowserClient 的配置应用逻辑，避免重复代码路径不一致。
+    probe_client = BrowserClient(config)
+    host = probe_client.config.host
+    port = probe_client.config.browser_port
+    token = probe_client.config.token
+    profile = probe_client.config.profile
+
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    url = f"http://{host}:{port}/"
+    try:
+        async with httpx.AsyncClient(timeout=1.2, headers=headers) as client:
+            resp = await client.get(url, params={"profile": profile})
+            return resp.status_code in {200, 401, 403}
+    except Exception:
+        return False
+
+
+async def _create_gateway_client(config: dict[str, Any] | None = None) -> BrowserClient:
     client = BrowserClient(config)
     connected = await client.connect()
     if not connected:
         raise BrowserError("Failed to connect to OpenClaw Gateway. Is the Gateway running? Check: docker compose ps")
+    return client
+
+
+async def _create_lite_client(config: dict[str, Any] | None = None):
+    try:
+        from src.core.playwright_client import PlaywrightBrowserClient
+    except Exception as exc:
+        raise BrowserError(
+            "Lite runtime requires Playwright. Install with: pip install playwright && playwright install chromium"
+        ) from exc
+
+    client = PlaywrightBrowserClient(config)
+    connected = await client.connect()
+    if not connected:
+        raise BrowserError(
+            "Failed to start Playwright Lite browser. Run: pip install playwright && playwright install chromium"
+        )
     return client

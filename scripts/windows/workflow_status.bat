@@ -8,5 +8,8 @@ if not exist .venv\Scripts\python.exe (
   exit /b 1
 )
 
-call .venv\Scripts\python -m src.cli messages --action workflow-status
+set WINDOW=1440
+if not "%~1"=="" set WINDOW=%~1
+
+call .venv\Scripts\python -m src.cli messages --action workflow-status --window-minutes %WINDOW%
 exit /b %ERRORLEVEL%

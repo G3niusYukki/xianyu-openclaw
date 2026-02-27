@@ -186,6 +186,7 @@ class AppConfig(BaseModel):
     log_level: str = Field(default="INFO", description="日志级别")
     data_dir: str = Field(default="data", description="数据目录")
     logs_dir: str = Field(default="logs", description="日志目录")
+    runtime: str = Field(default="auto", description="浏览器运行时：auto|lite|pro")
 
     @field_validator("log_level")
     @classmethod
@@ -194,6 +195,15 @@ class AppConfig(BaseModel):
         if v not in valid_levels:
             raise ValueError(f"log_level must be one of {valid_levels}, got {v}")
         return v
+
+    @field_validator("runtime")
+    @classmethod
+    def validate_runtime(cls, v: str) -> str:
+        valid_runtimes = {"auto", "lite", "pro"}
+        runtime = str(v).lower().strip()
+        if runtime not in valid_runtimes:
+            raise ValueError(f"runtime must be one of {sorted(valid_runtimes)}, got {v}")
+        return runtime
 
 
 class ConfigModel(BaseModel):

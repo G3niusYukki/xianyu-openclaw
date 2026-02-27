@@ -52,3 +52,40 @@ def test_order_after_sales_template(temp_dir) -> None:
 
     assert case["status"] == "after_sales"
     assert "退款" in case["reply_template"]
+
+
+def test_order_summary_and_list(temp_dir) -> None:
+    service = OrderFulfillmentService(db_path=str(temp_dir / "orders.db"))
+    service.upsert_order(order_id="s1", raw_status="已付款", session_id="session_1", item_type="virtual")
+    service.upsert_order(order_id="s2", raw_status="售后中", session_id="session_2", item_type="virtual")
+    service.set_manual_takeover("s2", True)
+
+    summary = service.get_summary()
+    active = service.list_orders(status="after_sales", include_manual=False, limit=20)
+    all_after_sales = service.list_orders(status="after_sales", include_manual=True, limit=20)
+
+    assert summary["total_orders"] == 2
+    assert summary["manual_takeover_orders"] == 1
+    assert summary["after_sales_orders"] == 1
+    assert len(active) == 0
+    assert len(all_after_sales) == 1
+
+
+def test_record_after_sales_followup_event(temp_dir) -> None:
+    service = OrderFulfillmentService(db_path=str(temp_dir / "orders.db"))
+    service.upsert_order(order_id="s3", raw_status="售后中", session_id="session_3", item_type="virtual")
+
+    recorded = service.record_after_sales_followup(
+        order_id="s3",
+        issue_type="delay",
+        reply_text="已为您加急处理",
+        sent=True,
+        dry_run=False,
+        reason="sent",
+        session_id="session_3",
+    )
+    trace = service.trace_order("s3")
+
+    assert recorded["sent"] is True
+    assert trace["events"][-1]["event_type"] == "after_sales_followup"
+    assert trace["events"][-1]["detail"]["reason"] == "sent"

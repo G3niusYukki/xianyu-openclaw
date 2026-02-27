@@ -9,6 +9,7 @@ app:
   log_level: "INFO"
   data_dir: "data"
   logs_dir: "logs"
+  runtime: "auto" # auto | lite | pro
 
 # 浏览器自动化配置 (通过 OpenClaw Gateway Browser API)
 openclaw:
@@ -153,6 +154,15 @@ messages:
       min_samples: 5
       reply_p95_threshold_ms: 3000
       quote_success_rate_threshold: 0.98
+    notifications:
+      feishu:
+        enabled: false
+        webhook: "${FEISHU_BOT_WEBHOOK}"
+        notify_on_start: false
+        notify_on_alert: true
+        notify_recovery: true
+        heartbeat_minutes: 30
+        bot_name: "闲鱼自动化助手"
 
 # 自动报价配置
 quote:

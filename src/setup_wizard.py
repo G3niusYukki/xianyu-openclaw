@@ -111,7 +111,9 @@ ALL_SUPPORTED_KEYS = [
 
 def _prompt(text: str, default: str | None = None, required: bool = False, secret: bool = False) -> str:
     while True:
-        hint = f" [{default}]" if default else ""
+        hint = ""
+        if default:
+            hint = " [已设置]" if secret else f" [{default}]"
         raw = getpass.getpass(f"{text}{hint}: ") if secret else input(f"{text}{hint}: ")
         value = raw.strip()
         if not value and default is not None:
