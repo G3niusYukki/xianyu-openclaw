@@ -120,6 +120,8 @@ Windows 可执行：
 
 ```bat
 scripts\windows\setup_windows.bat
+# 一键：安装依赖 + 严格自检 + 启动容器
+scripts\windows\quickstart.bat
 ```
 
 ---
@@ -217,6 +219,7 @@ python -m src.cli compliance --action replay --blocked-only --limit 20
 python -m src.cli growth    --action assign --experiment-id exp_reply --subject-id s1 --variants A,B
 python -m src.cli growth    --action funnel --days 7 --bucket day
 python -m src.cli ai        --action cost-stats
+python -m src.cli doctor    --strict
 python -m src.dashboard_server --port 8091
 ```
 

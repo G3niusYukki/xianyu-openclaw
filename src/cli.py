@@ -5,6 +5,7 @@
 所有命令输出结构化 JSON，方便 Agent 解析结果。
 
 用法:
+    python -m src.cli doctor --strict
     python -m src.cli publish --title "..." --price 5999 --images img1.jpg img2.jpg
     python -m src.cli polish --all --max 50
     python -m src.cli polish --id item_123456
@@ -435,6 +436,24 @@ async def cmd_ai(args: argparse.Namespace) -> None:
     _json_out({"error": f"Unknown ai action: {action}"})
 
 
+async def cmd_doctor(args: argparse.Namespace) -> None:
+    from src.core.doctor import run_doctor
+
+    report = run_doctor(skip_gateway=bool(args.skip_gateway), skip_quote=bool(args.skip_quote))
+    strict = bool(args.strict)
+    strict_ready = bool(report.get("ready", False)) and report.get("summary", {}).get("warning_failed", 0) == 0
+
+    output = {
+        **report,
+        "strict": strict,
+        "strict_ready": strict_ready,
+    }
+    _json_out(output)
+
+    if not output["ready"] or (strict and not strict_ready):
+        raise SystemExit(2)
+
+
 async def cmd_quote(args: argparse.Namespace) -> None:
     from src.core.config import get_config
     from src.modules.quote import CostTableRepository, QuoteSetupService
@@ -445,8 +464,8 @@ async def cmd_quote(args: argparse.Namespace) -> None:
 
     if action == "health":
         repo = CostTableRepository(
-            cost_table_dir=quote_cfg.get("cost_table_dir", "data/quote_costs"),
-            patterns=quote_cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
+            table_dir=quote_cfg.get("cost_table_dir", "data/quote_costs"),
+            include_patterns=quote_cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
         )
         stats = repo.get_stats(max_files=30)
         _json_out(
@@ -463,8 +482,8 @@ async def cmd_quote(args: argparse.Namespace) -> None:
             _json_out({"error": "Specify --origin-city and --destination-city"})
             return
         repo = CostTableRepository(
-            cost_table_dir=quote_cfg.get("cost_table_dir", "data/quote_costs"),
-            patterns=quote_cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
+            table_dir=quote_cfg.get("cost_table_dir", "data/quote_costs"),
+            include_patterns=quote_cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
         )
         records = repo.find_candidates(
             origin=args.origin_city,
@@ -706,6 +725,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--product-name", default="iPhone 15 Pro", help="模拟商品名")
     p.add_argument("--category", default="数码手机", help="模拟商品分类")
 
+    # doctor
+    p = sub.add_parser("doctor", help="运行系统自检并输出修复建议")
+    p.add_argument("--skip-gateway", action="store_true", help="跳过 OpenClaw Gateway 连通性检查")
+    p.add_argument("--skip-quote", action="store_true", help="跳过自动报价成本源检查")
+    p.add_argument("--strict", action="store_true", help="警告也按失败处理（返回非0）")
+
     # quote
     p = sub.add_parser("quote", help="自动报价诊断与配置")
     p.add_argument("--action", required=True, choices=["health", "candidates", "setup"])
@@ -766,6 +791,7 @@ def main() -> None:
         "orders": cmd_orders,
         "compliance": cmd_compliance,
         "ai": cmd_ai,
+        "doctor": cmd_doctor,
         "quote": cmd_quote,
         "growth": cmd_growth,
     }

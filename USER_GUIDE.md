@@ -136,6 +136,8 @@ Windows 用户也可以先执行（自动创建虚拟环境并安装依赖）：
 
 ```bat
 scripts\windows\setup_windows.bat
+# 一键安装 + 自检 + 启动
+scripts\windows\quickstart.bat
 ```
 
 按提示一步一步输入：
@@ -174,6 +176,14 @@ python -m src.dashboard_server --port 8091
 ```
 
 浏览器打开 `http://localhost:8091`，可看到趋势图、商品表现和最近操作记录。
+
+### 启动前自检（推荐）
+
+先执行 doctor，自动检查 Python、Cookie、数据库、网关连通性和首响配置：
+
+```bash
+python3 -m src.cli doctor --strict
+```
 
 ### 关闭
 
