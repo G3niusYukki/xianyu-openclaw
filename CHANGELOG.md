@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] - 2026-02-27
+
+### Added
+- `src/modules/messages/workflow.py`：
+  - `WorkflowState` + `SessionStateMachine` 状态迁移规则
+  - `WorkflowStore`（SQLite 持久化）：会话任务、迁移日志、幂等作业队列、SLA 事件、告警事件
+  - `WorkflowWorker`：常驻轮询、幂等去重、失败指数退避、过期租约恢复
+- `MessagesService.process_session(...)`，统一单会话处理路径，供批处理和 worker 复用。
+- CLI 新增 `messages` 动作：
+  - `auto-workflow`（单次或 daemon）
+  - `workflow-stats`（工作流与 SLA 汇总）
+- 新增测试 `tests/test_workflow.py`，覆盖状态迁移防护、作业去重与重试、worker 流程与人工接管跳过。
+
+### Changed
+- `src/modules/messages/service.py`：`auto_reply_unread` 改为复用 `process_session`，减少重复逻辑并对齐 worker 行为。
+- `config/config.example.yaml`、`src/core/config_models.py`、`src/core/config.py`：新增 `messages.workflow` 配置段与默认值支持。
+- `README.md` 更新为 4.4.0，补充 workflow worker、SLA 指标与新 CLI 用法。
+
 ## [4.3.0] - 2026-02-27
 
 ### Added

@@ -175,13 +175,26 @@ async def cmd_accounts(args: argparse.Namespace) -> None:
 
 
 async def cmd_messages(args: argparse.Namespace) -> None:
+    action = args.action
+
+    if action == "workflow-stats":
+        from src.modules.messages.workflow import WorkflowStore
+
+        store = WorkflowStore(db_path=args.workflow_db)
+        _json_out(
+            {
+                "workflow": store.get_workflow_summary(),
+                "sla": store.get_sla_summary(window_minutes=args.window_minutes or 1440),
+            }
+        )
+        return
+
     from src.core.browser_client import create_browser_client
     from src.modules.messages.service import MessagesService
 
     client = await create_browser_client()
     try:
         service = MessagesService(controller=client)
-        action = args.action
 
         if action == "list-unread":
             result = await service.get_unread_sessions(limit=args.limit or 20)
@@ -204,6 +217,28 @@ async def cmd_messages(args: argparse.Namespace) -> None:
 
         if action == "auto-reply":
             result = await service.auto_reply_unread(limit=args.limit or 20, dry_run=bool(args.dry_run))
+            _json_out(result)
+            return
+
+        if action == "auto-workflow":
+            from src.modules.messages.workflow import WorkflowWorker
+
+            worker = WorkflowWorker(
+                message_service=service,
+                config={
+                    "db_path": args.workflow_db,
+                    "poll_interval_seconds": args.interval,
+                    "scan_limit": args.limit,
+                },
+            )
+
+            if args.daemon:
+                result = await worker.run_forever(
+                    dry_run=bool(args.dry_run),
+                    max_loops=args.max_loops,
+                )
+            else:
+                result = await worker.run_once(dry_run=bool(args.dry_run))
             _json_out(result)
             return
 
@@ -266,11 +301,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     # messages
     p = sub.add_parser("messages", help="消息自动回复")
-    p.add_argument("--action", required=True, choices=["list-unread", "reply", "auto-reply"])
+    p.add_argument(
+        "--action",
+        required=True,
+        choices=["list-unread", "reply", "auto-reply", "auto-workflow", "workflow-stats"],
+    )
     p.add_argument("--limit", type=int, default=20, help="最多处理会话数")
     p.add_argument("--session-id", help="会话 ID（reply 时必填）")
     p.add_argument("--text", help="回复内容（reply 时必填）")
     p.add_argument("--dry-run", action="store_true", help="仅生成回复，不真正发送")
+    p.add_argument("--daemon", action="store_true", help="常驻运行 workflow worker")
+    p.add_argument("--max-loops", type=int, default=None, help="daemon 模式下最多循环次数")
+    p.add_argument("--interval", type=float, default=5.0, help="worker 轮询间隔（秒）")
+    p.add_argument("--workflow-db", default=None, help="workflow 数据库路径")
+    p.add_argument("--window-minutes", type=int, default=1440, help="SLA 统计窗口（分钟）")
 
     return parser
 

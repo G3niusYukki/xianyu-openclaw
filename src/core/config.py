@@ -209,6 +209,7 @@ class Config:
                 "quote_missing_template": "为了给您准确报价，请补充：{fields}。",
                 "quote_failed_template": "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
                 "quote": {},
+                "workflow": {},
             },
             "quote": {
                 "enabled": True,

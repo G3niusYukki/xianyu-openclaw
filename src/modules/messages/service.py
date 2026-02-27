@@ -420,48 +420,23 @@ class MessagesService:
 
         try:
             for index, session in enumerate(unread):
-                session_start = perf_counter()
-                session_id = str(session.get("session_id", ""))
-                msg = str(session.get("last_message", ""))
-                item_title = str(session.get("item_title", ""))
-
-                reply_text, quote_meta = await self._generate_reply_with_quote(msg, item_title=item_title)
-
-                sent = False
-                if dry_run:
-                    sent = True
-                elif session_id:
-                    sent = await self.reply_to_session(session_id, reply_text, page_id=shared_page_id)
-
-                latency_seconds = perf_counter() - session_start
-                within_target = latency_seconds <= self.reply_target_seconds
+                detail = await self.process_session(session=session, dry_run=dry_run, page_id=shared_page_id)
+                details.append(detail)
+                within_target = bool(detail.get("within_target", False))
 
                 if within_target:
                     within_target_count += 1
 
-                if quote_meta.get("is_quote"):
+                if detail.get("is_quote"):
                     quote_requests += 1
-                    if quote_meta.get("quote_success"):
+                    if detail.get("quote_success"):
                         quote_success_count += 1
-                    if quote_meta.get("quote_fallback"):
+                    if detail.get("quote_fallback"):
                         quote_fallback_count += 1
-                    if isinstance(quote_meta.get("quote_latency_ms"), int):
-                        quote_latency_samples.append(int(quote_meta["quote_latency_ms"]))
+                    if isinstance(detail.get("quote_latency_ms"), int):
+                        quote_latency_samples.append(int(detail["quote_latency_ms"]))
 
-                details.append(
-                    {
-                        "session_id": session_id,
-                        "peer_name": session.get("peer_name", ""),
-                        "last_message": msg,
-                        "reply": reply_text,
-                        "sent": sent,
-                        "latency_seconds": round(latency_seconds, 3),
-                        "within_target": within_target,
-                        **quote_meta,
-                    }
-                )
-
-                if sent:
+                if detail.get("sent"):
                     success += 1
 
                 if not dry_run:
@@ -493,4 +468,38 @@ class MessagesService:
             "quote_success_rate": round(quote_success_rate, 4),
             "quote_fallback_rate": round(quote_fallback_rate, 4),
             "details": details,
+        }
+
+    async def process_session(
+        self,
+        session: dict[str, Any],
+        dry_run: bool = False,
+        page_id: str | None = None,
+    ) -> dict[str, Any]:
+        """处理单个会话（供批处理与 worker 复用）。"""
+        session_start = perf_counter()
+        session_id = str(session.get("session_id", ""))
+        msg = str(session.get("last_message", ""))
+        item_title = str(session.get("item_title", ""))
+
+        reply_text, quote_meta = await self._generate_reply_with_quote(msg, item_title=item_title)
+
+        sent = False
+        if dry_run:
+            sent = True
+        elif session_id:
+            sent = await self.reply_to_session(session_id, reply_text, page_id=page_id)
+
+        latency_seconds = perf_counter() - session_start
+        within_target = latency_seconds <= self.reply_target_seconds
+
+        return {
+            "session_id": session_id,
+            "peer_name": session.get("peer_name", ""),
+            "last_message": msg,
+            "reply": reply_text,
+            "sent": sent,
+            "latency_seconds": round(latency_seconds, 3),
+            "within_target": within_target,
+            **quote_meta,
         }

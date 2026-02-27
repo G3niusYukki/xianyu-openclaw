@@ -140,6 +140,7 @@ class MessagesConfig(BaseModel):
         description="报价失败降级模板",
     )
     quote: dict[str, Any] = Field(default_factory=dict, description="消息模块中的报价覆盖配置")
+    workflow: dict[str, Any] = Field(default_factory=dict, description="常驻 workflow worker 配置")
 
 
 class QuoteConfig(BaseModel):

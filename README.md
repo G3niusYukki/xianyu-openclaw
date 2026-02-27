@@ -27,14 +27,14 @@
 
 ---
 
-## 4.3.0 更新摘要（2026-02-27）
+## 4.4.0 更新摘要（2026-02-27）
 
-- 新增 `Auto Quote Engine`：支持 `QuoteRequest/QuoteResult` 领域模型与可解释费用拆分。
-- 新增 `QuoteProvider` 适配层：`RuleTableQuoteProvider` + `RemoteQuoteProvider(mock)`，支持超时重试与本地回退。
-- 新增报价缓存：`TTL + stale-while-revalidate`，缓存 key 覆盖 `origin+dest+weight+service_level`。
-- 消息链路支持询价意图分流：`缺参补问 -> 自动报价 -> 降级文案`，兼容原 `messages --action auto-reply`。
-- 消息自动回复新增快速配置档：复用消息页、3 秒目标延迟指标、`within_target_rate` 批次统计。
-- 新增报价与消息链路测试，覆盖回退、缓存命中、询价补问与报价成功率指标。
+- 新增常驻 `workflow worker`：支持轮询处理、任务去重键、失败指数退避重试、超时任务恢复。
+- 新增会话状态机与持久化：`NEW -> REPLIED -> QUOTED -> FOLLOWED -> ORDERED -> CLOSED`，非法迁移自动拒绝并落库审计。
+- 新增 `manual_takeover` 人工接管开关（会话级），支持 worker 自动跳过人工会话。
+- 新增 SLA 事件采集与窗口聚合：首响 `P50/P95`、报价成功率、报价回退率。
+- 新增阈值告警最小实现：首响 P95 与报价成功率支持可配置阈值触发告警。
+- CLI 新增 `messages --action auto-workflow` 与 `messages --action workflow-stats`。
 
 ## 为什么做这个？
 
@@ -67,6 +67,8 @@ AI: 📊 今日浏览 1,247 | 想要 89 | 成交 12 | 营收 ¥38,700
 | ✨ | **一键擦亮** | 一句话批量擦亮全部商品，模拟人工随机间隔 |
 | 💰 | **价格管理** | 单个调价、批量调价、智能定价策略 |
 | 💬 | **消息自动回复 + 自动报价** | 询价识别、缺参补问、结构化报价、失败降级与合规回复 |
+| ⚙️ | **常驻 Workflow Worker** | 7x24 轮询处理、幂等去重、崩溃恢复、人工接管跳过 |
+| 📈 | **运营 SLA 监控** | 首响 P95 / 报价成功率 / 报价回退率采集与阈值告警 |
 | 📊 | **数据分析** | 每日报告、趋势分析、CSV 导出 |
 | 👥 | **多账号管理** | 同时管理多个闲鱼账号，Cookie 加密存储 |
 | 🔒 | **安全优先** | AES 加密 Cookie、参数化 SQL、请求限速 |
@@ -195,6 +197,8 @@ python -m src.cli relist   --id item_123
 python -m src.cli analytics --action dashboard
 python -m src.cli accounts  --action list
 python -m src.cli messages  --action auto-reply --limit 20 --dry-run
+python -m src.cli messages  --action auto-workflow --dry-run
+python -m src.cli messages  --action workflow-stats --window-minutes 60
 python -m src.dashboard_server --port 8091
 ```
 
@@ -227,6 +231,19 @@ messages:
       priority: 20
       keywords: ["代下单", "代拍", "代充", "代购", "代订"]
       reply: "支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。"
+  workflow:
+    db_path: "data/workflow.db"
+    poll_interval_seconds: 5
+    scan_limit: 20
+    claim_limit: 10
+    lease_seconds: 60
+    max_attempts: 3
+    backoff_seconds: 2
+    sla:
+      window_minutes: 60
+      min_samples: 5
+      reply_p95_threshold_ms: 3000
+      quote_success_rate_threshold: 0.98
 
 quote:
   enabled: true
