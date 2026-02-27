@@ -182,6 +182,7 @@ class BrowserClient:
         data = resp.json()
         target_id = data.get("targetId", data.get("id", f"tab_{len(self._tabs)}"))
         self._tabs[target_id] = target_id
+        self._active_tab_id = None
         self.logger.debug(f"Opened tab: {target_id}")
         return target_id
 
@@ -201,11 +202,12 @@ class BrowserClient:
     async def _focus_tab(self, page_id: str) -> None:
         if self._active_tab_id == page_id:
             return
-        await self._client.post(
+        resp = await self._client.post(
             "/tabs/focus",
             params={**self._profile_params(), "targetId": page_id},
         )
-        self._active_tab_id = page_id
+        if resp.is_success:
+            self._active_tab_id = page_id
 
     # ── navigation ──
 
