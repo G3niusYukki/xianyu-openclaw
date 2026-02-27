@@ -201,11 +201,12 @@ class BrowserClient:
     async def _focus_tab(self, page_id: str) -> None:
         if self._active_tab_id == page_id:
             return
-        await self._client.post(
+        resp = await self._client.post(
             "/tabs/focus",
             params={**self._profile_params(), "targetId": page_id},
         )
-        self._active_tab_id = page_id
+        if resp.is_success:
+            self._active_tab_id = page_id
 
     # ── navigation ──
 
