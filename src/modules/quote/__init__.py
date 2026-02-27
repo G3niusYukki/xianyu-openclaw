@@ -1,6 +1,6 @@
 """自动报价模块。"""
 
-from .cost_table import CostTableRecord, CostTableRepository
+from .cost_table import CostRecord, CostTableRepository
 from .engine import AutoQuoteEngine
 from .models import QuoteRequest, QuoteResult
 from .providers import (
@@ -13,7 +13,7 @@ from .setup import QuoteSetupService
 
 __all__ = [
     "AutoQuoteEngine",
-    "CostTableRecord",
+    "CostRecord",
     "CostTableRepository",
     "IQuoteProvider",
     "QuoteProviderError",
