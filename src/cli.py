@@ -204,9 +204,7 @@ def _start_background_module(target: str, args: argparse.Namespace) -> dict[str,
     log_file = _module_log_path(target)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     handle = open(log_file, "a", encoding="utf-8")
-    handle.write(
-        f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] start target={target} cmd={' '.join(cmd)}\n"
-    )
+    handle.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] start target={target} cmd={' '.join(cmd)}\n")
     handle.flush()
 
     popen_kwargs: dict[str, Any] = {

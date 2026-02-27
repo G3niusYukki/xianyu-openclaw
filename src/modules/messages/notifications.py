@@ -102,4 +102,3 @@ def format_heartbeat_message(last: dict[str, Any], loops: int) -> str:
             f"states={workflow.get('states', {})}",
         ]
     )
-

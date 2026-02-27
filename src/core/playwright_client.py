@@ -321,4 +321,3 @@ class PlaywrightBrowserClient:
 
         if cookies:
             await self._context.add_cookies(cookies)
-
