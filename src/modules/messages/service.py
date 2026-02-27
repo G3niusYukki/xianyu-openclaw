@@ -500,6 +500,9 @@ class MessagesService:
         if blocked_by_policy:
             sent = False
             reply_text = self.safe_fallback_reply
+            if quote_meta.get("is_quote"):
+                quote_meta["quote_success"] = False
+                quote_meta["quote_blocked_by_policy"] = True
         elif dry_run:
             sent = True
         elif session_id:
