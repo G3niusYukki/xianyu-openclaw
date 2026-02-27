@@ -108,6 +108,12 @@ class MessagesConfig(BaseModel):
     max_replies_per_run: int = Field(default=10, ge=1, le=200, description="单次最多自动回复数量")
     reply_prefix: str = Field(default="", description="回复前缀")
     default_reply: str = Field(default="您好，宝贝在的，感兴趣可以直接拍下。", description="默认回复文案")
+    virtual_default_reply: str = Field(
+        default="在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。",
+        description="虚拟商品场景默认回复",
+    )
+    virtual_product_keywords: list[str] = Field(default_factory=list, description="虚拟商品识别关键词")
+    intent_rules: list[dict[str, Any]] = Field(default_factory=list, description="意图规则列表")
     keyword_replies: dict[str, str] = Field(default_factory=dict, description="关键词回复模板")
 
 

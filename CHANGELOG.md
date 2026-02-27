@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.1] - 2026-02-27
+
+### Added
+- `src/modules/messages/reply_engine.py` — 通用自动回复策略引擎，支持意图规则（关键词/正则/优先级）与虚拟商品场景兜底回复
+- `messages` 配置新增 `virtual_default_reply`、`virtual_product_keywords`、`intent_rules`
+- 新增测试覆盖：虚拟商品卡密咨询、代下单咨询的自动回复命中逻辑
+
+### Changed
+- `src/modules/messages/service.py` 自动回复逻辑由单一关键词匹配升级为策略引擎驱动，保留原 `keyword_replies` 兼容路径
+- `config/config.example.yaml` 增加虚拟商品/卡密/代下单策略配置示例，便于按品类快速扩展
+- `README.md` 更新消息自动回复策略说明，新增可直接复用的规则化配置模板
+
 ## [4.2.0] - 2026-02-27
 
 ### Added

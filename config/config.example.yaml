@@ -102,6 +102,22 @@ messages:
   max_replies_per_run: 10
   reply_prefix: ""
   default_reply: "您好，宝贝在的，感兴趣可以直接拍下。"
+  virtual_default_reply: "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。"
+  virtual_product_keywords: ["虚拟", "卡密", "激活码", "兑换码", "CDK", "代下单", "代充", "代订"]
+  intent_rules:
+    - name: "card_code_delivery"
+      priority: 10
+      keywords: ["卡密", "兑换码", "激活码", "CDK", "授权码", "序列号"]
+      reply: "这是虚拟商品，付款后会通过平台聊天发卡密/兑换信息，请按商品说明使用。"
+    - name: "online_fulfillment"
+      priority: 20
+      keywords: ["代下单", "代拍", "代充", "代购", "代订"]
+      reply: "支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。"
+    - name: "delivery_eta"
+      priority: 30
+      keywords: ["多久发", "发货时间", "什么时候发", "多久到账"]
+      patterns: ["\\d+\\s*分钟", "\\d+\\s*小时"]
+      reply: "虚拟商品通常付款后几分钟内处理，高峰期会稍有延迟，我会尽快给你。"
   keyword_replies:
     还在: "在的，商品还在，直接拍就可以。"
     包邮: "默认不包邮，具体看地区可以商量。"

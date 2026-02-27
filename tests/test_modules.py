@@ -86,6 +86,19 @@ def test_messages_generate_reply_uses_keyword_template() -> None:
     assert reply.startswith("【自动回复】")
 
 
+def test_messages_generate_reply_for_virtual_card_code() -> None:
+    service = MessagesService(controller=None, config={})
+    reply = service.generate_reply("这个多久发卡密？", item_title="流媒体会员卡密")
+    assert "虚拟商品" in reply
+    assert "关于「流媒体会员卡密」" in reply
+
+
+def test_messages_generate_reply_for_online_fulfillment() -> None:
+    service = MessagesService(controller=None, config={})
+    reply = service.generate_reply("支持代下单吗")
+    assert "支持代下单服务" in reply
+
+
 @pytest.mark.asyncio
 async def test_messages_auto_reply_unread_dry_run(mock_controller) -> None:
     service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 5})

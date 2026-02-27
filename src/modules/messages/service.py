@@ -13,6 +13,7 @@ from typing import Any
 from src.core.config import get_config
 from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
+from src.modules.messages.reply_engine import ReplyStrategyEngine
 
 
 class MessageSelectors:
@@ -42,6 +43,10 @@ class MessagesService:
         )
         self.reply_prefix = self.config.get("reply_prefix", "")
         self.default_reply = self.config.get("default_reply", "您好，宝贝在的，感兴趣可以直接拍下。")
+        self.virtual_default_reply = self.config.get(
+            "virtual_default_reply",
+            "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。",
+        )
         self.max_replies_per_run = int(self.config.get("max_replies_per_run", 10))
 
         self.keyword_replies: dict[str, str] = {
@@ -59,6 +64,15 @@ class MessagesService:
         custom_keywords = self.config.get("keyword_replies", {})
         if isinstance(custom_keywords, dict):
             self.keyword_replies.update({str(k): str(v) for k, v in custom_keywords.items()})
+
+        self.reply_engine = ReplyStrategyEngine(
+            default_reply=self.default_reply,
+            virtual_default_reply=self.virtual_default_reply,
+            reply_prefix=self.reply_prefix,
+            keyword_replies=self.keyword_replies,
+            intent_rules=self.config.get("intent_rules", []),
+            virtual_product_keywords=self.config.get("virtual_product_keywords", []),
+        )
 
         self.selectors = MessageSelectors()
 
@@ -122,25 +136,8 @@ class MessagesService:
             await self.controller.close_page(page_id)
 
     def generate_reply(self, message_text: str, item_title: str = "") -> str:
-        """根据关键词生成回复。"""
-        text = (message_text or "").strip().lower()
-
-        reply = ""
-        for keyword, template in self.keyword_replies.items():
-            if keyword.lower() in text:
-                reply = template
-                break
-
-        if not reply:
-            reply = self.default_reply
-
-        if item_title:
-            reply = f"关于「{item_title}」，{reply}"
-
-        if self.reply_prefix:
-            reply = f"{self.reply_prefix}{reply}"
-
-        return reply
+        """按策略引擎生成回复。"""
+        return self.reply_engine.generate_reply(message_text=message_text, item_title=item_title)
 
     async def reply_to_session(self, session_id: str, reply_text: str) -> bool:
         """向指定会话发送消息。"""

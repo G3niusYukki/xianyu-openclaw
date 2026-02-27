@@ -27,12 +27,14 @@
 
 ---
 
-## 4.2.0 更新摘要（2026-02-27）
+## 4.2.1 更新摘要（2026-02-27）
 
 - 新增交互式一键部署向导：`python -m src.setup_wizard`，可逐步输入 API Key / Cookie / 密码并自动启动。
 - 新增后台可视化看板：`python -m src.dashboard_server --port 8091`，支持趋势图、操作日志、商品表现 Top。
-- 新增闲鱼消息自动回复：支持未读会话扫描、关键词模板回复、`--dry-run` 预演模式。
-- CLI 扩展 `messages` 子命令，配置新增 `messages` 段，文档与示例命令同步更新。
+- 消息自动回复能力升级为“意图规则引擎”：支持规则优先级、关键词+正则匹配、旧配置兼容。
+- 新增虚拟商品场景增强：覆盖卡密、激活码、会员代充、线上代下单等高频询单语义。
+- `messages` 配置新增 `intent_rules` / `virtual_product_keywords` / `virtual_default_reply`。
+- 文档新增自动回复策略配置示例，可直接按业务扩展多个虚拟品类模板。
 
 ## 为什么做这个？
 
@@ -194,6 +196,28 @@ python -m src.cli analytics --action dashboard
 python -m src.cli accounts  --action list
 python -m src.cli messages  --action auto-reply --limit 20 --dry-run
 python -m src.dashboard_server --port 8091
+```
+
+### 消息自动回复策略（虚拟商品/卡密/代下单）
+
+`messages` 配置支持“意图规则 + 关键词兼容”两层策略，默认已内置常见虚拟商品场景：
+
+```yaml
+messages:
+  enabled: true
+  reply_prefix: "【自动回复】"
+  default_reply: "您好，宝贝在的，感兴趣可以直接拍下。"
+  virtual_default_reply: "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。"
+  virtual_product_keywords: ["虚拟", "卡密", "激活码", "兑换码", "CDK", "代下单", "代充", "代订"]
+  intent_rules:
+    - name: "card_code_delivery"
+      priority: 10
+      keywords: ["卡密", "兑换码", "激活码", "CDK", "授权码"]
+      reply: "这是虚拟商品，付款后会通过平台聊天发卡密/兑换信息，请按商品说明使用。"
+    - name: "online_fulfillment"
+      priority: 20
+      keywords: ["代下单", "代拍", "代充", "代购", "代订"]
+      reply: "支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。"
 ```
 
 ---

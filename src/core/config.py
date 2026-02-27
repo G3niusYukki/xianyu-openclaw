@@ -195,6 +195,9 @@ class Config:
                 "max_replies_per_run": 10,
                 "reply_prefix": "",
                 "default_reply": "您好，宝贝在的，感兴趣可以直接拍下。",
+                "virtual_default_reply": "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。",
+                "virtual_product_keywords": [],
+                "intent_rules": [],
                 "keyword_replies": {},
             },
         }
