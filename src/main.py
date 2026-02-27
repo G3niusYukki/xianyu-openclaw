@@ -28,6 +28,7 @@ async def main():
         from src.modules.content.service import ContentService  # noqa: F401
         from src.modules.listing.service import ListingService  # noqa: F401
         from src.modules.media.service import MediaService  # noqa: F401
+        from src.modules.messages.service import MessagesService  # noqa: F401
         from src.modules.operations.service import OperationsService  # noqa: F401
 
         logger.success("All modules loaded successfully")

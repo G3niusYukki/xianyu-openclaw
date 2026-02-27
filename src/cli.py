@@ -16,6 +16,7 @@
     python -m src.cli analytics --action trend --metric views --days 30
     python -m src.cli accounts --action list
     python -m src.cli accounts --action health --id account_1
+    python -m src.cli messages --action auto-reply --limit 20 --dry-run
 """
 
 import argparse
@@ -173,6 +174,44 @@ async def cmd_accounts(args: argparse.Namespace) -> None:
     _json_out(result)
 
 
+async def cmd_messages(args: argparse.Namespace) -> None:
+    from src.core.browser_client import create_browser_client
+    from src.modules.messages.service import MessagesService
+
+    client = await create_browser_client()
+    try:
+        service = MessagesService(controller=client)
+        action = args.action
+
+        if action == "list-unread":
+            result = await service.get_unread_sessions(limit=args.limit or 20)
+            _json_out({"total": len(result), "sessions": result})
+            return
+
+        if action == "reply":
+            if not args.session_id or not args.text:
+                _json_out({"error": "Specify --session-id and --text"})
+                return
+            sent = await service.reply_to_session(args.session_id, args.text)
+            _json_out(
+                {
+                    "session_id": args.session_id,
+                    "reply": args.text,
+                    "success": bool(sent),
+                }
+            )
+            return
+
+        if action == "auto-reply":
+            result = await service.auto_reply_unread(limit=args.limit or 20, dry_run=bool(args.dry_run))
+            _json_out(result)
+            return
+
+        _json_out({"error": f"Unknown messages action: {action}"})
+    finally:
+        await client.disconnect()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xianyu-cli",
@@ -225,6 +264,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", help="账号 ID")
     p.add_argument("--cookie", help="新的 Cookie 值")
 
+    # messages
+    p = sub.add_parser("messages", help="消息自动回复")
+    p.add_argument("--action", required=True, choices=["list-unread", "reply", "auto-reply"])
+    p.add_argument("--limit", type=int, default=20, help="最多处理会话数")
+    p.add_argument("--session-id", help="会话 ID（reply 时必填）")
+    p.add_argument("--text", help="回复内容（reply 时必填）")
+    p.add_argument("--dry-run", action="store_true", help="仅生成回复，不真正发送")
+
     return parser
 
 
@@ -244,6 +291,7 @@ def main() -> None:
         "relist": cmd_relist,
         "analytics": cmd_analytics,
         "accounts": cmd_accounts,
+        "messages": cmd_messages,
     }
 
     handler = dispatch.get(args.command)

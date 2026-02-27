@@ -11,6 +11,11 @@ from .listing.service import ListingService
 from .media.service import MediaService
 
 try:
+    from .messages.service import MessagesService
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    MessagesService = None
+
+try:
     from .operations.service import OperationsService
 except Exception:  # pragma: no cover - optional dependency/runtime environment
     OperationsService = None
@@ -33,6 +38,7 @@ __all__ = [
     "ListingImage",
     "ListingService",
     "MediaService",
+    "MessagesService",
     "OperationsService",
     "PublishResult",
 ]

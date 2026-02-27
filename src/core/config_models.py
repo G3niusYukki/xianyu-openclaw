@@ -101,6 +101,16 @@ class BrowserConfig(BaseModel):
     upload_timeout: int = Field(default=60, ge=10, le=300, description="文件上传超时时间（秒）")
 
 
+class MessagesConfig(BaseModel):
+    """消息自动回复配置模型"""
+
+    enabled: bool = Field(default=False, description="是否启用消息自动回复")
+    max_replies_per_run: int = Field(default=10, ge=1, le=200, description="单次最多自动回复数量")
+    reply_prefix: str = Field(default="", description="回复前缀")
+    default_reply: str = Field(default="您好，宝贝在的，感兴趣可以直接拍下。", description="默认回复文案")
+    keyword_replies: dict[str, str] = Field(default_factory=dict, description="关键词回复模板")
+
+
 class AppConfig(BaseModel):
     """应用配置模型"""
 
@@ -133,6 +143,7 @@ class ConfigModel(BaseModel):
     media: MediaConfig = Field(default_factory=MediaConfig)
     content: ContentConfig = Field(default_factory=ContentConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
+    messages: MessagesConfig = Field(default_factory=MessagesConfig)
 
     @field_validator("default_account")
     @classmethod

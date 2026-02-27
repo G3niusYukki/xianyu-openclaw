@@ -27,12 +27,12 @@
 
 ---
 
-## 4.1.0 更新摘要（2026-02-27）
+## 4.2.0 更新摘要（2026-02-27）
 
-- 完成全量历史质量清理：`ruff check src tests` 通过，测试体系与现有架构对齐。
-- 修复关键运行时缺陷：调度器 BrowserClient 注入、监控 await 修复、分析周报表缺失修复。
-- 落地增强版合规护栏：支持 `warn/block` 双模式、规则自动重载、发布与运营链路审计日志。
-- 统一技能路线：以 `SKILL.md + CLI` 为唯一执行路径，旧 `skills/xianyu_*` Python 包标记为废弃兼容层。
+- 新增交互式一键部署向导：`python -m src.setup_wizard`，可逐步输入 API Key / Cookie / 密码并自动启动。
+- 新增后台可视化看板：`python -m src.dashboard_server --port 8091`，支持趋势图、操作日志、商品表现 Top。
+- 新增闲鱼消息自动回复：支持未读会话扫描、关键词模板回复、`--dry-run` 预演模式。
+- CLI 扩展 `messages` 子命令，配置新增 `messages` 段，文档与示例命令同步更新。
 
 ## 为什么做这个？
 
@@ -64,6 +64,7 @@ AI: 📊 今日浏览 1,247 | 想要 89 | 成交 12 | 营收 ¥38,700
 | 📦 | **智能发布** | AI 自动生成标题、描述、标签，针对闲鱼 SEO 优化 |
 | ✨ | **一键擦亮** | 一句话批量擦亮全部商品，模拟人工随机间隔 |
 | 💰 | **价格管理** | 单个调价、批量调价、智能定价策略 |
+| 💬 | **消息自动回复** | 扫描未读会话，按关键词模板自动回复 |
 | 📊 | **数据分析** | 每日报告、趋势分析、CSV 导出 |
 | 👥 | **多账号管理** | 同时管理多个闲鱼账号，Cookie 加密存储 |
 | 🔒 | **安全优先** | AES 加密 Cookie、参数化 SQL、请求限速 |
@@ -96,6 +97,32 @@ docker compose up -d
 ```
 
 打开 **http://localhost:8080** ，开始跟你的闲鱼 AI 助手对话。
+
+### 一键部署向导（推荐）
+
+如果你不想手动编辑 `.env`，可以直接运行交互式向导，按提示一步步输入 API Key、Cookie、密码并自动启动：
+
+```bash
+python -m src.setup_wizard
+# 或
+./scripts/one_click_deploy.sh
+```
+
+---
+
+### 后台数据可视化
+
+项目内置了轻量后台页面（本地 Web）：
+
+```bash
+python -m src.dashboard_server --port 8091
+```
+
+打开 **http://localhost:8091** 可查看：
+- 总操作数 / 今日操作 / 在售商品等核心指标
+- 近 30 天趋势图
+- 最近操作日志
+- 商品表现 Top 列表
 
 ---
 
@@ -165,6 +192,8 @@ python -m src.cli delist   --id item_123
 python -m src.cli relist   --id item_123
 python -m src.cli analytics --action dashboard
 python -m src.cli accounts  --action list
+python -m src.cli messages  --action auto-reply --limit 20 --dry-run
+python -m src.dashboard_server --port 8091
 ```
 
 ---
@@ -316,7 +345,7 @@ docker compose pull && docker compose up -d
 - [ ] 基于数据分析的智能定价建议
 - [ ] 竞品监控
 - [ ] Telegram / 微信通知推送
-- [ ] 闲鱼消息自动回复
+- [x] 闲鱼消息自动回复
 - [ ] 多语言支持
 
 ---

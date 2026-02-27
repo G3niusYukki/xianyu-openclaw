@@ -7,6 +7,7 @@ import pytest
 from src.core.error_handler import BrowserError
 from src.modules.listing.service import ListingService, XianyuSelectors
 from src.modules.media.service import MediaService
+from src.modules.messages.service import MessagesService
 from src.modules.operations.service import OperationsService
 
 
@@ -76,3 +77,42 @@ def test_media_save_format_mapping_case_insensitive() -> None:
     service = MediaService()
     assert service._get_save_format("PNG") == "PNG"
     assert service._get_save_format("webp") == "WEBP"
+
+
+def test_messages_generate_reply_uses_keyword_template() -> None:
+    service = MessagesService(controller=None, config={"reply_prefix": "【自动回复】"})
+    reply = service.generate_reply("还在吗？")
+    assert "在的" in reply
+    assert reply.startswith("【自动回复】")
+
+
+@pytest.mark.asyncio
+async def test_messages_auto_reply_unread_dry_run(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 5})
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "s1",
+                "peer_name": "买家A",
+                "item_title": "iPhone 15",
+                "last_message": "最低多少",
+                "unread_count": 1,
+            },
+            {
+                "session_id": "s2",
+                "peer_name": "买家B",
+                "item_title": "",
+                "last_message": "还在吗",
+                "unread_count": 2,
+            },
+        ]
+    )
+    service.reply_to_session = AsyncMock(return_value=True)
+
+    result = await service.auto_reply_unread(limit=10, dry_run=True)
+
+    assert result["total"] == 2
+    assert result["success"] == 2
+    assert result["failed"] == 0
+    assert result["dry_run"] is True
+    service.reply_to_session.assert_not_called()

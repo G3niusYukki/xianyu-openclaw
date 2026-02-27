@@ -190,6 +190,13 @@ class Config:
                 "delay": {"min": 1, "max": 3},
                 "upload_timeout": 60,
             },
+            "messages": {
+                "enabled": False,
+                "max_replies_per_run": 10,
+                "reply_prefix": "",
+                "default_reply": "您好，宝贝在的，感兴趣可以直接拍下。",
+                "keyword_replies": {},
+            },
         }
 
         for section, values in defaults.items():
@@ -274,6 +281,11 @@ class Config:
     def browser(self) -> dict[str, Any]:
         """浏览器配置"""
         return self.get_section("browser", {})
+
+    @property
+    def messages(self) -> dict[str, Any]:
+        """消息自动回复配置"""
+        return self.get_section("messages", {})
 
     def reload(self, config_path: str | None = None) -> None:
         """

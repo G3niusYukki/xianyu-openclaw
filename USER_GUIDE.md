@@ -123,6 +123,21 @@ XIANYU_COOKIE_1=你的闲鱼Cookie（下一步教你获取）
 
 ## 5. 启动工具
 
+### 一键部署（推荐）
+
+不想手动改 `.env` 的话，直接运行：
+
+```bash
+python -m src.setup_wizard
+```
+
+按提示一步一步输入：
+- AI API Key
+- OpenClaw 登录密码
+- 闲鱼 Cookie
+
+向导会自动生成 `.env`，并可直接帮你执行 `docker compose up -d`。
+
 ### 第一次启动
 
 在工具文件夹中打开终端（命令行），执行：
@@ -142,6 +157,16 @@ http://localhost:8080
 ```
 
 输入你在 `.env` 中设置的用户名（默认 admin）和密码登录。
+
+### 可视化后台（运营看板）
+
+如果你想看图表和操作日志，可单独启动后台页面：
+
+```bash
+python -m src.dashboard_server --port 8091
+```
+
+浏览器打开 `http://localhost:8091`，可看到趋势图、商品表现和最近操作记录。
 
 ### 关闭
 

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-02-27
+
+### Added
+- `src/setup_wizard.py` — 交互式一键部署向导，支持逐步输入 API Key、Cookie、认证信息并生成 `.env`
+- `scripts/one_click_deploy.sh` — 一键部署脚本封装，优先使用 `.venv/bin/python`
+- `src/dashboard_server.py` — 轻量运营后台可视化服务（HTTP + Chart.js），提供实时指标与图表
+- `src/modules/messages/service.py` — 闲鱼消息自动回复服务，支持关键词模板与批量未读处理
+- CLI 新命令 `messages`（`list-unread` / `reply` / `auto-reply`）
+- 新增测试：`tests/test_setup_wizard.py`、`tests/test_dashboard_server.py`、消息模块相关单测
+
+### Changed
+- `README.md` / `USER_GUIDE.md` 增加一键部署与后台可视化使用说明
+- `config/config.example.yaml` / `src/core/config*.py` 新增 `messages` 配置模型与默认项
+- `src/main.py` / `src/modules/__init__.py` 接入消息模块加载与导出
+
 ## [4.1.0] - 2026-02-27
 
 ### Added
