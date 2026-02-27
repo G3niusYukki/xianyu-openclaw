@@ -17,6 +17,8 @@ class QuoteRequest:
     pieces: int = 1
     urgency: bool = False
     origin_city: str | None = None
+    courier: str | None = None
+    profile: str | None = None
     raw_message: str = ""
 
 
@@ -40,6 +42,7 @@ class QuoteResult:
     eta_minutes: int
     currency: str = "CNY"
     provider: str = "rule_engine"
+    courier: str | None = None
     confidence: float = 0.9
     valid_minutes: int = 15
     explain: str = ""

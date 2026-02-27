@@ -212,6 +212,22 @@ class Config:
                 "enabled": True,
                 "mode": "rule_only",
                 "origin_city": "杭州",
+                "pricing_profile": "normal",
+                "preferred_couriers": [],
+                "cost_table_dir": "data/quote_costs",
+                "cost_table_patterns": ["*.xlsx", "*.csv"],
+                "markup_rules": {
+                    "default": {
+                        "normal_first_add": 0.5,
+                        "member_first_add": 0.3,
+                        "normal_extra_add": 0.5,
+                        "member_extra_add": 0.3,
+                    }
+                },
+                "cost_api_url": "",
+                "cost_api_key": "",
+                "cost_api_timeout_seconds": 3,
+                "cost_api_headers": {},
                 "currency": "CNY",
                 "first_weight_kg": 1.0,
                 "first_price": 8.0,

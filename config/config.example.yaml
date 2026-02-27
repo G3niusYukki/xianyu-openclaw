@@ -134,8 +134,64 @@ messages:
 # 自动报价配置（快递服务）
 quote:
   enabled: true
-  mode: "rule_only"  # rule_only | remote_then_rule
-  origin_city: "杭州"
+  mode: "cost_table_plus_markup"  # rule_only | remote_then_rule | cost_table_plus_markup | api_cost_plus_markup
+  origin_city: "安徽"
+  pricing_profile: "normal"  # normal | member
+  preferred_couriers: ["圆通", "韵达", "中通", "申通"]
+  cost_table_dir: "data/quote_costs"
+  cost_table_patterns: ["*.xlsx", "*.csv"]
+  # 成本价加价规则（首重/续重）
+  markup_rules:
+    default:
+      normal_first_add: 0.50
+      member_first_add: 0.25
+      normal_extra_add: 0.50
+      member_extra_add: 0.30
+    圆通:
+      normal_first_add: 0.56
+      member_first_add: 0.30
+      normal_extra_add: 0.50
+      member_extra_add: 0.30
+    韵达:
+      normal_first_add: 0.87
+      member_first_add: 0.57
+      normal_extra_add: 0.40
+      member_extra_add: 0.30
+    中通:
+      normal_first_add: 0.60
+      member_first_add: 0.30
+      normal_extra_add: 0.60
+      member_extra_add: 0.40
+    申通:
+      normal_first_add: 0.50
+      member_first_add: 0.25
+      normal_extra_add: 0.50
+      member_extra_add: 0.30
+    德邦:
+      normal_first_add: 0.70
+      member_first_add: 0.40
+      normal_extra_add: 0.50
+      member_extra_add: 0.30
+    顺丰:
+      normal_first_add: 0.20
+      member_first_add: 0.20
+      normal_extra_add: 0.30
+      member_extra_add: 0.30
+    京东:
+      normal_first_add: 0.70
+      member_first_add: 0.30
+      normal_extra_add: 0.50
+      member_extra_add: 0.30
+    邮政:
+      normal_first_add: 0.50
+      member_first_add: 0.25
+      normal_extra_add: 0.50
+      member_extra_add: 0.40
+  # mode = api_cost_plus_markup 时生效（接口返回成本价，再套加价规则）
+  cost_api_url: ""
+  cost_api_key: "${QUOTE_COST_API_KEY}"
+  cost_api_timeout_seconds: 3
+  cost_api_headers: {}
   currency: "CNY"
   first_weight_kg: 1.0
   first_price: 8.0
@@ -148,6 +204,7 @@ quote:
   eta_same_city_minutes: 90
   eta_inter_city_minutes: 360
   valid_minutes: 15
+  # mode = remote_then_rule 时生效（直接使用接口返回的最终售价）
   remote_api_url: ""
   remote_api_key: "${QUOTE_API_KEY}"
   timeout_seconds: 3

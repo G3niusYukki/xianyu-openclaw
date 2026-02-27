@@ -141,8 +141,23 @@ class QuoteConfig(BaseModel):
     """自动报价配置模型"""
 
     enabled: bool = Field(default=True, description="是否启用自动报价")
-    mode: str = Field(default="rule_only", description="报价模式: rule_only | remote_then_rule")
+    mode: str = Field(
+        default="rule_only",
+        description="报价模式: rule_only | remote_then_rule | cost_table_plus_markup | api_cost_plus_markup",
+    )
     origin_city: str = Field(default="杭州", description="默认寄件城市")
+    pricing_profile: str = Field(default="normal", description="加价档位: normal | member")
+    preferred_couriers: list[str] = Field(default_factory=list, description="优先承运商列表（未指定快递时生效）")
+    cost_table_dir: str = Field(default="data/quote_costs", description="成本价表目录")
+    cost_table_patterns: list[str] = Field(default_factory=lambda: ["*.xlsx", "*.csv"], description="成本表匹配规则")
+    markup_rules: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="加价规则（按快递公司与档位）",
+    )
+    cost_api_url: str = Field(default="", description="成本价接口 URL")
+    cost_api_key: str = Field(default="", description="成本价接口密钥")
+    cost_api_timeout_seconds: int = Field(default=3, ge=1, le=30, description="成本价接口超时（秒）")
+    cost_api_headers: dict[str, str] = Field(default_factory=dict, description="成本价接口额外请求头")
     currency: str = Field(default="CNY", description="币种")
     first_weight_kg: float = Field(default=1.0, ge=0.1, le=10.0, description="首重公斤数")
     first_price: float = Field(default=8.0, ge=0, le=9999, description="首重价格")
@@ -165,10 +180,23 @@ class QuoteConfig(BaseModel):
     @field_validator("mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
-        valid_modes = {"rule_only", "remote_then_rule"}
+        valid_modes = {
+            "rule_only",
+            "remote_then_rule",
+            "cost_table_plus_markup",
+            "api_cost_plus_markup",
+        }
         if v not in valid_modes:
             raise ValueError(f"mode must be one of {sorted(valid_modes)}, got {v}")
         return v
+
+    @field_validator("pricing_profile")
+    @classmethod
+    def validate_pricing_profile(cls, v: str) -> str:
+        profile = (v or "").strip().lower()
+        if profile in {"normal", "member"}:
+            return profile
+        raise ValueError(f"pricing_profile must be one of ['normal', 'member'], got {v}")
 
 
 class AppConfig(BaseModel):

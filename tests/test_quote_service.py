@@ -1,10 +1,12 @@
 """自动报价与双阶段回复测试。"""
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 from src.modules.messages.service import MessagesService
+from src.modules.quote.cost_table import CostRecord
 from src.modules.quote.service import QuoteService
 
 
@@ -30,6 +32,16 @@ def test_quote_service_parse_missing_fields() -> None:
     assert "请补充" in first_reply
 
 
+def test_quote_service_parse_route_and_courier_profile() -> None:
+    service = QuoteService(config={"origin_city": "杭州", "pricing_profile": "normal"})
+    parsed = service.parse_quote_request("从安徽寄到上海 圆通 2kg 会员报价")
+
+    assert parsed.request.origin_city == "安徽"
+    assert parsed.request.destination_city == "上海"
+    assert parsed.request.courier == "圆通"
+    assert parsed.request.profile == "member"
+
+
 @pytest.mark.asyncio
 async def test_quote_service_compute_rule_quote() -> None:
     service = QuoteService(
@@ -53,6 +65,114 @@ async def test_quote_service_compute_rule_quote() -> None:
     assert source == "rule"
     assert quote.total_fee > 0
     assert quote.provider == "rule_engine"
+
+
+@pytest.mark.asyncio
+async def test_quote_service_compute_cost_table_plus_markup(tmp_path: Path) -> None:
+    cost_file = tmp_path / "cost.csv"
+    cost_file.write_text(
+        "快递公司,始发地,目的地,首重,续重,抛比\n"
+        "圆通快递,安徽,上海,3.49,1.60,8000\n"
+        "韵达快递,安徽,上海,3.20,2.80,8000\n",
+        encoding="utf-8",
+    )
+    service = QuoteService(
+        config={
+            "mode": "cost_table_plus_markup",
+            "origin_city": "安徽",
+            "pricing_profile": "normal",
+            "cost_table_dir": str(tmp_path),
+            "cost_table_patterns": ["*.csv"],
+            "service_fee": 1.0,
+            "first_weight_kg": 1.0,
+            "markup_rules": {
+                "default": {"normal_first_add": 0.5, "normal_extra_add": 0.3},
+                "圆通": {"normal_first_add": 0.56, "normal_extra_add": 0.5},
+            },
+        }
+    )
+
+    parsed = service.parse_quote_request("寄到上海 2kg 圆通 报价")
+    quote, source = await service.compute_quote(parsed)
+
+    assert quote is not None
+    assert source == "cost_table"
+    assert quote.courier == "圆通"
+    assert quote.total_fee == pytest.approx(7.15, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_quote_service_compute_api_cost_plus_markup_fallback_table(tmp_path: Path) -> None:
+    cost_file = tmp_path / "cost.csv"
+    cost_file.write_text(
+        "快递公司,始发地,目的地,首重,续重\n"
+        "圆通快递,安徽,上海,3.49,1.60\n",
+        encoding="utf-8",
+    )
+    service = QuoteService(
+        config={
+            "mode": "api_cost_plus_markup",
+            "origin_city": "安徽",
+            "pricing_profile": "normal",
+            "cost_table_dir": str(tmp_path),
+            "cost_table_patterns": ["*.csv"],
+            "cost_api_url": "https://example.com/cost",
+            "service_fee": 1.0,
+            "first_weight_kg": 1.0,
+            "markup_rules": {
+                "default": {"normal_first_add": 0.5, "normal_extra_add": 0.3},
+                "圆通": {"normal_first_add": 0.56, "normal_extra_add": 0.5},
+            },
+        }
+    )
+    service._fetch_remote_cost_candidates = AsyncMock(return_value=[])
+
+    parsed = service.parse_quote_request("寄到上海 2kg 圆通 报价")
+    quote, source = await service.compute_quote(parsed)
+
+    assert quote is not None
+    assert source == "fallback_cost_table"
+    assert quote.courier == "圆通"
+
+
+@pytest.mark.asyncio
+async def test_quote_service_compute_api_cost_plus_markup_success() -> None:
+    service = QuoteService(
+        config={
+            "mode": "api_cost_plus_markup",
+            "origin_city": "安徽",
+            "pricing_profile": "normal",
+            "cost_api_url": "https://example.com/cost",
+            "service_fee": 1.0,
+            "first_weight_kg": 1.0,
+            "markup_rules": {
+                "default": {"normal_first_add": 0.5, "normal_extra_add": 0.3},
+                "韵达": {"normal_first_add": 0.87, "normal_extra_add": 0.4},
+            },
+        }
+    )
+    service._fetch_remote_cost_candidates = AsyncMock(
+        return_value=[
+            CostRecord(
+                courier="韵达",
+                origin="安徽",
+                destination="上海",
+                first_cost=3.2,
+                extra_cost=2.8,
+                throw_ratio=8000,
+                source_file="api",
+                source_sheet="cost",
+            )
+        ]
+    )
+
+    parsed = service.parse_quote_request("寄到上海 2kg 韵达 报价")
+    quote, source = await service.compute_quote(parsed)
+
+    assert quote is not None
+    assert source == "api_cost_markup"
+    assert quote.courier == "韵达"
+    assert quote.total_fee == pytest.approx(8.27, abs=0.01)
 
 
 @pytest.mark.asyncio
