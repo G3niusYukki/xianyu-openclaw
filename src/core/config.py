@@ -214,6 +214,7 @@ class Config:
                     "queue_wait_seconds": 0.3,
                     "token_refresh_interval_seconds": 3600,
                     "token_retry_seconds": 300,
+                    "auth_hold_until_cookie_update": True,
                 },
                 "max_replies_per_run": 10,
                 "reply_prefix": "",

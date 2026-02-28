@@ -186,13 +186,13 @@ class MessagesService:
         return mode
 
     def _resolve_ws_cookie(self) -> str:
-        raw_cookie = str(self.config.get("cookie", "") or "").strip()
-        if raw_cookie:
-            return raw_cookie
-
         env_cookie = str(os.getenv("XIANYU_COOKIE_1", "") or "").strip()
         if env_cookie:
             return env_cookie
+
+        raw_cookie = str(self.config.get("cookie", "") or "").strip()
+        if raw_cookie:
+            return raw_cookie
 
         app_config = get_config()
         for account in app_config.accounts:

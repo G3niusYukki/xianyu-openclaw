@@ -308,6 +308,7 @@ class GoofishWsTransport:
         self.auth_failure_backoff_seconds = float(
             self.config.get("auth_failure_backoff_seconds", max(30.0, float(self.token_retry_seconds)))
         )
+        self.auth_hold_until_cookie_update = bool(self.config.get("auth_hold_until_cookie_update", True))
 
         self.cookie_supplier = cookie_supplier
         self.cookie_text = ""
@@ -418,6 +419,14 @@ class GoofishWsTransport:
             if self._maybe_reload_cookie(reason="watch"):
                 return True
             await asyncio.sleep(min(interval, max(0.5, deadline - time.time())))
+        return False
+
+    async def _wait_for_cookie_update_forever(self) -> bool:
+        interval = max(1.0, float(self.cookie_watch_interval_seconds))
+        while not self._stop_event.is_set():
+            if self._maybe_reload_cookie(reason="watch"):
+                return True
+            await asyncio.sleep(interval)
         return False
 
     def _base_headers(self) -> dict[str, str]:
@@ -569,6 +578,8 @@ class GoofishWsTransport:
                         await self._preflight_has_login()
                     except Exception as exc:
                         self.logger.debug(f"WS hasLogin retry failed: {exc}")
+                    # 认证/风控错误快速失败，交由上层进入“仅等待 Cookie 更新”流程，避免持续重试加重风险。
+                    break
                 if attempt < max_attempts:
                     await asyncio.sleep(min(2.0 * attempt, 6.0))
                     continue
@@ -789,8 +800,15 @@ class GoofishWsTransport:
                 self.logger.warning(f"Goofish WebSocket disconnected, retrying: {reason}")
 
                 if auth_error:
-                    # 认证失败优先等待 Cookie 更新，避免持续重试触发更高风险。
-                    if await self._wait_for_cookie_update(self.auth_failure_backoff_seconds):
+                    # 认证失败时默认停在“等待 Cookie 更新”，避免周期性重试触发更高风险。
+                    if self.auth_hold_until_cookie_update:
+                        self.logger.warning("Auth/risk failure detected, suspend reconnect until cookie is updated")
+                        if await self._wait_for_cookie_update_forever():
+                            self._connect_failures = 0
+                            self.logger.info("Detected cookie update, retrying WS connection immediately")
+                            continue
+                    # 兼容老模式：有限等待后再重试
+                    elif await self._wait_for_cookie_update(self.auth_failure_backoff_seconds):
                         self._connect_failures = 0
                         self.logger.info("Detected cookie update, retrying WS connection immediately")
                         continue

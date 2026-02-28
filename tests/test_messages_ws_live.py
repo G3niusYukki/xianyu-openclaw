@@ -89,3 +89,17 @@ def test_ws_transport_auth_error_marker() -> None:
     assert GoofishWsTransport._is_auth_related_error(Exception("Token API failed: ['FAIL_SYS_USER_VALIDATE']")) is True
     assert GoofishWsTransport._is_auth_related_error(Exception("server rejected WebSocket connection: HTTP 400")) is True
     assert GoofishWsTransport._is_auth_related_error(Exception("network reset by peer")) is False
+
+
+def test_ws_transport_auth_hold_until_cookie_update_enabled_by_default() -> None:
+    transport = GoofishWsTransport(
+        cookie_text="unb=10001; _m_h5_tk=token_a_123; cookie2=a; _tb_token_=t; sgcookie=s",
+        config={},
+    )
+    assert transport.auth_hold_until_cookie_update is True
+
+    transport_relaxed = GoofishWsTransport(
+        cookie_text="unb=10001; _m_h5_tk=token_a_123; cookie2=a; _tb_token_=t; sgcookie=s",
+        config={"auth_hold_until_cookie_update": False},
+    )
+    assert transport_relaxed.auth_hold_until_cookie_update is False

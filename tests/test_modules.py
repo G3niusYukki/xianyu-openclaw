@@ -1,5 +1,6 @@
 """核心模块行为测试。"""
 
+import os
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
@@ -116,6 +117,20 @@ def test_messages_extract_locations_with_from_by_prefix() -> None:
 def test_messages_quote_keywords_fallback_when_empty_configured() -> None:
     service = MessagesService(controller=None, config={"quote_intent_keywords": []})
     assert service._is_quote_request("安徽到上海 1kg 圆通多少钱") is True
+
+
+def test_messages_resolve_ws_cookie_prefers_env_over_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = MessagesService(controller=None, config={"cookie": "unb=config_user; _m_h5_tk=configtoken_1"})
+    origin_getenv = os.getenv
+
+    def _fake_getenv(key: str, default: str | None = None) -> str | None:
+        if key == "XIANYU_COOKIE_1":
+            return "unb=env_user; _m_h5_tk=envtoken_1"
+        return origin_getenv(key, default)
+
+    monkeypatch.setattr(os, "getenv", _fake_getenv)
+    resolved = service._resolve_ws_cookie()
+    assert resolved.startswith("unb=env_user")
 
 
 def test_messages_quote_detection_avoids_false_positive_for_logistics_status() -> None:
