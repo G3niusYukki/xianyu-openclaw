@@ -360,10 +360,16 @@ async def test_messages_greeting_forces_standard_template_even_non_strict(mock_c
 
 
 @pytest.mark.asyncio
-async def test_messages_context_memory_allows_followup_weight_only_quote(mock_controller) -> None:
+async def test_messages_courier_choice_returns_checkout_guide(mock_controller) -> None:
     service = MessagesService(
         controller=mock_controller,
-        config={"max_replies_per_run": 3, "strict_format_reply_enabled": False, "context_memory_enabled": True},
+        config={
+            "max_replies_per_run": 3,
+            "strict_format_reply_enabled": False,
+            "context_memory_enabled": True,
+            "quote_reply_all_couriers": True,
+            "quote": {"preferred_couriers": ["圆通", "中通", "韵达", "顺丰"]},
+        },
     )
 
     first = await service.process_session(
@@ -399,7 +405,13 @@ async def test_messages_context_memory_allows_followup_weight_only_quote(mock_co
 async def test_messages_courier_choice_returns_checkout_guide(mock_controller) -> None:
     service = MessagesService(
         controller=mock_controller,
-        config={"max_replies_per_run": 3, "strict_format_reply_enabled": False, "context_memory_enabled": True},
+        config={
+            "max_replies_per_run": 3,
+            "strict_format_reply_enabled": False,
+            "context_memory_enabled": True,
+            "quote_reply_all_couriers": True,
+            "quote": {"preferred_couriers": ["圆通", "中通", "韵达", "顺丰"]},
+        },
     )
 
     quoted = await service.process_session(

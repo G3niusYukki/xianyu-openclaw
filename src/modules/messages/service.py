@@ -165,9 +165,14 @@ class MessagesService:
             "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
         )
         self.force_non_empty_reply = bool(self.config.get("force_non_empty_reply", True))
-        self.non_empty_reply_fallback = str(
-            self.config.get("non_empty_reply_fallback", self.quote_missing_template or DEFAULT_NON_EMPTY_REPLY_FALLBACK)
-        ).strip() or DEFAULT_NON_EMPTY_REPLY_FALLBACK
+        self.non_empty_reply_fallback = (
+            str(
+                self.config.get(
+                    "non_empty_reply_fallback", self.quote_missing_template or DEFAULT_NON_EMPTY_REPLY_FALLBACK
+                )
+            ).strip()
+            or DEFAULT_NON_EMPTY_REPLY_FALLBACK
+        )
         self.strict_format_reply_enabled = bool(self.config.get("strict_format_reply_enabled", False))
         self.quote_reply_all_couriers = bool(self.config.get("quote_reply_all_couriers", True))
         self.quote_reply_max_couriers = max(1, int(self.config.get("quote_reply_max_couriers", 10)))
@@ -964,7 +969,9 @@ class MessagesService:
         has_checkout_context = bool(session_id and context_after.get("courier_choice"))
         if has_checkout_context and (courier_choice is not None or self._is_checkout_followup(message_text)):
             selected_courier = str(context_after.get("courier_choice") or "已选渠道")
-            has_quote_rows = isinstance(context_after.get("last_quote_rows"), list) and bool(context_after.get("last_quote_rows"))
+            has_quote_rows = isinstance(context_after.get("last_quote_rows"), list) and bool(
+                context_after.get("last_quote_rows")
+            )
             if not has_quote_rows:
                 prompt = self.quote_missing_template.format(fields="寄件城市、收件城市、包裹重量（kg）")
                 return self._sanitize_reply(prompt), {
@@ -978,7 +985,9 @@ class MessagesService:
 
             lock_reply, matched = self._build_courier_lock_reply(context_after)
             if courier_choice and not matched:
-                lock_reply = f"当前线路暂未匹配到{selected_courier}报价。\n{self._build_available_couriers_hint(context_after)}"
+                lock_reply = (
+                    f"当前线路暂未匹配到{selected_courier}报价。\n{self._build_available_couriers_hint(context_after)}"
+                )
             return self._sanitize_reply(lock_reply), {
                 "is_quote": False,
                 "courier_locked": bool(matched),
@@ -1102,7 +1111,8 @@ class MessagesService:
                     pending_missing_fields=[],
                     last_quote_rows=[
                         {
-                            "courier": str(result.explain.get("courier") if isinstance(result.explain, dict) else "") or "默认渠道",
+                            "courier": str(result.explain.get("courier") if isinstance(result.explain, dict) else "")
+                            or "默认渠道",
                             "total_fee": round(float(result.total_fee), 2),
                             "eta_days": self._format_eta_days(result.eta_minutes),
                         }
