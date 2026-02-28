@@ -352,6 +352,7 @@ python3 -m src.cli module --action check --target presales
 ```
 
 如果能返回会话列表，且 `module check` 无浏览器运行时阻塞，说明已切到 WS 实时通道。
+
 启动前建议先做模块检查：
 
 ```bash
@@ -440,4 +441,4 @@ docker compose logs -f
 
 ---
 
-**版本**: v4.8.0 | **更新日期**: 2026-02-28
+**版本**: v4.6.0 | **更新日期**: 2026-02-27

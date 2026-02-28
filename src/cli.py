@@ -69,7 +69,7 @@ def _pct(values: list[int], ratio: float) -> int:
     if not values:
         return 0
     ordered = sorted(int(v) for v in values)
-    idx = round((len(ordered) - 1) * max(0.0, min(1.0, float(ratio))))
+    idx = int(round((len(ordered) - 1) * max(0.0, min(1.0, float(ratio)))))
     return int(ordered[idx])
 
 
@@ -190,6 +190,7 @@ def _messages_transport_mode() -> str:
 
 def _messages_requires_browser_runtime() -> bool:
     return _messages_transport_mode() in {"dom", "auto"}
+
 
 def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[str, Any]:
     from src.core.startup_checks import resolve_runtime_mode
@@ -627,6 +628,7 @@ async def cmd_messages(args: argparse.Namespace) -> None:
         )
         _json_out(result)
         return
+
     if action in {"workflow-stats", "workflow-status"}:
         from src.modules.messages.workflow import WorkflowStore
 
@@ -928,74 +930,6 @@ async def cmd_automation(args: argparse.Namespace) -> None:
         return
 
     _json_out({"error": f"Unknown automation action: {action}"})
-
-async def cmd_followup(args: argparse.Namespace) -> None:
-    from src.modules.followup.service import FollowUpEngine, FollowUpPolicy
-
-    policy = FollowUpPolicy(
-        max_touches_per_day=args.max_touches or 2,
-        min_interval_hours=args.min_interval or 4.0,
-    )
-    engine = FollowUpEngine(policy=policy, db_path=args.db_path or "data/followup.db")
-    action = args.action
-
-    if action == "check":
-        if not args.session_id:
-            _json_out({"error": "Specify --session-id"})
-            return
-        eligible, reason = engine.check_eligibility(
-            session_id=args.session_id,
-            account_id=args.account_id,
-            last_read_at=args.last_read_at,
-            last_reply_at=args.last_reply_at,
-        )
-        _json_out({"session_id": args.session_id, "eligible": eligible, "reason": reason})
-        return
-
-    if action == "process":
-        if not args.session_id:
-            _json_out({"error": "Specify --session-id"})
-            return
-        result = engine.process_session(
-            session_id=args.session_id,
-            account_id=args.account_id,
-            last_read_at=args.last_read_at,
-            last_reply_at=args.last_reply_at,
-            dry_run=bool(args.dry_run),
-        )
-        _json_out(result)
-        return
-
-    if action == "dnd-add":
-        if not args.session_id:
-            _json_out({"error": "Specify --session-id"})
-            return
-        engine.add_dnd(args.session_id, reason=args.reason or "user_reject")
-        _json_out({"session_id": args.session_id, "added_to_dnd": True})
-        return
-
-    if action == "dnd-remove":
-        if not args.session_id:
-            _json_out({"error": "Specify --session-id"})
-            return
-        removed = engine.remove_dnd(args.session_id)
-        _json_out({"session_id": args.session_id, "removed_from_dnd": removed})
-        return
-
-    if action == "audit":
-        events = engine.get_audit_log(
-            session_id=args.session_id,
-            account_id=args.account_id,
-            limit=args.limit or 50,
-        )
-        _json_out({"total": len(events), "events": events})
-        return
-
-    if action == "stats":
-        _json_out(engine.get_stats())
-        return
-
-    _json_out({"error": f"Unknown followup action: {action}"})
 
 
 async def _start_presales_module(args: argparse.Namespace) -> dict[str, Any]:
@@ -1810,20 +1744,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from-stage", default="inquiry", help="转化起始阶段")
     p.add_argument("--to-stage", default="ordered", help="转化目标阶段")
 
-    # followup
-    p = sub.add_parser("followup", help="跟进引擎")
-    p.add_argument("--action", required=True, choices=["check", "process", "dnd-add", "dnd-remove", "audit", "stats"])
-    p.add_argument("--session-id", default=None, help="会话ID")
-    p.add_argument("--account-id", default=None, help="账号ID")
-    p.add_argument("--last-read-at", default=None, help="最后已读时间")
-    p.add_argument("--last-reply-at", default=None, help="最后回复时间")
-    p.add_argument("--dry-run", action="store_true", help="仅模拟不执行")
-    p.add_argument("--reason", default=None, help="dnd-add 原因")
-    p.add_argument("--limit", type=int, default=50, help="audit 返回数量")
-    p.add_argument("--max-touches", type=int, default=2, help="每日最大跟进次数")
-    p.add_argument("--min-interval", type=float, default=4.0, help="最小跟进间隔（小时）")
-    p.add_argument("--db-path", default="data/followup.db", help="跟进数据库路径")
-
     return parser
 
 
@@ -1852,7 +1772,6 @@ def main() -> None:
         "module": cmd_module,
         "quote": cmd_quote,
         "growth": cmd_growth,
-        "followup": cmd_followup,
     }
 
     handler = dispatch.get(args.command)

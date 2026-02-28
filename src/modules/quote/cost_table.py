@@ -251,24 +251,51 @@ class CostTableRepository:
         if not origin_norm or not destination_norm:
             return []
 
+        origin_keys = [origin_norm]
+        destination_keys = [destination_norm]
+        origin_region = region_of_location(origin_norm)
+        destination_region = region_of_location(destination_norm)
+        if origin_region and origin_region not in origin_keys:
+            origin_keys.append(origin_region)
+        if destination_region and destination_region not in destination_keys:
+            destination_keys.append(destination_region)
+
         courier_norm = normalize_courier_name(courier) if courier else ""
 
         if courier_norm:
-            exact = self._index_courier_route.get((courier_norm, origin_norm, destination_norm), [])
-            if exact:
-                return self._sort_candidates(exact)[:limit]
+            for origin_key in origin_keys:
+                for destination_key in destination_keys:
+                    exact = self._index_courier_route.get((courier_norm, origin_key, destination_key), [])
+                    if exact:
+                        return self._sort_candidates(exact)[:limit]
 
-            dest_pool = self._index_courier_destination.get((courier_norm, destination_norm), [])
+            for destination_key in destination_keys:
+                dest_pool = self._index_courier_destination.get((courier_norm, destination_key), [])
+                if not dest_pool:
+                    continue
+                scored = self._rank_by_origin_similarity(dest_pool, origin_norm)
+                if not scored and origin_region and origin_region != origin_norm:
+                    scored = self._rank_by_origin_similarity(dest_pool, origin_region)
+                if scored:
+                    return scored[:limit]
+            return []
+
+        for origin_key in origin_keys:
+            for destination_key in destination_keys:
+                exact = self._index_route.get((origin_key, destination_key), [])
+                if exact:
+                    return self._sort_candidates(exact)[:limit]
+
+        for destination_key in destination_keys:
+            dest_pool = self._index_destination.get(destination_key, [])
+            if not dest_pool:
+                continue
             scored = self._rank_by_origin_similarity(dest_pool, origin_norm)
-            return scored[:limit]
-
-        exact = self._index_route.get((origin_norm, destination_norm), [])
-        if exact:
-            return self._sort_candidates(exact)[:limit]
-
-        dest_pool = self._index_destination.get(destination_norm, [])
-        scored = self._rank_by_origin_similarity(dest_pool, origin_norm)
-        return scored[:limit]
+            if not scored and origin_region and origin_region != origin_norm:
+                scored = self._rank_by_origin_similarity(dest_pool, origin_region)
+            if scored:
+                return scored[:limit]
+        return []
 
     def get_stats(self, max_files: int = 30) -> dict:
         self._reload_if_needed()

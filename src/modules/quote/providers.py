@@ -109,10 +109,12 @@ class CostTableMarkupQuoteProvider(IQuoteProvider):
         include_patterns: list[str] | None = None,
         markup_rules: dict[str, Any] | None = None,
         pricing_profile: str = "normal",
+        volume_divisor_default: float | None = None,
     ):
         self.repo = CostTableRepository(table_dir=table_dir, include_patterns=include_patterns or ["*.xlsx", "*.csv"])
         self.pricing_profile = "member" if str(pricing_profile).strip().lower() == "member" else "normal"
         self.markup_rules = _normalize_markup_rules(markup_rules or {})
+        self.volume_divisor_default = float(volume_divisor_default or 0.0) if volume_divisor_default else 0.0
 
     async def get_quote(self, request: QuoteRequest, timeout_ms: int = 3000) -> QuoteResult:
         requested_courier = _requested_courier(request.courier)
@@ -131,7 +133,15 @@ class CostTableMarkupQuoteProvider(IQuoteProvider):
         markup = _resolve_markup(self.markup_rules, row.courier)
         first_add, extra_add = _profile_markup(markup, self.pricing_profile)
 
-        extra_weight = max(0.0, float(request.weight) - 1.0)
+        actual_weight = max(0.0, float(request.weight))
+        divisor = _first_positive(row.throw_ratio, self.volume_divisor_default)
+        volume_weight = _derive_volume_weight_kg(
+            volume_cm3=float(request.volume or 0.0),
+            explicit_volume_weight=float(request.volume_weight or 0.0),
+            divisor=divisor,
+        )
+        billing_weight = max(actual_weight, volume_weight)
+        extra_weight = max(0.0, billing_weight - 1.0)
         sale_first = max(0.0, float(row.first_cost) + first_add)
         sale_extra = max(0.0, float(row.extra_cost) + extra_add)
         extra_fee = extra_weight * sale_extra
@@ -154,6 +164,11 @@ class CostTableMarkupQuoteProvider(IQuoteProvider):
                 "matched_destination": row.destination,
                 "cost_first": row.first_cost,
                 "cost_extra": row.extra_cost,
+                "actual_weight_kg": round(actual_weight, 3),
+                "billing_weight_kg": round(billing_weight, 3),
+                "volume_cm3": round(float(request.volume or 0.0), 3),
+                "volume_weight_kg": round(volume_weight, 3),
+                "volume_divisor": divisor if divisor > 0 else None,
                 "markup_first_add": first_add,
                 "markup_extra_add": extra_add,
                 "source_file": row.source_file,
@@ -176,11 +191,13 @@ class ApiCostMarkupQuoteProvider(IQuoteProvider):
         api_key_env: str = "QUOTE_COST_API_KEY",
         markup_rules: dict[str, Any] | None = None,
         pricing_profile: str = "normal",
+        volume_divisor_default: float | None = None,
     ):
         self.api_url = str(api_url or "").strip()
         self.api_key_env = str(api_key_env or "").strip()
         self.markup_rules = _normalize_markup_rules(markup_rules or {})
         self.pricing_profile = "member" if str(pricing_profile).strip().lower() == "member" else "normal"
+        self.volume_divisor_default = float(volume_divisor_default or 0.0) if volume_divisor_default else 0.0
 
     async def get_quote(self, request: QuoteRequest, timeout_ms: int = 3000) -> QuoteResult:
         if not self.api_url:
@@ -227,7 +244,18 @@ class ApiCostMarkupQuoteProvider(IQuoteProvider):
         if first_cost is None and total_cost is None:
             raise QuoteProviderError("Remote cost api missing first_cost/total_cost")
 
-        extra_weight = max(0.0, float(request.weight) - 1.0)
+        volume_weight = _derive_volume_weight_kg(
+            volume_cm3=float(request.volume or 0.0),
+            explicit_volume_weight=float(request.volume_weight or 0.0),
+            divisor=self.volume_divisor_default,
+        )
+        api_billable_weight = _to_float(parsed.get("billable_weight"))
+        billing_weight = max(
+            float(request.weight or 0.0),
+            float(api_billable_weight or 0.0),
+            float(volume_weight or 0.0),
+        )
+        extra_weight = max(0.0, billing_weight - 1.0)
         if first_cost is None:
             first_cost = max(0.0, float(total_cost or 0.0) - (extra_weight * float(extra_cost or 0.0)))
         if extra_cost is None:
@@ -257,6 +285,12 @@ class ApiCostMarkupQuoteProvider(IQuoteProvider):
                 "cost_first": first_cost,
                 "cost_extra": extra_cost,
                 "cost_total_raw": total_cost,
+                "actual_weight_kg": round(float(request.weight or 0.0), 3),
+                "billing_weight_kg": round(billing_weight, 3),
+                "volume_cm3": round(float(request.volume or 0.0), 3),
+                "volume_weight_kg": round(volume_weight, 3),
+                "api_billable_weight_kg": api_billable_weight,
+                "volume_divisor": self.volume_divisor_default if self.volume_divisor_default > 0 else None,
                 "markup_first_add": first_add,
                 "markup_extra_add": extra_add,
                 "api_provider": provider_name,
@@ -403,6 +437,29 @@ def _parse_cost_api_response(data: Any) -> dict[str, Any]:
         or payload.get("extra_price")
         or payload.get("续重"),
         "total_cost": payload.get("total_cost") or payload.get("total_fee") or payload.get("price"),
+        "billable_weight": payload.get("billable_weight")
+        or payload.get("chargeable_weight")
+        or payload.get("计费重")
+        or payload.get("weight_billable"),
         "eta_minutes": payload.get("eta_minutes") or payload.get("eta"),
         "confidence": payload.get("confidence"),
     }
+
+
+def _first_positive(*values: Any) -> float:
+    for value in values:
+        v = _to_float(value)
+        if v is not None and v > 0:
+            return float(v)
+    return 0.0
+
+
+def _derive_volume_weight_kg(volume_cm3: float, explicit_volume_weight: float, divisor: float) -> float:
+    explicit = _to_float(explicit_volume_weight)
+    if explicit is not None and explicit > 0:
+        return float(explicit)
+    volume = _to_float(volume_cm3)
+    div = _to_float(divisor)
+    if volume is None or volume <= 0 or div is None or div <= 0:
+        return 0.0
+    return round(float(volume) / float(div), 3)

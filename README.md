@@ -27,25 +27,6 @@
 
 ---
 
-## 4.8.0 更新摘要（2026-02-27）
-
-- **Lite 运行时**：支持 Playwright 本地浏览器，无需 OpenClaw Gateway 即可运行（`runtime: lite`）。
-- **模块化启动**：`module` 命令支持按模块独立启动（售前/运营/售后），后台运行与状态管理。
-- **飞书告警通知**：Workflow 启动/心跳/SLA 告警与恢复消息推送到飞书机器人。
-- **自检增强**：`doctor --strict` 严格模式，支持 `skip-gateway`/`skip-quote` 跳过特定检查。
-- **自动化配置**：`automation` 命令一键配置轮询参数与飞书 webhook。
-- **Windows 一键脚本**：新增 16 个 `.bat` 脚本，支持 launcher 菜单、lite 快速启动、模块管理。
-- **报价 KPI 修复**：被合规拦截的报价不计入成功，新增 `quote_blocked_by_policy` 追溯字段。
-- **CI 收敛**：CI workflow 改为聚焦真实阻断问题（导入/重复定义/运行错误），避免纯样式噪音导致发布阻塞。
-
-## 4.7.0 更新摘要（2026-02-27）
-
-- **两阶段报价工作流**：询价消息先发快速确认（1-3s 内），再异步发送精确报价，保证首响 SLA。
-- **报价多源容灾**：成本源优先级 API → 热缓存 → 本地成本表 → 兜底模板，熔断与半开恢复，报价快照追溯。
-- **合规跟进引擎**：已读未回场景的自动跟进，支持每日上限、冷却间隔、静默时段、DND 退订、审计回放。
-- **零门槛诊断**：`python -m src.cli doctor` 一键检查 Python/Docker/配置/端口/依赖，输出修复建议。
-- **CLI 增强**：新增 `followup` 命令管理跟进策略与 DND 列表。
-
 ## 4.6.0 更新摘要（2026-02-27）
 
 - 一站式部署向导升级：网关 AI 与业务文案 AI 分离配置，自动生成 token 与启动后健康检查。
@@ -85,9 +66,6 @@ AI: 📊 今日浏览 1,247 | 想要 89 | 成交 12 | 营收 ¥38,700
 | ✨ | **一键擦亮** | 一句话批量擦亮全部商品，模拟人工随机间隔 |
 | 💰 | **价格管理** | 单个调价、批量调价、智能定价策略 |
 | 💬 | **消息自动回复 + 自动报价** | 询价识别、缺参补问、结构化报价、失败降级与合规回复 |
-| ⚡ | **两阶段报价工作流** | 首响 1-3s 快速确认 + 异步精确报价，保证 SLA |
-| 🔄 | **报价多源容灾** | API → 热缓存 → 成本表 → 兜底模板，熔断与追溯 |
-| 📢 | **合规跟进引擎** | 已读未回自动跟进，频次上限、静默时段、DND 退订 |
 | 🛡️ | **合规策略中心** | 账号级/会话级分级规则、发送前拦截、审计回放 |
 | 📦 | **订单履约闭环（MVP）** | 下单状态映射、虚拟/实物交付动作、售后模板、人工接管与追溯 |
 | ⚙️ | **常驻 Workflow Worker** | 7x24 轮询处理、幂等去重、崩溃恢复、人工接管跳过 |
@@ -243,9 +221,6 @@ python -m src.cli growth    --action assign --experiment-id exp_reply --subject-
 python -m src.cli growth    --action funnel --days 7 --bucket day
 python -m src.cli ai        --action cost-stats
 python -m src.cli doctor    --strict
-python -m src.cli followup  --action check --session-id s1
-python -m src.cli followup  --action dnd-add --session-id s1 --reason "user_reject"
-python -m src.cli followup  --action audit --limit 20
 python -m src.cli automation --action setup --enable-feishu --feishu-webhook "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
 python -m src.cli automation --action status
 python -m src.cli automation --action test-feishu
@@ -440,9 +415,7 @@ xianyu-openclaw/
 │       ├── content/             # AI 内容生成
 │       ├── media/               # 图片处理（Pillow）
 │       ├── messages/            # 自动回复与询价分流
-│       ├── quote/               # 自动报价引擎与 provider 适配层
-│       ├── followup/            # 合规跟进引擎（已读未回场景）
-│       └── orders/              # 订单履约服务
+│       └── quote/               # 自动报价引擎与 provider 适配层
 ├── config/                      # 配置模板
 ├── scripts/init.sh              # Docker 容器 Python 环境初始化
 ├── docker-compose.yml           # 一键部署
@@ -464,10 +437,10 @@ pip install -r requirements.txt
 python -m src.cli --help
 
 # 测试
-python -m pytest tests/ -v --tb=short
+pytest tests/
 
 # 代码检查
-ruff check src/ tests/ --ignore I001,E501,UP012,RUF100
+ruff check src/
 ```
 
 ---

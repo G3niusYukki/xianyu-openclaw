@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -304,20 +305,56 @@ class PlaywrightBrowserClient:
         if self._context is None:
             return
 
-        cookies = []
-        for item in cookies_str.split(";"):
+        name_re = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+        parsed_pairs: dict[str, str] = {}
+
+        # header/cookies.txt 风格：k=v; k2=v2
+        for item in re.split(r"[;\n\r]+", str(cookies_str or "")):
             item = item.strip()
             if "=" not in item:
                 continue
             name, value = item.split("=", 1)
-            cookies.append(
-                {
-                    "name": name.strip(),
-                    "value": value.strip(),
-                    "domain": domain,
-                    "path": "/",
-                }
-            )
+            name = name.strip()
+            value = value.strip()
+            if not name or not name_re.fullmatch(name):
+                continue
+            parsed_pairs[name] = value
 
-        if cookies:
+        # 表格风格：name<TAB>value
+        for line in str(cookies_str or "").splitlines():
+            cols = [c.strip() for c in re.split(r"\t+", line) if c.strip()]
+            if len(cols) < 2:
+                continue
+            name = cols[0]
+            value = cols[1]
+            if not name_re.fullmatch(name):
+                continue
+            parsed_pairs[name] = value
+
+        cookies = [
+            {
+                "name": name,
+                "value": value,
+                "domain": domain,
+                "path": "/",
+            }
+            for name, value in parsed_pairs.items()
+        ]
+
+        if not cookies:
+            self.logger.warning("No valid cookies parsed from XIANYU_COOKIE_1; skip cookie seeding for Playwright context")
+            return
+
+        try:
             await self._context.add_cookies(cookies)
+        except Exception as exc:
+            accepted = 0
+            for cookie in cookies:
+                try:
+                    await self._context.add_cookies([cookie])
+                    accepted += 1
+                except Exception:
+                    continue
+            if accepted <= 0:
+                raise exc
+            self.logger.warning(f"Partially accepted cookies for {domain}: {accepted}/{len(cookies)}")

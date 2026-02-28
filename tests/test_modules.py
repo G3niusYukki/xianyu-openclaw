@@ -118,6 +118,33 @@ def test_messages_quote_keywords_fallback_when_empty_configured() -> None:
     assert service._is_quote_request("安徽到上海 1kg 圆通多少钱") is True
 
 
+def test_messages_quote_detection_avoids_false_positive_for_logistics_status() -> None:
+    service = MessagesService(controller=None, config={"quote_intent_keywords": []})
+    assert service._is_quote_request("你好 到货了吗") is False
+    assert service._is_quote_request("你好 到货了吗 2kg") is False
+
+
+def test_messages_extract_locations_supports_compact_separator_format() -> None:
+    origin, destination = MessagesService._extract_locations("杭州～北京～2kg")
+    assert origin == "杭州"
+    assert destination == "北京"
+
+
+def test_messages_extract_locations_supports_labeled_format() -> None:
+    origin, destination = MessagesService._extract_locations("寄件杭州 收件北京 2kg")
+    assert origin == "杭州"
+    assert destination == "北京"
+
+
+def test_messages_build_quote_request_extracts_volume_and_volume_weight() -> None:
+    service = MessagesService(controller=None, config={})
+    req, missing = service._build_quote_request("杭州～北京～2kg 30x20x10cm 体积重1.6kg")
+    assert missing == []
+    assert req is not None
+    assert req.volume == 6000
+    assert req.volume_weight == 1.6
+
+
 @pytest.mark.asyncio
 async def test_messages_auto_reply_unread_dry_run(mock_controller) -> None:
     service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 5})
@@ -193,8 +220,134 @@ async def test_messages_quote_request_missing_fields_returns_followup_question(m
     detail = result["details"][0]
 
     assert detail["is_quote"] is True
+    assert detail["quote_need_info"] is True
     assert detail["quote_success"] is False
-    assert "请补充" in detail["reply"]
+    assert "咨询格式" in detail["reply"]
+
+
+@pytest.mark.asyncio
+async def test_messages_strict_format_mode_forces_standard_template(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": True})
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "q_strict",
+                "peer_name": "买家S",
+                "item_title": "快递服务",
+                "last_message": "在吗",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.auto_reply_unread(limit=5, dry_run=True)
+    detail = result["details"][0]
+
+    assert detail["is_quote"] is True
+    assert detail["quote_need_info"] is True
+    assert detail["format_enforced"] is True
+    assert "咨询格式" in detail["reply"]
+
+
+@pytest.mark.asyncio
+async def test_messages_non_strict_mode_keeps_general_reply_for_non_quote(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": False})
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "q_non_strict",
+                "peer_name": "买家N",
+                "item_title": "快递服务",
+                "last_message": "这个商品有货吗",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.auto_reply_unread(limit=5, dry_run=True)
+    detail = result["details"][0]
+
+    assert detail["is_quote"] is False
+    assert "咨询格式" not in detail["reply"]
+
+
+@pytest.mark.asyncio
+async def test_messages_greeting_forces_standard_template_even_non_strict(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": False})
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "q_greeting",
+                "peer_name": "买家G",
+                "item_title": "快递服务",
+                "last_message": "你好",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.auto_reply_unread(limit=5, dry_run=True)
+    detail = result["details"][0]
+
+    assert detail["is_quote"] is True
+    assert detail["quote_need_info"] is True
+    assert detail["format_enforced"] is True
+    assert detail["format_enforced_reason"] == "greeting"
+    assert "咨询格式" in detail["reply"]
+
+
+@pytest.mark.asyncio
+async def test_messages_get_unread_sessions_fallback_to_dom_when_ws_not_ready(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"transport": "auto", "strict_format_reply_enabled": True})
+    ws_transport = Mock()
+    ws_transport.get_unread_sessions = AsyncMock(return_value=[])
+    ws_transport.is_ready = Mock(return_value=False)
+    service._ensure_ws_transport = AsyncMock(return_value=ws_transport)
+    service._get_unread_sessions_dom = AsyncMock(
+        return_value=[
+            {
+                "session_id": "dom_1",
+                "peer_name": "买家D",
+                "item_title": "快递服务",
+                "last_message": "你好",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.get_unread_sessions(limit=5)
+
+    assert len(result) == 1
+    assert result[0]["session_id"] == "dom_1"
+    service._get_unread_sessions_dom.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_messages_reply_to_session_fallback_to_dom_when_ws_send_failed(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"transport": "auto", "strict_format_reply_enabled": True})
+    ws_transport = Mock()
+    ws_transport.send_text = AsyncMock(return_value=False)
+    service._ensure_ws_transport = AsyncMock(return_value=ws_transport)
+    service._send_reply_on_page = AsyncMock(return_value=True)
+
+    sent = await service.reply_to_session("session_dom_fallback", "咨询格式：寄件城市～收件城市～重量（多少kg）")
+
+    assert sent is True
+    service._send_reply_on_page.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_messages_ws_mode_does_not_fallback_to_dom_when_ws_send_failed(mock_controller) -> None:
+    service = MessagesService(controller=mock_controller, config={"transport": "ws", "strict_format_reply_enabled": True})
+    ws_transport = Mock()
+    ws_transport.send_text = AsyncMock(return_value=False)
+    service._ensure_ws_transport = AsyncMock(return_value=ws_transport)
+    service._send_reply_on_page = AsyncMock(return_value=True)
+
+    sent = await service.reply_to_session("session_ws_only", "咨询格式：寄件城市～收件城市～重量（多少kg）")
+
+    assert sent is False
+    service._send_reply_on_page.assert_not_called()
 
 
 @pytest.mark.asyncio

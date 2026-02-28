@@ -1,0 +1,280 @@
+app:
+  name: xianyu-openclaw
+  version: 4.1.0
+  debug: false
+  log_level: INFO
+  data_dir: data
+  logs_dir: logs
+openclaw:
+  timeout: 30
+  retry_times: 3
+ai:
+  provider: deepseek
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+  temperature: 0.7
+  max_tokens: 1000
+  fallback_enabled: true
+  fallback_model: gpt-3.5-turbo
+database:
+  type: sqlite
+  path: data/agent.db
+  max_connections: 5
+  timeout: 30
+accounts:
+- id: account_1
+  name: 主账号
+  cookie: ${XIANYU_COOKIE_1}
+  priority: 1
+  enabled: true
+default_account: account_1
+scheduler:
+  enabled: false
+  timezone: Asia/Shanghai
+  polish:
+    enabled: true
+    cron: 0 9 * * *
+  metrics:
+    enabled: true
+    cron: 0 */4 * * *
+media:
+  max_image_size: 5242880
+  supported_formats:
+  - jpg
+  - jpeg
+  - png
+  - webp
+  output_format: jpeg
+  output_quality: 85
+  max_width: 1500
+  max_height: 1500
+  watermark:
+    enabled: false
+    text: 闲鱼助手
+    position: bottom-right
+    font_size: 24
+    color: '#FFFFFF'
+content:
+  title:
+    max_length: 25
+    min_length: 10
+    keywords_enabled: true
+  description:
+    max_length: 500
+    min_length: 50
+    structure_enabled: true
+  templates:
+    enabled: true
+    path: config/templates
+browser:
+  headless: true
+  user_agent: ''
+  viewport:
+    width: 1280
+    height: 800
+  delay:
+    min: 1
+    max: 3
+  upload_timeout: 60
+messages:
+  enabled: true
+  max_replies_per_run: 10
+  fast_first_reply_enabled: true
+  first_reply_target_seconds: 3.0
+  reuse_message_page: true
+  first_reply_delay_seconds:
+  - 0.25
+  - 0.8
+  inter_reply_delay_seconds:
+  - 0.4
+  - 1.2
+  send_confirm_delay_seconds:
+  - 0.15
+  - 0.35
+  followup_quote_enabled: true
+  followup_quote_delay_seconds:
+  - 0.6
+  - 1.5
+  reply_prefix: ''
+  default_reply: 您好，宝贝在的，感兴趣可以直接拍下。
+  virtual_default_reply: 在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。
+  virtual_product_keywords:
+  - 虚拟
+  - 卡密
+  - 激活码
+  - 兑换码
+  - CDK
+  - 代下单
+  - 代充
+  - 代订
+  intent_rules:
+  - name: card_code_delivery
+    priority: 10
+    keywords:
+    - 卡密
+    - 兑换码
+    - 激活码
+    - CDK
+    - 授权码
+    - 序列号
+    reply: 这是虚拟商品，付款后会通过平台聊天发卡密/兑换信息，请按商品说明使用。
+  - name: online_fulfillment
+    priority: 20
+    keywords:
+    - 代下单
+    - 代拍
+    - 代充
+    - 代购
+    - 代订
+    reply: 支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。
+  - name: delivery_eta
+    priority: 30
+    keywords:
+    - 多久发
+    - 发货时间
+    - 什么时候发
+    - 多久到账
+    patterns:
+    - \d+\s*分钟
+    - \d+\s*小时
+    reply: 虚拟商品通常付款后几分钟内处理，高峰期会稍有延迟，我会尽快给你。
+  keyword_replies:
+    还在: 在的，商品还在，直接拍就可以。
+    包邮: 默认不包邮，具体看地区可以商量。
+    最低: 价格已经尽量实在了，诚心要的话可以小刀。
+  outbound_compliance_enabled: true
+  outbound_block_keywords:
+  - 微信
+  - vx
+  - qq
+  - qq群
+  - 站外
+  - 私下交易
+  - 加我
+  outbound_min_interval_seconds: 1
+  outbound_max_per_session_hour: 6
+  outbound_max_per_session_day: 20
+  fast_reply_enabled: true
+  reply_target_seconds: 2.8
+  workflow:
+    db_path: data/workflow.db
+    poll_interval_seconds: 4.0
+    scan_limit: 25
+    claim_limit: 8
+    lease_seconds: 60
+    max_attempts: 3
+    backoff_seconds: 2
+    notifications:
+      feishu:
+        enabled: false
+        notify_on_start: false
+        notify_on_alert: true
+        notify_recovery: true
+        heartbeat_minutes: 30
+        bot_name: 闲鱼自动化助手
+quote:
+  enabled: true
+  mode: cost_table_plus_markup
+  origin_city: 安徽
+  pricing_profile: normal
+  preferred_couriers:
+  - 圆通
+  - 中通
+  - 申通
+  - 韵达
+  - 菜鸟裹裹
+  - 极兔
+  - 德邦
+  - 顺丰
+  - 京东
+  - 邮政
+  cost_table_dir: data/quote_costs
+  cost_table_patterns:
+  - '*.xlsx'
+  - '*.csv'
+  markup_rules:
+    default:
+      normal_first_add: 0.5
+      member_first_add: 0.25
+      normal_extra_add: 0.5
+      member_extra_add: 0.3
+    圆通:
+      normal_first_add: 0.56
+      member_first_add: 0.3
+      normal_extra_add: 0.5
+      member_extra_add: 0.3
+    韵达:
+      normal_first_add: 0.87
+      member_first_add: 0.57
+      normal_extra_add: 0.4
+      member_extra_add: 0.3
+    中通:
+      normal_first_add: 0.6
+      member_first_add: 0.3
+      normal_extra_add: 0.6
+      member_extra_add: 0.4
+    申通:
+      normal_first_add: 0.5
+      member_first_add: 0.25
+      normal_extra_add: 0.5
+      member_extra_add: 0.3
+    菜鸟裹裹:
+      normal_first_add: 0.5
+      member_first_add: 0.25
+      normal_extra_add: 0.5
+      member_extra_add: 0.3
+    极兔:
+      normal_first_add: 0.5
+      member_first_add: 0.25
+      normal_extra_add: 0.5
+      member_extra_add: 0.3
+    德邦:
+      normal_first_add: 0.7
+      member_first_add: 0.4
+      normal_extra_add: 0.5
+      member_extra_add: 0.3
+    顺丰:
+      normal_first_add: 0.2
+      member_first_add: 0.2
+      normal_extra_add: 0.3
+      member_extra_add: 0.3
+    京东:
+      normal_first_add: 0.7
+      member_first_add: 0.3
+      normal_extra_add: 0.5
+      member_extra_add: 0.3
+    邮政:
+      normal_first_add: 0.5
+      member_first_add: 0.25
+      normal_extra_add: 0.5
+      member_extra_add: 0.4
+  cost_api_url: ''
+  cost_api_key: ${QUOTE_COST_API_KEY}
+  cost_api_timeout_seconds: 3
+  cost_api_headers: {}
+  api_fallback_to_table_parallel: true
+  api_prefer_max_wait_seconds: 1.2
+  currency: CNY
+  first_weight_kg: 1.0
+  first_price: 8.0
+  extra_per_kg: 2.5
+  service_fee: 1.0
+  urgency_fee: 4.0
+  inter_city_extra: 2.0
+  remote_extra: 6.0
+  remote_keywords:
+  - 新疆
+  - 西藏
+  - 青海
+  - 甘肃
+  - 内蒙古
+  - 海南
+  eta_same_city_minutes: 90
+  eta_inter_city_minutes: 360
+  valid_minutes: 15
+  remote_api_url: ''
+  remote_api_key: ${QUOTE_API_KEY}
+  timeout_seconds: 3
+rules:
+  path: config/rules.yaml

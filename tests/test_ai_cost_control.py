@@ -56,3 +56,21 @@ def test_ai_usage_mode_with_budget_and_cache_hits() -> None:
     assert t2 == t1
     assert stats["ai_calls"] == 1
     assert stats["cache_hits"] >= 1
+
+
+def test_placeholder_api_key_is_treated_as_missing(monkeypatch) -> None:
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-fallback-should-not-be-used")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    service = ContentService(
+        {
+            "provider": "aliyun_bailian",
+            "api_key": "${DASHSCOPE_API_KEY}",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen-plus-latest",
+        }
+    )
+
+    assert service.api_key is None
+    assert service.client is None

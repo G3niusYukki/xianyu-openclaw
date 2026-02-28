@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import cgi
 import csv
 import io
 import json
@@ -15,19 +16,12 @@ import sys
 import time
 import zipfile
 from datetime import datetime, timedelta
-from email.parser import BytesParser
-from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import yaml
-
-try:
-    import cgi
-except ModuleNotFoundError:  # pragma: no cover - Python 3.13+
-    cgi = None  # type: ignore[assignment]
 
 from src.core.config import get_config
 from src.modules.messages.reply_engine import ReplyStrategyEngine
@@ -312,11 +306,11 @@ class ModuleConsole:
 
 DEFAULT_WEIGHT_TEMPLATE = (
     "您好，{origin} 到 {destination}，按实际重量 {weight}kg 预估，"
-    "{courier} 报价约 ¥{price}，可直接拍下。"
+    "{courier} 报价约 ¥{price}（{price_breakdown}）。预计时效约 {eta_days}。"
 )
 DEFAULT_VOLUME_TEMPLATE = (
     "您好，{origin} 到 {destination}，按体积重规则（{volume_formula}）预估，"
-    "{courier} 报价约 ¥{price}，可直接拍下。"
+    "{courier} 报价约 ¥{price}（{price_breakdown}）。预计时效约 {eta_days}。"
 )
 
 
@@ -795,6 +789,105 @@ class MimicOps:
         if parse_errors:
             stats["parse_error"] = " | ".join(parse_errors[:5])
         return {"success": True, "stats": stats}
+
+    def _workflow_db_path(self) -> Path:
+        messages_cfg = get_config().get_section("messages", {})
+        workflow_cfg = messages_cfg.get("workflow", {}) if isinstance(messages_cfg.get("workflow"), dict) else {}
+        raw = str(workflow_cfg.get("db_path", "data/workflow.db") or "data/workflow.db")
+        path = Path(raw)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path
+
+    def _query_message_stats_from_workflow(self) -> dict[str, Any] | None:
+        db_path = self._workflow_db_path()
+        if not db_path.exists():
+            return None
+
+        reply_states = ("REPLIED", "QUOTED")
+        ok_status = ("success", "forced")
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+
+                total_replied = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM session_state_transitions
+                        WHERE status IN (?, ?)
+                          AND to_state IN (?, ?)
+                        """,
+                        (ok_status[0], ok_status[1], reply_states[0], reply_states[1]),
+                    ).fetchone()["c"]
+                )
+
+                today_replied = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM session_state_transitions
+                        WHERE status IN (?, ?)
+                          AND to_state IN (?, ?)
+                          AND date(datetime(created_at), 'localtime') = date('now', 'localtime')
+                        """,
+                        (ok_status[0], ok_status[1], reply_states[0], reply_states[1]),
+                    ).fetchone()["c"]
+                )
+
+                recent_replied = int(
+                    conn.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM session_state_transitions
+                        WHERE status IN (?, ?)
+                          AND to_state IN (?, ?)
+                          AND datetime(created_at) >= datetime('now', '-60 minutes')
+                        """,
+                        (ok_status[0], ok_status[1], reply_states[0], reply_states[1]),
+                    ).fetchone()["c"]
+                )
+
+                total_conversations = int(conn.execute("SELECT COUNT(*) AS c FROM session_tasks").fetchone()["c"])
+                total_messages = int(conn.execute("SELECT COUNT(*) AS c FROM workflow_jobs").fetchone()["c"])
+
+                hourly_rows = conn.execute(
+                    """
+                    SELECT strftime('%H', datetime(created_at), 'localtime') AS h, COUNT(*) AS c
+                    FROM session_state_transitions
+                    WHERE status IN (?, ?)
+                      AND to_state IN (?, ?)
+                      AND datetime(created_at) >= datetime('now', '-24 hours')
+                    GROUP BY h
+                    """,
+                    (ok_status[0], ok_status[1], reply_states[0], reply_states[1]),
+                ).fetchall()
+
+                daily_rows = conn.execute(
+                    """
+                    SELECT strftime('%Y-%m-%d', datetime(created_at), 'localtime') AS d, COUNT(*) AS c
+                    FROM session_state_transitions
+                    WHERE status IN (?, ?)
+                      AND to_state IN (?, ?)
+                      AND date(datetime(created_at), 'localtime') >= date('now', 'localtime', '-6 days')
+                    GROUP BY d
+                    """,
+                    (ok_status[0], ok_status[1], reply_states[0], reply_states[1]),
+                ).fetchall()
+
+            hourly = {str(r["h"]): int(r["c"]) for r in hourly_rows if r["h"] is not None}
+            daily = {str(r["d"]): int(r["c"]) for r in daily_rows if r["d"] is not None}
+            return {
+                "total_replied": total_replied,
+                "today_replied": today_replied,
+                "recent_replied": recent_replied,
+                "total_conversations": total_conversations,
+                "total_messages": total_messages,
+                "hourly_replies": hourly,
+                "daily_replies": daily,
+            }
+        except Exception:
+            return None
 
     @staticmethod
     def _safe_filename(name: str) -> str:
@@ -1828,12 +1921,17 @@ class MimicOps:
         route_stat_payload = route_stats.get("stats", {}) if isinstance(route_stats, dict) else {}
         route_stats_by_courier = route_stat_payload.get("courier_details", {}) if isinstance(route_stat_payload, dict) else {}
 
-        message_stats = {
-            "total_replied": int(presales_sla.get("quote_total", 0) or 0),
-            "today_replied": int(presales_sla.get("quote_total", 0) or 0),
+        workflow_states = workflow.get("states", {}) if isinstance(workflow.get("states"), dict) else {}
+        workflow_jobs = workflow.get("jobs", {}) if isinstance(workflow.get("jobs"), dict) else {}
+        fallback_total_replied = int(workflow_states.get("REPLIED", 0) or 0) + int(workflow_states.get("QUOTED", 0) or 0)
+        fallback_total_conversations = sum(int(v or 0) for v in workflow_states.values())
+        fallback_total_messages = sum(int(v or 0) for v in workflow_jobs.values())
+        message_stats = self._query_message_stats_from_workflow() or {
+            "total_replied": fallback_total_replied,
+            "today_replied": fallback_total_replied,
             "recent_replied": int(presales_sla.get("event_count", 0) or 0),
-            "total_conversations": int(workflow.get("manual_takeover_sessions", 0) or 0),
-            "total_messages": int(presales_sla.get("event_count", 0) or 0),
+            "total_conversations": fallback_total_conversations,
+            "total_messages": fallback_total_messages,
             "hourly_replies": {},
             "daily_replies": {},
         }
@@ -2294,12 +2392,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     function buildDailySeries(dailyMap) {
+      const localDateKey = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return y + "-" + m + "-" + day;
+      };
       const labels = [];
       const values = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
-        const key = d.toISOString().slice(0, 10);
+        const key = localDateKey(d);
         labels.push((d.getMonth() + 1) + "/" + d.getDate());
         values.push(Number((dailyMap || {})[key] || 0));
       }
@@ -2674,48 +2778,11 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
     </div>
 
     <div class="guide-card">
-      <strong>引导式流程：</strong><br>
-      第1步：Cookie页更新登录态。<br>
-      第2步：路线数据页导入成本报价表。<br>
-      第3步：回复模板页按你的话术保存模板。<br>
-      第4步：去“测试调试”页验证，再回首页启动服务。
-    </div>
-
-    <div class="info-box">
-      <p><strong>Cookie 详细获取步骤（推荐按这个顺序）</strong></p>
-      <p>1. 用 Chrome / Edge 打开闲鱼并保持登录状态。</p>
-      <p>2. 按 F12 打开开发者工具，切到 Network（网络）标签。</p>
-      <p>3. 刷新页面，点击任意 goofish.com 请求。</p>
-      <p>4. 在 Request Headers 找到 <code>Cookie:</code>，复制整行值。</p>
-      <p>5. 粘贴到下方输入框，先点“智能解析”，再点“更新Cookie”。</p>
-      <p>6. 页面提示成功后，回首页查看 Cookie 长度与连接状态。</p>
-    </div>
-
-    <details class="cookie-help">
-      <summary>展开：0基础 Cookie 复制方式、关键字段、故障排查</summary>
-      <div class="cookie-help-content">
-        <p><strong>A. 复制方式（都支持）</strong></p>
-        <p>1) 直接复制请求头 Cookie 字符串：<code>a=1; b=2; ...</code></p>
-        <p>2) 复制浏览器 Cookie 表格文本（Name / Value / Domain ...）</p>
-        <p>3) 导入 <code>cookies.txt</code>（Netscape 格式）或 JSON 导出</p>
-        <p><strong>B. 关键字段（缺失会降低可用性）</strong></p>
-        <p><code>_tb_token_</code>、<code>cookie2</code>、<code>sgcookie</code>、<code>unb</code></p>
-        <p><strong>C. 常见失败原因</strong></p>
-        <p>1) 复制了过期 Cookie（重新登录后再复制）</p>
-        <p>2) 只复制了部分字段（必须复制完整 Cookie 行）</p>
-        <p>3) 粘贴了乱码/空格破损（先点“智能解析”再保存）</p>
-        <p>4) 浏览器未登录闲鱼（先确认网页里账号处于登录态）</p>
-        <div class="cookie-help-tip">
-          安全提示：Cookie 等同账号登录态，不要发到群聊或交给他人。
-        </div>
-      </div>
-    </details>
-
-    <div class="info-box">
-      <p><strong>更新后如何确认生效：</strong></p>
-      <p>1. 点击“加载当前”，确认输入框能回显最新 Cookie。</p>
-      <p>2. 去首页“立即刷新状态”，查看闲鱼连接是否正常。</p>
-      <p>3. 若仍异常，重新登录网页后再次复制并更新。</p>
+      <strong>Cookie 极简流程（默认推荐）</strong><br>
+      1. 上传插件导出的 <code>cookies.txt / JSON / ZIP</code>，点击“上传并一键更新”。<br>
+      2. 或者直接粘贴 Cookie 字符串，点击“粘贴并更新”。<br>
+      3. 更新后回首页点“刷新状态”，看连接是否正常。<br>
+      需要详细说明时，再展开下方“高级选项”。
     </div>
 
     <div id="currentCookie" class="current-cookie"><strong>当前Cookie：</strong> <span id="currentCookieText"></span></div>
@@ -2729,55 +2796,40 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
 
     <div id="cookieTab" class="tab-content active">
       <div class="section">
-        <h2 class="section-title">Cookie管理</h2>
-        <div class="form-group">
-          <label for="cookieFile">导入 Cookie 文件（可选）</label>
-          <input type="file" id="cookieFile" accept=".txt,.json,.log,.cookies">
-          <div class="hint">支持 header 文本、Netscape cookies.txt、JSON 导出。</div>
-        </div>
-        <div class="info-box">
-          <p><strong>插件一键导入（已接入）：Get-cookies.txt-LOCALLY</strong></p>
-          <p>1. 先点击“下载内置插件包”（项目已内置，不依赖外网）。</p>
-          <p>2. 解压后打开浏览器扩展页，加载 <code>Get-cookies.txt-LOCALLY/src</code>。</p>
-          <p>3. 在闲鱼页面导出 <code>cookies.txt</code> / JSON / ZIP。</p>
-          <p>4. 下方选择导出文件，点击“插件一键导入并更新”。</p>
-          <p>5. 系统会自动识别并写入 <code>XIANYU_COOKIE_1</code>。</p>
-          <div class="button-group" style="margin-top: 8px;">
-            <button class="btn-secondary" title="下载项目内置的插件源码包，用于本地离线安装" onclick="window.location.href='/api/download-cookie-plugin'">下载内置插件包</button>
-          </div>
-          <p><a href="https://github.com/kairi003/Get-cookies.txt-LOCALLY" target="_blank" rel="noopener">插件项目地址（GitHub）</a></p>
-        </div>
-        <details class="cookie-help">
-          <summary>展开：浏览器本地安装插件（Chrome / Edge）</summary>
-          <div class="cookie-help-content">
-            <p><strong>Chrome：</strong></p>
-            <p>1) 打开 <code>chrome://extensions</code> → 开启“开发者模式”</p>
-            <p>2) 点击“加载已解压的扩展程序”</p>
-            <p>3) 选择解压目录里的 <code>Get-cookies.txt-LOCALLY/src</code></p>
-            <p><strong>Edge：</strong></p>
-            <p>1) 打开 <code>edge://extensions</code> → 开启“开发人员模式”</p>
-            <p>2) 点击“加载解压缩的扩展”</p>
-            <p>3) 选择解压目录里的 <code>Get-cookies.txt-LOCALLY/src</code></p>
-            <div class="cookie-help-tip">提示：必须选择 src 目录，不是整个仓库根目录。</div>
-          </div>
-        </details>
+        <h2 class="section-title">Cookie管理（极简）</h2>
         <div class="form-group">
           <label for="cookiePluginFile">插件导出文件（支持多选）</label>
           <input type="file" id="cookiePluginFile" accept=".txt,.json,.log,.cookies,.zip" multiple>
-          <div class="hint">兼容 Get-cookies.txt-LOCALLY 导出文件，ZIP 内会自动扫描 cookies 文件。</div>
+          <div class="hint">推荐：直接上传插件导出的 cookies 文件，系统会自动识别并更新。</div>
         </div>
         <div class="form-group">
           <label for="cookie">Cookie字符串</label>
           <textarea id="cookie" placeholder="支持直接粘贴表格文本 / Cookie请求头 / cookies.txt / JSON"></textarea>
         </div>
         <div class="button-group">
-          <button class="btn-primary" title="上传插件导出文件并自动更新到系统 Cookie" onclick="importCookiePlugin()">插件一键导入并更新</button>
-          <button class="btn-secondary" title="读取本地 Cookie 文件并填充到输入框" onclick="importCookieFile()">导入文件</button>
-          <button class="btn-secondary" title="智能识别并标准化 Cookie 文本" onclick="normalizeCookieText()">智能解析</button>
-          <button class="btn-secondary" title="读取当前已保存的 Cookie 到输入框" onclick="loadCurrentCookie()">加载当前</button>
-          <button class="btn-primary" title="保存当前输入的 Cookie 到系统配置" onclick="saveCookie()">更新Cookie</button>
+          <button class="btn-primary" title="上传插件导出文件并自动更新到系统 Cookie" onclick="importCookiePlugin()">上传并一键更新</button>
+          <button class="btn-primary" title="保存当前输入的 Cookie 到系统配置" onclick="saveCookie()">粘贴并更新</button>
+          <button class="btn-secondary" title="读取当前已保存的 Cookie 到输入框" onclick="loadCurrentCookie()">查看当前</button>
         </div>
-        <div class="inline-note">推荐流程：导入文件/粘贴文本 → 智能解析 → 更新Cookie。更新后回首页检查 Cookie 长度和连接状态。</div>
+        <div class="inline-note">只用上面3个按钮就够用。导入成功后，回首页刷新状态即可。</div>
+        <details class="cookie-help" style="margin-top: 12px;">
+          <summary>高级选项：插件安装与手动解析</summary>
+          <div class="cookie-help-content">
+            <p><strong>插件安装：</strong>下载内置插件包 → 浏览器扩展页加载 <code>Get-cookies.txt-LOCALLY/src</code>。</p>
+            <div class="button-group" style="margin-top: 8px;">
+              <button class="btn-secondary" onclick="window.location.href='/api/download-cookie-plugin'">下载内置插件包</button>
+            </div>
+            <p><a href="https://github.com/kairi003/Get-cookies.txt-LOCALLY" target="_blank" rel="noopener">插件项目地址（GitHub）</a></p>
+            <div class="form-group" style="margin-top: 10px;">
+              <label for="cookieFile">手动导入 Cookie 文件</label>
+              <input type="file" id="cookieFile" accept=".txt,.json,.log,.cookies">
+            </div>
+            <div class="button-group">
+              <button class="btn-secondary" onclick="importCookieFile()">导入文件到输入框</button>
+              <button class="btn-secondary" onclick="normalizeCookieText()">智能解析</button>
+            </div>
+          </div>
+        </details>
         <div id="cookieParseResult" class="panel"></div>
       </div>
     </div>
@@ -4309,59 +4361,32 @@ class DashboardHandler(BaseHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in content_type:
             return []
-        if cgi is not None:
-            form = cgi.FieldStorage(
-                fp=self.rfile,
-                headers=self.headers,
-                environ={
-                    "REQUEST_METHOD": "POST",
-                    "CONTENT_TYPE": content_type,
-                },
-            )
-            items: list[cgi.FieldStorage] = []
-            for key in form.keys():
-                field = form[key]
-                if isinstance(field, list):
-                    items.extend([x for x in field if isinstance(x, cgi.FieldStorage)])
-                elif isinstance(field, cgi.FieldStorage):
-                    items.append(field)
-
-            files: list[tuple[str, bytes]] = []
-            for item in items:
-                if not getattr(item, "filename", None):
-                    continue
-                content = item.file.read() if item.file else b""
-                if isinstance(content, str):
-                    content = content.encode("utf-8", errors="ignore")
-                if not isinstance(content, (bytes, bytearray)):
-                    continue
-                files.append((str(item.filename), bytes(content)))
-            return files
-
-        try:
-            content_len = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            content_len = 0
-        if content_len <= 0:
-            return []
-
-        raw = self.rfile.read(content_len)
-        if not raw:
-            return []
-
-        message = BytesParser(policy=email_policy).parsebytes(
-            f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + raw
+        form = cgi.FieldStorage(
+            fp=self.rfile,
+            headers=self.headers,
+            environ={
+                "REQUEST_METHOD": "POST",
+                "CONTENT_TYPE": content_type,
+            },
         )
+        items: list[cgi.FieldStorage] = []
+        for key in form.keys():
+            field = form[key]
+            if isinstance(field, list):
+                items.extend([x for x in field if isinstance(x, cgi.FieldStorage)])
+            elif isinstance(field, cgi.FieldStorage):
+                items.append(field)
 
         files: list[tuple[str, bytes]] = []
-        for part in message.iter_parts():
-            filename = part.get_filename()
-            if not filename:
+        for item in items:
+            if not getattr(item, "filename", None):
                 continue
-            content = part.get_payload(decode=True) or b""
+            content = item.file.read() if item.file else b""
+            if isinstance(content, str):
+                content = content.encode("utf-8", errors="ignore")
             if not isinstance(content, (bytes, bytearray)):
                 continue
-            files.append((str(filename), bytes(content)))
+            files.append((str(item.filename), bytes(content)))
         return files
 
     def do_GET(self) -> None:

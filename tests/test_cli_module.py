@@ -97,6 +97,8 @@ def test_module_check_summary_ws_transport_skips_browser_runtime(monkeypatch) ->
     assert summary["messages_transport"] == "ws"
     assert summary["ready"] is True
     assert not any(item["name"] == "浏览器运行时" for item in summary["blockers"])
+
+
 @pytest.mark.asyncio
 async def test_cmd_module_check_all_aggregates_results(monkeypatch) -> None:
     monkeypatch.setattr(
