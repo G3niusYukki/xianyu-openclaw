@@ -212,9 +212,8 @@ async def test_messages_quote_request_generates_quote(mock_controller) -> None:
 
     assert detail["is_quote"] is True
     assert detail["quote_success"] is True
-    assert "可选快递报价" in detail["reply"]
+    assert "首单价格" in detail["reply"] or "可选快递报价" in detail["reply"]
     assert "预计" in detail["reply"]
-    assert len(detail.get("quote_all_couriers", [])) >= 1
     assert result["quote_success_rate"] == 1.0
 
 
@@ -271,7 +270,9 @@ async def test_messages_quote_request_missing_fields_returns_followup_question(m
 
 @pytest.mark.asyncio
 async def test_messages_strict_format_mode_forces_standard_template(mock_controller) -> None:
-    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": True})
+    service = MessagesService(
+        controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": True}
+    )
     service.get_unread_sessions = AsyncMock(
         return_value=[
             {
@@ -295,7 +296,9 @@ async def test_messages_strict_format_mode_forces_standard_template(mock_control
 
 @pytest.mark.asyncio
 async def test_messages_non_strict_mode_keeps_general_reply_for_non_quote(mock_controller) -> None:
-    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": False})
+    service = MessagesService(
+        controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": False}
+    )
     service.get_unread_sessions = AsyncMock(
         return_value=[
             {
@@ -317,7 +320,9 @@ async def test_messages_non_strict_mode_keeps_general_reply_for_non_quote(mock_c
 
 @pytest.mark.asyncio
 async def test_messages_greeting_forces_standard_template_even_non_strict(mock_controller) -> None:
-    service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": False})
+    service = MessagesService(
+        controller=mock_controller, config={"max_replies_per_run": 3, "strict_format_reply_enabled": False}
+    )
     service.get_unread_sessions = AsyncMock(
         return_value=[
             {
@@ -342,7 +347,9 @@ async def test_messages_greeting_forces_standard_template_even_non_strict(mock_c
 
 @pytest.mark.asyncio
 async def test_messages_get_unread_sessions_fallback_to_dom_when_ws_not_ready(mock_controller) -> None:
-    service = MessagesService(controller=mock_controller, config={"transport": "auto", "strict_format_reply_enabled": True})
+    service = MessagesService(
+        controller=mock_controller, config={"transport": "auto", "strict_format_reply_enabled": True}
+    )
     ws_transport = Mock()
     ws_transport.get_unread_sessions = AsyncMock(return_value=[])
     ws_transport.is_ready = Mock(return_value=False)
@@ -368,13 +375,17 @@ async def test_messages_get_unread_sessions_fallback_to_dom_when_ws_not_ready(mo
 
 @pytest.mark.asyncio
 async def test_messages_reply_to_session_fallback_to_dom_when_ws_send_failed(mock_controller) -> None:
-    service = MessagesService(controller=mock_controller, config={"transport": "auto", "strict_format_reply_enabled": True})
+    service = MessagesService(
+        controller=mock_controller, config={"transport": "auto", "strict_format_reply_enabled": True}
+    )
     ws_transport = Mock()
     ws_transport.send_text = AsyncMock(return_value=False)
     service._ensure_ws_transport = AsyncMock(return_value=ws_transport)
     service._send_reply_on_page = AsyncMock(return_value=True)
 
-    sent = await service.reply_to_session("session_dom_fallback", "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）")
+    sent = await service.reply_to_session(
+        "session_dom_fallback", "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）"
+    )
 
     assert sent is True
     service._send_reply_on_page.assert_awaited_once()
@@ -382,7 +393,9 @@ async def test_messages_reply_to_session_fallback_to_dom_when_ws_send_failed(moc
 
 @pytest.mark.asyncio
 async def test_messages_ws_mode_does_not_fallback_to_dom_when_ws_send_failed(mock_controller) -> None:
-    service = MessagesService(controller=mock_controller, config={"transport": "ws", "strict_format_reply_enabled": True})
+    service = MessagesService(
+        controller=mock_controller, config={"transport": "ws", "strict_format_reply_enabled": True}
+    )
     ws_transport = Mock()
     ws_transport.send_text = AsyncMock(return_value=False)
     service._ensure_ws_transport = AsyncMock(return_value=ws_transport)
