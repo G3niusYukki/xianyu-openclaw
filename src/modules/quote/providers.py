@@ -1,10 +1,24 @@
 """自动报价 provider 适配层。"""
 
+from __future__ import annotations
+
 import asyncio
+import os
 import random
 from abc import ABC, abstractmethod
+from typing import Any
 
+import httpx
+
+from src.modules.quote.cost_table import CostTableRepository, normalize_courier_name
 from src.modules.quote.models import QuoteRequest, QuoteResult
+
+DEFAULT_MARKUP_RULE: dict[str, float] = {
+    "normal_first_add": 0.50,
+    "member_first_add": 0.25,
+    "normal_extra_add": 0.50,
+    "member_extra_add": 0.30,
+}
 
 
 class QuoteProviderError(RuntimeError):
@@ -85,6 +99,174 @@ class RuleTableQuoteProvider(IQuoteProvider):
         return True
 
 
+class CostTableMarkupQuoteProvider(IQuoteProvider):
+    """成本表 + 加价规则 provider。"""
+
+    def __init__(
+        self,
+        *,
+        table_dir: str = "data/quote_costs",
+        include_patterns: list[str] | None = None,
+        markup_rules: dict[str, Any] | None = None,
+        pricing_profile: str = "normal",
+    ):
+        self.repo = CostTableRepository(table_dir=table_dir, include_patterns=include_patterns or ["*.xlsx", "*.csv"])
+        self.pricing_profile = "member" if str(pricing_profile).strip().lower() == "member" else "normal"
+        self.markup_rules = _normalize_markup_rules(markup_rules or {})
+
+    async def get_quote(self, request: QuoteRequest, timeout_ms: int = 3000) -> QuoteResult:
+        requested_courier = _requested_courier(request.courier)
+        candidates = self.repo.find_candidates(
+            origin=request.origin,
+            destination=request.destination,
+            courier=requested_courier,
+            limit=8,
+        )
+        if not candidates:
+            raise QuoteProviderError(
+                f"No matched cost table records for route: {request.origin}->{request.destination}"
+            )
+
+        row = candidates[0]
+        markup = _resolve_markup(self.markup_rules, row.courier)
+        first_add, extra_add = _profile_markup(markup, self.pricing_profile)
+
+        extra_weight = max(0.0, float(request.weight) - 1.0)
+        sale_first = max(0.0, float(row.first_cost) + first_add)
+        sale_extra = max(0.0, float(row.extra_cost) + extra_add)
+        extra_fee = extra_weight * sale_extra
+
+        surcharges: dict[str, float] = {}
+        if extra_fee > 0:
+            surcharges["续重"] = round(extra_fee, 2)
+
+        return QuoteResult(
+            provider="cost_table_markup",
+            base_fee=round(sale_first, 2),
+            surcharges=surcharges,
+            total_fee=round(sale_first + extra_fee, 2),
+            eta_minutes=_eta_by_service_level(request.service_level),
+            confidence=0.92,
+            explain={
+                "pricing_profile": self.pricing_profile,
+                "matched_courier": row.courier,
+                "matched_origin": row.origin,
+                "matched_destination": row.destination,
+                "cost_first": row.first_cost,
+                "cost_extra": row.extra_cost,
+                "markup_first_add": first_add,
+                "markup_extra_add": extra_add,
+                "source_file": row.source_file,
+                "source_sheet": row.source_sheet,
+            },
+        )
+
+    async def health_check(self) -> bool:
+        stats = self.repo.get_stats(max_files=10)
+        return int(stats.get("total_records", 0)) > 0
+
+
+class ApiCostMarkupQuoteProvider(IQuoteProvider):
+    """API 成本价 + 加价规则 provider。"""
+
+    def __init__(
+        self,
+        *,
+        api_url: str = "",
+        api_key_env: str = "QUOTE_COST_API_KEY",
+        markup_rules: dict[str, Any] | None = None,
+        pricing_profile: str = "normal",
+    ):
+        self.api_url = str(api_url or "").strip()
+        self.api_key_env = str(api_key_env or "").strip()
+        self.markup_rules = _normalize_markup_rules(markup_rules or {})
+        self.pricing_profile = "member" if str(pricing_profile).strip().lower() == "member" else "normal"
+
+    async def get_quote(self, request: QuoteRequest, timeout_ms: int = 3000) -> QuoteResult:
+        if not self.api_url:
+            raise QuoteProviderError("cost_api_url is empty")
+
+        headers = {"Content-Type": "application/json"}
+        api_key = os.getenv(self.api_key_env, "").strip() if self.api_key_env else ""
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+            headers["X-API-Key"] = api_key
+
+        payload = {
+            "origin": request.origin,
+            "destination": request.destination,
+            "weight": request.weight,
+            "volume": request.volume,
+            "courier": request.courier,
+            "service_level": request.service_level,
+            "item_type": request.item_type,
+            "time_window": request.time_window,
+        }
+
+        timeout_seconds = max(0.2, float(timeout_ms) / 1000.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.post(self.api_url, json=payload, headers=headers)
+        except Exception as exc:
+            raise QuoteProviderError(f"Remote cost api request failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise QuoteProviderError(f"Remote cost api http {response.status_code}")
+
+        try:
+            body = response.json()
+        except Exception as exc:
+            raise QuoteProviderError(f"Remote cost api invalid json: {exc}") from exc
+
+        parsed = _parse_cost_api_response(body)
+        courier = normalize_courier_name(parsed.get("courier") or request.courier)
+        first_cost = _to_float(parsed.get("first_cost"))
+        extra_cost = _to_float(parsed.get("extra_cost"))
+        total_cost = _to_float(parsed.get("total_cost"))
+
+        if first_cost is None and total_cost is None:
+            raise QuoteProviderError("Remote cost api missing first_cost/total_cost")
+
+        extra_weight = max(0.0, float(request.weight) - 1.0)
+        if first_cost is None:
+            first_cost = max(0.0, float(total_cost or 0.0) - (extra_weight * float(extra_cost or 0.0)))
+        if extra_cost is None:
+            extra_cost = 0.0
+
+        markup = _resolve_markup(self.markup_rules, courier)
+        first_add, extra_add = _profile_markup(markup, self.pricing_profile)
+
+        sale_first = max(0.0, first_cost + first_add)
+        sale_extra = max(0.0, extra_cost + extra_add)
+        extra_fee = extra_weight * sale_extra
+        surcharges: dict[str, float] = {}
+        if extra_fee > 0:
+            surcharges["续重"] = round(extra_fee, 2)
+
+        provider_name = str(parsed.get("provider") or "api_cost_markup")
+        return QuoteResult(
+            provider=provider_name,
+            base_fee=round(sale_first, 2),
+            surcharges=surcharges,
+            total_fee=round(sale_first + extra_fee, 2),
+            eta_minutes=int(parsed.get("eta_minutes") or _eta_by_service_level(request.service_level)),
+            confidence=float(parsed.get("confidence") or 0.93),
+            explain={
+                "pricing_profile": self.pricing_profile,
+                "api_url": self.api_url,
+                "cost_first": first_cost,
+                "cost_extra": extra_cost,
+                "cost_total_raw": total_cost,
+                "markup_first_add": first_add,
+                "markup_extra_add": extra_add,
+                "api_provider": provider_name,
+            },
+        )
+
+    async def health_check(self) -> bool:
+        return bool(self.api_url)
+
+
 class RemoteQuoteProvider(IQuoteProvider):
     """外部运价 provider 占位实现（mock）。"""
 
@@ -134,3 +316,93 @@ class RemoteQuoteProvider(IQuoteProvider):
 
     async def health_check(self) -> bool:
         return self.enabled
+
+
+def _requested_courier(courier: str | None) -> str | None:
+    text = str(courier or "").strip()
+    if not text or text.lower() == "auto":
+        return None
+    return text
+
+
+def _normalize_markup_rules(raw_rules: dict[str, Any]) -> dict[str, dict[str, float]]:
+    rules: dict[str, dict[str, float]] = {"default": dict(DEFAULT_MARKUP_RULE)}
+    if not isinstance(raw_rules, dict):
+        return rules
+
+    for key, value in raw_rules.items():
+        if not isinstance(value, dict):
+            continue
+        courier_key = normalize_courier_name(str(key).strip()) if str(key).strip() else "default"
+        target = dict(DEFAULT_MARKUP_RULE)
+        for field_name in DEFAULT_MARKUP_RULE:
+            if field_name in value:
+                target[field_name] = float(value[field_name])
+        rules[courier_key or "default"] = target
+
+    if "default" not in rules:
+        rules["default"] = dict(DEFAULT_MARKUP_RULE)
+    return rules
+
+
+def _resolve_markup(markup_rules: dict[str, dict[str, float]], courier: str | None) -> dict[str, float]:
+    normalized = normalize_courier_name(courier)
+    if normalized in markup_rules:
+        return markup_rules[normalized]
+    return markup_rules.get("default", dict(DEFAULT_MARKUP_RULE))
+
+
+def _profile_markup(markup: dict[str, float], pricing_profile: str) -> tuple[float, float]:
+    profile = str(pricing_profile or "normal").strip().lower()
+    if profile == "member":
+        return float(markup.get("member_first_add", 0.0)), float(markup.get("member_extra_add", 0.0))
+    return float(markup.get("normal_first_add", 0.0)), float(markup.get("normal_extra_add", 0.0))
+
+
+def _eta_by_service_level(service_level: str) -> int:
+    text = str(service_level or "").strip().lower()
+    if text == "urgent":
+        return 12 * 60
+    if text == "express":
+        return 24 * 60
+    return 48 * 60
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except Exception:
+        return None
+
+
+def _parse_cost_api_response(data: Any) -> dict[str, Any]:
+    if isinstance(data, dict):
+        payload = data.get("data") if isinstance(data.get("data"), dict) else data
+    elif isinstance(data, list) and data:
+        payload = data[0] if isinstance(data[0], dict) else {}
+    else:
+        payload = {}
+
+    if not isinstance(payload, dict):
+        payload = {}
+
+    return {
+        "provider": payload.get("provider") or payload.get("source"),
+        "courier": payload.get("courier") or payload.get("carrier"),
+        "first_cost": payload.get("first_cost")
+        or payload.get("first_price")
+        or payload.get("base_fee")
+        or payload.get("base_price"),
+        "extra_cost": payload.get("extra_cost")
+        or payload.get("continue_cost")
+        or payload.get("extra_price")
+        or payload.get("续重"),
+        "total_cost": payload.get("total_cost") or payload.get("total_fee") or payload.get("price"),
+        "eta_minutes": payload.get("eta_minutes") or payload.get("eta"),
+        "confidence": payload.get("confidence"),
+    }

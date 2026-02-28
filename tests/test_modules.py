@@ -113,6 +113,11 @@ def test_messages_extract_locations_with_from_by_prefix() -> None:
     assert destination == "深圳市"
 
 
+def test_messages_quote_keywords_fallback_when_empty_configured() -> None:
+    service = MessagesService(controller=None, config={"quote_intent_keywords": []})
+    assert service._is_quote_request("安徽到上海 1kg 圆通多少钱") is True
+
+
 @pytest.mark.asyncio
 async def test_messages_auto_reply_unread_dry_run(mock_controller) -> None:
     service = MessagesService(controller=mock_controller, config={"max_replies_per_run": 5})

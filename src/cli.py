@@ -25,6 +25,7 @@
 import argparse
 import asyncio
 import json
+import random
 import os
 import signal
 import subprocess
@@ -40,11 +41,162 @@ def _json_out(data: Any) -> None:
 
 _MODULE_TARGETS = ("presales", "operations", "aftersales")
 
+_BENCH_QUOTE_MESSAGES = [
+    "安徽到上海 1kg 圆通多少钱",
+    "从合肥寄到杭州 2.5kg 申通报价",
+    "广州到北京 3kg 运费多少",
+    "深圳到成都 0.8kg 韵达价格",
+    "南京到西安 4kg 快递费",
+    "武汉到重庆 1.2kg 中通多少钱",
+]
+
+_BENCH_QUOTE_MISSING_MESSAGES = [
+    "寄到上海多少钱",
+    "从合肥发快递运费",
+    "圆通报价",
+    "快递费怎么收",
+]
+
+_BENCH_NON_QUOTE_MESSAGES = [
+    "宝贝还在吗",
+    "可以便宜点吗",
+    "什么时候发货",
+    "这个是全新的吗",
+]
+
+
+def _pct(values: list[int], ratio: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(int(v) for v in values)
+    idx = int(round((len(ordered) - 1) * max(0.0, min(1.0, float(ratio)))))
+    return int(ordered[idx])
+
+
+def _pick_bench_message(rng: random.Random, quote_ratio: float, quote_only: bool) -> str:
+    if quote_only:
+        return rng.choice(_BENCH_QUOTE_MESSAGES)
+    if rng.random() <= max(0.0, min(1.0, quote_ratio)):
+        pool = _BENCH_QUOTE_MESSAGES if rng.random() > 0.25 else _BENCH_QUOTE_MISSING_MESSAGES
+        return rng.choice(pool)
+    return rng.choice(_BENCH_NON_QUOTE_MESSAGES)
+
+
+async def _run_messages_sla_benchmark(
+    *,
+    count: int,
+    concurrency: int,
+    quote_ratio: float,
+    quote_only: bool,
+    seed: int,
+    slowest: int,
+    warmup: int,
+) -> dict[str, Any]:
+    from src.modules.messages.service import MessagesService
+
+    service = MessagesService(controller=None)
+    rng = random.Random(seed)
+    sample_count = max(1, int(count))
+    max_concurrency = max(1, int(concurrency))
+    keep_slowest = max(1, int(slowest))
+    warmup_count = max(0, int(warmup))
+
+    async def _run_one(index: int) -> dict[str, Any]:
+        msg = _pick_bench_message(rng, quote_ratio=quote_ratio, quote_only=quote_only)
+        session = {
+            "session_id": f"sla_bench_{index + 1}",
+            "peer_name": "bench_user",
+            "item_title": "测试商品",
+            "last_message": msg,
+            "unread_count": 1,
+        }
+        detail = await service.process_session(session=session, dry_run=True, actor="sla_benchmark")
+        detail["sample_message"] = msg
+        return detail
+
+    for i in range(warmup_count):
+        await _run_one(-(i + 1))
+
+    if max_concurrency == 1:
+        details = [await _run_one(i) for i in range(sample_count)]
+    else:
+        sem = asyncio.Semaphore(max_concurrency)
+
+        async def _guarded(i: int) -> dict[str, Any]:
+            async with sem:
+                return await _run_one(i)
+
+        details = await asyncio.gather(*(_guarded(i) for i in range(sample_count)))
+
+    latencies_ms = [int(float(item.get("latency_seconds", 0.0)) * 1000) for item in details]
+    within_target_count = sum(1 for item in details if bool(item.get("within_target")))
+    quote_rows = [item for item in details if bool(item.get("is_quote"))]
+    quote_success = sum(1 for item in quote_rows if bool(item.get("quote_success")))
+    quote_fallback = sum(1 for item in quote_rows if bool(item.get("quote_fallback")))
+    quote_missing = sum(1 for item in quote_rows if bool(item.get("quote_missing_fields")))
+
+    slowest_rows = sorted(details, key=lambda x: float(x.get("latency_seconds", 0.0)), reverse=True)[:keep_slowest]
+    slim_slowest = [
+        {
+            "session_id": row.get("session_id", ""),
+            "latency_ms": int(float(row.get("latency_seconds", 0.0)) * 1000),
+            "within_target": bool(row.get("within_target")),
+            "is_quote": bool(row.get("is_quote")),
+            "quote_success": bool(row.get("quote_success")),
+            "sample_message": row.get("sample_message", ""),
+        }
+        for row in slowest_rows
+    ]
+
+    quote_total = len(quote_rows)
+    return {
+        "action": "messages_sla_benchmark",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "config": {
+            "count": sample_count,
+            "concurrency": max_concurrency,
+            "quote_ratio": round(float(quote_ratio), 4),
+            "quote_only": bool(quote_only),
+            "seed": int(seed),
+            "warmup": warmup_count,
+            "target_reply_seconds": float(getattr(service, "reply_target_seconds", 3.0)),
+        },
+        "summary": {
+            "samples": sample_count,
+            "within_target_count": within_target_count,
+            "within_target_rate": round((within_target_count / sample_count) if sample_count else 0.0, 4),
+            "latency_p50_ms": _pct(latencies_ms, 0.5),
+            "latency_p95_ms": _pct(latencies_ms, 0.95),
+            "latency_p99_ms": _pct(latencies_ms, 0.99),
+            "latency_max_ms": max(latencies_ms) if latencies_ms else 0,
+            "quote_total": quote_total,
+            "quote_success_rate": round((quote_success / quote_total) if quote_total else 0.0, 4),
+            "quote_fallback_rate": round((quote_fallback / quote_total) if quote_total else 0.0, 4),
+            "quote_missing_fields_rate": round((quote_missing / quote_total) if quote_total else 0.0, 4),
+        },
+        "slowest_samples": slim_slowest,
+    }
+
+
+def _messages_transport_mode() -> str:
+    from src.core.config import get_config
+
+    cfg = get_config().get_section("messages", {})
+    mode = str(cfg.get("transport", "ws") or "ws").strip().lower()
+    if mode not in {"dom", "ws", "auto"}:
+        return "dom"
+    return mode
+
+
+def _messages_requires_browser_runtime() -> bool:
+    return _messages_transport_mode() in {"dom", "auto"}
 
 def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[str, Any]:
     from src.core.startup_checks import resolve_runtime_mode
 
     runtime = resolve_runtime_mode()
+    messages_transport = _messages_transport_mode()
+    uses_ws_only = messages_transport == "ws" and target in {"presales", "aftersales"}
     checks = doctor_report.get("checks", [])
     check_map = {str(item.get("name", "")): item for item in checks}
 
@@ -58,7 +210,9 @@ def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[st
     gateway_item = check_map.get("OpenClaw Gateway")
     lite_item = check_map.get("Lite 浏览器驱动")
 
-    if runtime == "pro":
+    if uses_ws_only:
+        pass
+    elif runtime == "pro":
         if gateway_item is not None:
             required_checks.append(gateway_item)
             if not bool(gateway_item.get("passed", False)):
@@ -95,6 +249,7 @@ def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[st
     return {
         "target": target,
         "runtime": runtime,
+        "messages_transport": messages_transport,
         "ready": len(blockers) == 0,
         "required_checks": required_checks,
         "blockers": blockers,
@@ -460,6 +615,18 @@ async def cmd_accounts(args: argparse.Namespace) -> None:
 async def cmd_messages(args: argparse.Namespace) -> None:
     action = args.action
 
+    if action == "sla-benchmark":
+        result = await _run_messages_sla_benchmark(
+            count=int(args.benchmark_count or 120),
+            concurrency=int(args.concurrency or 1),
+            quote_ratio=float(args.quote_ratio or 0.75),
+            quote_only=bool(args.quote_only),
+            seed=int(args.seed or 42),
+            slowest=int(args.slowest or 8),
+            warmup=int(args.warmup or 3),
+        )
+        _json_out(result)
+        return
     if action in {"workflow-stats", "workflow-status"}:
         from src.modules.messages.workflow import WorkflowStore
 
@@ -512,10 +679,15 @@ async def cmd_messages(args: argparse.Namespace) -> None:
         )
         return
 
-    from src.core.browser_client import create_browser_client
     from src.modules.messages.service import MessagesService
 
-    client = await create_browser_client()
+    client = None
+    service: MessagesService | None = None
+    if _messages_requires_browser_runtime():
+        from src.core.browser_client import create_browser_client
+
+        client = await create_browser_client()
+
     try:
         service = MessagesService(controller=client)
 
@@ -567,7 +739,10 @@ async def cmd_messages(args: argparse.Namespace) -> None:
 
         _json_out({"error": f"Unknown messages action: {action}"})
     finally:
-        await client.disconnect()
+        if service is not None:
+            await service.close()
+        if client is not None:
+            await client.disconnect()
 
 
 async def cmd_orders(args: argparse.Namespace) -> None:
@@ -724,7 +899,7 @@ async def cmd_automation(args: argparse.Namespace) -> None:
     if action == "setup":
         feishu_enabled = bool(args.enable_feishu or str(args.feishu_webhook or "").strip())
         result = setup_service.apply(
-            poll_interval_seconds=float(args.poll_interval or 5.0),
+            poll_interval_seconds=float(args.poll_interval or 1.0),
             scan_limit=int(args.scan_limit or 20),
             claim_limit=int(args.claim_limit or 10),
             reply_target_seconds=float(args.reply_target_seconds or 3.0),
@@ -753,7 +928,6 @@ async def cmd_automation(args: argparse.Namespace) -> None:
         return
 
     _json_out({"error": f"Unknown automation action: {action}"})
-
 
 async def cmd_followup(args: argparse.Namespace) -> None:
     from src.modules.followup.service import FollowUpEngine, FollowUpPolicy
@@ -825,11 +999,16 @@ async def cmd_followup(args: argparse.Namespace) -> None:
 
 
 async def _start_presales_module(args: argparse.Namespace) -> dict[str, Any]:
-    from src.core.browser_client import create_browser_client
     from src.modules.messages.service import MessagesService
     from src.modules.messages.workflow import WorkflowWorker
 
-    client = await create_browser_client()
+    client = None
+    if _messages_requires_browser_runtime():
+        from src.core.browser_client import create_browser_client
+
+        client = await create_browser_client()
+
+    service: MessagesService | None = None
     try:
         service = MessagesService(controller=client)
         worker = WorkflowWorker(
@@ -850,7 +1029,10 @@ async def _start_presales_module(args: argparse.Namespace) -> dict[str, Any]:
             result = await worker.run_once(dry_run=bool(args.dry_run))
         return {"target": "presales", "mode": args.mode, "result": result}
     finally:
-        await client.disconnect()
+        if service is not None:
+            await service.close()
+        if client is not None:
+            await client.disconnect()
 
 
 def _init_default_operation_tasks(args: argparse.Namespace) -> dict[str, Any]:
@@ -994,7 +1176,6 @@ async def _run_aftersales_once(args: argparse.Namespace, message_service: Any | 
 
 
 async def _start_aftersales_module(args: argparse.Namespace) -> dict[str, Any]:
-    from src.core.browser_client import create_browser_client
     from src.modules.messages.service import MessagesService
     from src.modules.orders.service import OrderFulfillmentService
 
@@ -1003,12 +1184,20 @@ async def _start_aftersales_module(args: argparse.Namespace) -> dict[str, Any]:
         if bool(args.dry_run):
             result = await _run_aftersales_once(args, message_service=None)
         else:
-            client = await create_browser_client()
+            client = None
+            if _messages_requires_browser_runtime():
+                from src.core.browser_client import create_browser_client
+
+                client = await create_browser_client()
+            message_service: MessagesService | None = None
             try:
                 message_service = MessagesService(controller=client)
                 result = await _run_aftersales_once(args, message_service=message_service)
             finally:
-                await client.disconnect()
+                if message_service is not None:
+                    await message_service.close()
+                if client is not None:
+                    await client.disconnect()
 
         return {
             "target": "aftersales",
@@ -1035,7 +1224,12 @@ async def _start_aftersales_module(args: argparse.Namespace) -> dict[str, Any]:
                 break
             await asyncio.sleep(max(1.0, float(args.interval or 30.0)))
     else:
-        client = await create_browser_client()
+        client = None
+        if _messages_requires_browser_runtime():
+            from src.core.browser_client import create_browser_client
+
+            client = await create_browser_client()
+        message_service: MessagesService | None = None
         try:
             message_service = MessagesService(controller=client)
             while True:
@@ -1053,7 +1247,10 @@ async def _start_aftersales_module(args: argparse.Namespace) -> dict[str, Any]:
                     break
                 await asyncio.sleep(max(1.0, float(args.interval or 30.0)))
         finally:
-            await client.disconnect()
+            if message_service is not None:
+                await message_service.close()
+            if client is not None:
+                await client.disconnect()
 
     return {
         "target": "aftersales",
@@ -1468,6 +1665,7 @@ def build_parser() -> argparse.ArgumentParser:
             "reply",
             "auto-reply",
             "auto-workflow",
+            "sla-benchmark",
             "workflow-stats",
             "workflow-status",
             "workflow-transition",
@@ -1481,9 +1679,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="仅生成回复，不真正发送")
     p.add_argument("--daemon", action="store_true", help="常驻运行 workflow worker")
     p.add_argument("--max-loops", type=int, default=None, help="daemon 模式下最多循环次数")
-    p.add_argument("--interval", type=float, default=5.0, help="worker 轮询间隔（秒）")
+    p.add_argument("--interval", type=float, default=1.0, help="worker 轮询间隔（秒）")
     p.add_argument("--workflow-db", default=None, help="workflow 数据库路径")
     p.add_argument("--window-minutes", type=int, default=1440, help="SLA 统计窗口（分钟）")
+    p.add_argument("--benchmark-count", type=int, default=120, help="sla-benchmark 样本数量")
+    p.add_argument("--concurrency", type=int, default=1, help="sla-benchmark 并发度")
+    p.add_argument("--quote-ratio", type=float, default=0.75, help="sla-benchmark 报价消息比例")
+    p.add_argument("--quote-only", action="store_true", help="sla-benchmark 仅生成完整报价消息")
+    p.add_argument("--seed", type=int, default=42, help="sla-benchmark 随机种子")
+    p.add_argument("--warmup", type=int, default=3, help="sla-benchmark 预热样本数（不计入统计）")
+    p.add_argument("--slowest", type=int, default=8, help="sla-benchmark 输出最慢样本数")
 
     # orders
     p = sub.add_parser("orders", help="订单履约")
@@ -1529,7 +1734,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("automation", help="自动化推进配置与飞书接入")
     p.add_argument("--action", required=True, choices=["setup", "status", "test-feishu"])
     p.add_argument("--config-path", default="config/config.yaml", help="配置文件路径")
-    p.add_argument("--poll-interval", type=float, default=5.0, help="workflow 轮询间隔（秒）")
+    p.add_argument("--poll-interval", type=float, default=1.0, help="workflow 轮询间隔（秒）")
     p.add_argument("--scan-limit", type=int, default=20, help="每轮扫描会话数")
     p.add_argument("--claim-limit", type=int, default=10, help="每轮最大认领任务数")
     p.add_argument("--reply-target-seconds", type=float, default=3.0, help="自动首响目标时延（秒）")
@@ -1554,7 +1759,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--orders-db", default="data/orders.db", help="aftersales 订单数据库路径")
     p.add_argument("--limit", type=int, default=20, help="presales 扫描会话数 / aftersales 处理工单数")
     p.add_argument("--claim-limit", type=int, default=10, help="presales 每轮认领任务数")
-    p.add_argument("--interval", type=float, default=5.0, help="轮询间隔（秒）")
+    p.add_argument("--interval", type=float, default=1.0, help="轮询间隔（秒）")
     p.add_argument("--dry-run", action="store_true", help="presales/aftersales 仅生成回复不发送")
     p.add_argument("--issue-type", default="delay", help="aftersales 售后类型：delay/refund/quality")
     p.add_argument("--include-manual", action="store_true", help="aftersales 包含人工接管订单")

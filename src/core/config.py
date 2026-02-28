@@ -203,6 +203,18 @@ class Config:
             },
             "messages": {
                 "enabled": False,
+                "transport": "ws",
+                "ws": {
+                    "base_url": "wss://wss-goofish.dingtalk.com/",
+                    "heartbeat_interval_seconds": 15,
+                    "heartbeat_timeout_seconds": 5,
+                    "reconnect_delay_seconds": 3.0,
+                    "message_expire_ms": 300000,
+                    "max_queue_size": 200,
+                    "queue_wait_seconds": 0.3,
+                    "token_refresh_interval_seconds": 3600,
+                    "token_retry_seconds": 300,
+                },
                 "max_replies_per_run": 10,
                 "reply_prefix": "",
                 "default_reply": "您好，宝贝在的，感兴趣可以直接拍下。",
@@ -234,6 +246,14 @@ class Config:
                 "safety_margin": 0.0,
                 "validity_minutes": 30,
                 "analytics_log_enabled": True,
+                "pricing_profile": "normal",
+                "cost_table_dir": "data/quote_costs",
+                "cost_table_patterns": ["*.xlsx", "*.csv"],
+                "markup_rules": {},
+                "cost_api_url": "",
+                "cost_api_key_env": "QUOTE_COST_API_KEY",
+                "api_fallback_to_table_parallel": True,
+                "api_prefer_max_wait_seconds": 1.2,
                 "providers": {
                     "remote": {
                         "enabled": False,

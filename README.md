@@ -93,6 +93,7 @@ AI: 📊 今日浏览 1,247 | 想要 89 | 成交 12 | 营收 ¥38,700
 | 📈 | **运营 SLA 监控** | 首响 P95 / 报价成功率 / 报价回退率采集与阈值告警 |
 | 🧪 | **增长实验与漏斗** | A/B 分流、策略版本管理、漏斗统计、显著性检验 |
 | 💸 | **AI 降本治理** | `always/auto/minimal`、任务级开关、预算与缓存、调用成本统计 |
+| 🔔 | **飞书告警通知** | Workflow 启动/心跳/SLA 告警与恢复消息推送 |
 | 📊 | **数据分析** | 每日报告、趋势分析、CSV 导出 |
 | 👥 | **多账号管理** | 同时管理多个闲鱼账号，Cookie 加密存储 |
 | 🔒 | **安全优先** | AES 加密 Cookie、参数化 SQL、请求限速 |
@@ -135,6 +136,14 @@ docker compose up -d
 python3 -m src.setup_wizard
 # 或
 ./scripts/one_click_deploy.sh
+```
+
+Windows 可执行：
+
+```bat
+scripts\windows\setup_windows.bat
+# 一键：安装依赖 + 严格自检 + 启动容器
+scripts\windows\quickstart.bat
 ```
 
 ---
@@ -250,6 +259,19 @@ python -m src.cli module --action logs   --target all --tail-lines 80
 python -m src.dashboard_server --port 8091
 ```
 
+Windows 可直接按模块启动：
+
+```bat
+scripts\windows\launcher.bat
+scripts\windows\lite_quickstart.bat
+scripts\windows\module_check.bat
+scripts\windows\module_status.bat
+scripts\windows\start_all_lite.bat
+scripts\windows\start_presales.bat daemon 20 5
+scripts\windows\start_operations.bat daemon 30
+scripts\windows\start_aftersales.bat daemon 20 15 delay
+```
+
 ### 消息自动回复策略（虚拟商品 + 快递自动报价）
 
 `messages` 配置支持“意图规则 + 关键词兼容”两层策略，默认已内置常见虚拟商品场景：
@@ -257,6 +279,11 @@ python -m src.dashboard_server --port 8091
 ```yaml
 messages:
   enabled: true
+  transport: "ws"   # dom | ws | auto
+  ws:
+    base_url: "wss://wss-goofish.dingtalk.com/"
+    heartbeat_interval_seconds: 15
+    reconnect_delay_seconds: 3.0
   fast_reply_enabled: true
   reply_target_seconds: 3.0
   reuse_message_page: true
@@ -281,7 +308,7 @@ messages:
       reply: "支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。"
   workflow:
     db_path: "data/workflow.db"
-    poll_interval_seconds: 5
+    poll_interval_seconds: 1.0
     scan_limit: 20
     claim_limit: 10
     lease_seconds: 60
@@ -333,6 +360,7 @@ quote:
 8. 粘贴到 `.env` 文件的 `XIANYU_COOKIE_1=...`
 
 > Cookie 有效期通常 7–30 天，过期后工具会提醒你更新。
+> 也可直接用项目内置插件包：打开 `http://127.0.0.1:8091/cookie`，点击“下载内置插件包”，加载 `Get-cookies.txt-LOCALLY/src` 后导出并一键导入。
 
 </details>
 

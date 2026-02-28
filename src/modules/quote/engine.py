@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sqlite3
 import time
 from copy import deepcopy
@@ -14,7 +15,14 @@ from src.core.logger import get_logger
 from src.modules.analytics.service import AnalyticsService
 from src.modules.quote.cache import QuoteCache
 from src.modules.quote.models import QuoteRequest, QuoteResult, QuoteSnapshot
-from src.modules.quote.providers import IQuoteProvider, QuoteProviderError, RemoteQuoteProvider, RuleTableQuoteProvider
+from src.modules.quote.providers import (
+    ApiCostMarkupQuoteProvider,
+    CostTableMarkupQuoteProvider,
+    IQuoteProvider,
+    QuoteProviderError,
+    RemoteQuoteProvider,
+    RuleTableQuoteProvider,
+)
 from src.modules.quote.route import normalize_request_route
 
 
@@ -108,7 +116,7 @@ class AutoQuoteEngine:
 
         self.logger = get_logger()
         self.enabled = bool(cfg.get("enabled", True))
-        self.mode = str(cfg.get("mode", "rule_only")).lower()
+        self.mode = self._normalize_mode(str(cfg.get("mode", "rule_only")).lower())
         self.timeout_ms = int(cfg.get("timeout_ms", 3000))
         self.retry_times = int(cfg.get("retry_times", 1))
         self.safety_margin = float(cfg.get("safety_margin", 0.0))
@@ -117,12 +125,26 @@ class AutoQuoteEngine:
         self.circuit_open_seconds = int(cfg.get("circuit_open_seconds", 30))
         self.half_open_success_threshold = int(cfg.get("half_open_success_threshold", 2))
         self.hot_cache_ttl_seconds = int(cfg.get("hot_cache_ttl_seconds", 300))
+        self.api_fallback_to_table_parallel = bool(cfg.get("api_fallback_to_table_parallel", True))
+        self.api_prefer_max_wait_seconds = max(0.05, float(cfg.get("api_prefer_max_wait_seconds", 1.2)))
 
         self._circuit_breakers: dict[str, CircuitBreakerState] = {}
         self._hot_cache: dict[str, tuple[QuoteResult, float]] = {}
         self._version = cfg.get("version", "v2.0")
 
         self.rule_provider: IQuoteProvider = RuleTableQuoteProvider()
+        self.cost_table_provider: IQuoteProvider = CostTableMarkupQuoteProvider(
+            table_dir=str(cfg.get("cost_table_dir", "data/quote_costs")),
+            include_patterns=cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
+            markup_rules=cfg.get("markup_rules", {}),
+            pricing_profile=str(cfg.get("pricing_profile", "normal")),
+        )
+        self.api_cost_provider: IQuoteProvider = ApiCostMarkupQuoteProvider(
+            api_url=str(cfg.get("cost_api_url", "")),
+            api_key_env=self._resolve_api_key_env_name(cfg),
+            markup_rules=cfg.get("markup_rules", {}),
+            pricing_profile=str(cfg.get("pricing_profile", "normal")),
+        )
         self.remote_provider: IQuoteProvider = RemoteQuoteProvider(
             enabled=bool(providers_cfg.get("remote", {}).get("enabled", False)),
             simulated_latency_ms=int(providers_cfg.get("remote", {}).get("simulated_latency_ms", 120)),
@@ -197,51 +219,114 @@ class AutoQuoteEngine:
         expires_at = time.time() + self.hot_cache_ttl_seconds
         self._hot_cache[key] = (result, expires_at)
 
+    def _with_snapshot(
+        self,
+        result: QuoteResult,
+        *,
+        cost_source: str,
+        cost_version: str,
+        provider_chain: list[str],
+        fallback_reason: str = "",
+    ) -> QuoteResult:
+        result.snapshot = QuoteSnapshot(
+            cost_source=cost_source,
+            cost_version=cost_version,
+            pricing_rule_version=self.PRICING_RULE_VERSION,
+            provider_chain=list(provider_chain),
+            fallback_reason=fallback_reason,
+        )
+        return result
+
     async def _quote_multi_source(self, request: QuoteRequest) -> QuoteResult:
         provider_chain: list[str] = []
 
+        if self.mode == "cost_table_plus_markup":
+            try:
+                result = await self.cost_table_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                return self._with_snapshot(
+                    result,
+                    cost_source="cost_table",
+                    cost_version="local",
+                    provider_chain=["cost_table"],
+                )
+            except Exception as table_error:
+                fallback = await self.rule_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                fallback.fallback_used = True
+                fallback.explain = {
+                    **fallback.explain,
+                    "fallback_reason": str(table_error),
+                    "fallback_source": "rule",
+                }
+                return self._with_snapshot(
+                    fallback,
+                    cost_source="rule_table",
+                    cost_version="builtin",
+                    provider_chain=["cost_table", "rule_table"],
+                    fallback_reason=str(table_error),
+                )
+
+        if self.mode == "api_cost_plus_markup":
+            return await self._quote_api_cost_plus_markup(request)
+
         if self.mode == "rule_only":
             result = await self.rule_provider.get_quote(request, timeout_ms=self.timeout_ms)
-            result.snapshot = QuoteSnapshot(
+            return self._with_snapshot(
+                result,
                 cost_source="rule_table",
                 cost_version="builtin",
-                pricing_rule_version=self.PRICING_RULE_VERSION,
                 provider_chain=["rule_table"],
             )
-            return result
 
         circuit = self._get_circuit_breaker("remote")
+
+        if self.mode == "remote_only":
+            if circuit.open_until > time.time() and not circuit.half_open:
+                raise QuoteProviderError("remote_circuit_open")
+
+            remote_error: Exception | None = None
+            for _ in range(max(1, self.retry_times)):
+                try:
+                    result = await self.remote_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                    self._record_success(circuit)
+                    return self._with_snapshot(
+                        result,
+                        cost_source="api",
+                        cost_version="live",
+                        provider_chain=["api"],
+                    )
+                except Exception as exc:
+                    remote_error = exc
+                    self._record_failure(circuit)
+            raise QuoteProviderError(f"Remote quote failed: {remote_error}")
 
         if circuit.half_open:
             try:
                 result = await self.remote_provider.get_quote(request, timeout_ms=self.timeout_ms)
                 self._record_success(circuit)
-                result.snapshot = QuoteSnapshot(
+                return self._with_snapshot(
+                    result,
                     cost_source="api",
                     cost_version="live",
-                    pricing_rule_version=self.PRICING_RULE_VERSION,
                     provider_chain=["api"],
                 )
-                return result
             except Exception:
                 self._record_failure(circuit)
                 return await self._fallback_chain(request, provider_chain, QuoteProviderError("half_open_failed"))
 
         if circuit.open_until > time.time():
-            return await self._fallback_chain(request, provider_chain, QuoteProviderError("circuit_open"))
+            return await self._fallback_chain(request, provider_chain, QuoteProviderError("remote_circuit_open"))
 
         remote_error: Exception | None = None
         for _ in range(max(1, self.retry_times)):
             try:
                 result = await self.remote_provider.get_quote(request, timeout_ms=self.timeout_ms)
                 self._record_success(circuit)
-                result.snapshot = QuoteSnapshot(
+                return self._with_snapshot(
+                    result,
                     cost_source="api",
                     cost_version="live",
-                    pricing_rule_version=self.PRICING_RULE_VERSION,
                     provider_chain=["api"],
                 )
-                return result
             except Exception as exc:
                 remote_error = exc
                 self._record_failure(circuit)
@@ -375,6 +460,214 @@ class AutoQuoteEngine:
     def set_top_routes(self, routes: list[tuple[str, str]]) -> None:
         self._top_routes = routes[:50]
 
+    async def _quote_api_cost_plus_markup(self, request: QuoteRequest) -> QuoteResult:
+        if not self.api_fallback_to_table_parallel:
+            try:
+                result = await self.api_cost_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                return self._with_snapshot(
+                    result,
+                    cost_source="api_cost",
+                    cost_version="live",
+                    provider_chain=["api_cost"],
+                )
+            except Exception as api_error:
+                try:
+                    fallback = await self.cost_table_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                    fallback.fallback_used = True
+                    fallback.explain = {
+                        **fallback.explain,
+                        "fallback_reason": str(api_error),
+                        "fallback_source": "cost_table",
+                    }
+                    return self._with_snapshot(
+                        fallback,
+                        cost_source="cost_table",
+                        cost_version="local",
+                        provider_chain=["api_cost", "cost_table"],
+                        fallback_reason=str(api_error),
+                    )
+                except Exception as table_error:
+                    fallback = await self.rule_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                    fallback.fallback_used = True
+                    fallback.explain = {
+                        **fallback.explain,
+                        "fallback_reason": f"api={api_error}; table={table_error}",
+                        "fallback_source": "rule",
+                    }
+                    return self._with_snapshot(
+                        fallback,
+                        cost_source="rule_table",
+                        cost_version="builtin",
+                        provider_chain=["api_cost", "cost_table", "rule_table"],
+                        fallback_reason=f"api={api_error}; table={table_error}",
+                    )
+
+        api_task = asyncio.create_task(self.api_cost_provider.get_quote(request, timeout_ms=self.timeout_ms))
+        table_task = asyncio.create_task(self.cost_table_provider.get_quote(request, timeout_ms=self.timeout_ms))
+
+        try:
+            done, _ = await asyncio.wait({api_task}, timeout=self.api_prefer_max_wait_seconds)
+            if api_task in done:
+                try:
+                    api_result = api_task.result()
+                    table_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await table_task
+                    return self._with_snapshot(
+                        api_result,
+                        cost_source="api_cost",
+                        cost_version="live",
+                        provider_chain=["api_cost"],
+                    )
+                except Exception as api_error:
+                    try:
+                        fallback = await table_task
+                    except Exception as table_error:
+                        fallback = await self.rule_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                        fallback.fallback_used = True
+                        fallback.explain = {
+                            **fallback.explain,
+                            "fallback_reason": f"api={api_error}; table={table_error}",
+                            "fallback_source": "rule",
+                        }
+                        return self._with_snapshot(
+                            fallback,
+                            cost_source="rule_table",
+                            cost_version="builtin",
+                            provider_chain=["api_cost", "cost_table", "rule_table"],
+                            fallback_reason=f"api={api_error}; table={table_error}",
+                        )
+
+                    fallback.fallback_used = True
+                    fallback.explain = {
+                        **fallback.explain,
+                        "fallback_reason": str(api_error),
+                        "fallback_source": "cost_table",
+                    }
+                    return self._with_snapshot(
+                        fallback,
+                        cost_source="cost_table",
+                        cost_version="local",
+                        provider_chain=["api_cost", "cost_table"],
+                        fallback_reason=str(api_error),
+                    )
+
+            try:
+                fallback = await table_task
+            except Exception as table_error:
+                try:
+                    return await api_task
+                except Exception as api_error:
+                    fallback = await self.rule_provider.get_quote(request, timeout_ms=self.timeout_ms)
+                    fallback.fallback_used = True
+                    fallback.explain = {
+                        **fallback.explain,
+                        "fallback_reason": f"api={api_error}; table={table_error}",
+                        "fallback_source": "rule",
+                    }
+                    return self._with_snapshot(
+                        fallback,
+                        cost_source="rule_table",
+                        cost_version="builtin",
+                        provider_chain=["api_cost", "cost_table", "rule_table"],
+                        fallback_reason=f"api={api_error}; table={table_error}",
+                    )
+
+            if not api_task.done():
+                api_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await api_task
+                fallback.fallback_used = True
+                fallback.explain = {
+                    **fallback.explain,
+                    "fallback_reason": "api_slow",
+                    "fallback_source": "cost_table",
+                }
+                return self._with_snapshot(
+                    fallback,
+                    cost_source="cost_table",
+                    cost_version="local",
+                    provider_chain=["api_cost", "cost_table"],
+                    fallback_reason="api_slow",
+                )
+
+            try:
+                api_result = api_task.result()
+                return self._with_snapshot(
+                    api_result,
+                    cost_source="api_cost",
+                    cost_version="live",
+                    provider_chain=["api_cost"],
+                )
+            except Exception:
+                pass
+
+            fallback.fallback_used = True
+            fallback.explain = {
+                **fallback.explain,
+                "fallback_reason": "api_failed_after_wait",
+                "fallback_source": "cost_table",
+            }
+            return self._with_snapshot(
+                fallback,
+                cost_source="cost_table",
+                cost_version="local",
+                provider_chain=["api_cost", "cost_table"],
+                fallback_reason="api_failed_after_wait",
+            )
+        finally:
+            if not api_task.done():
+                api_task.cancel()
+            if not table_task.done():
+                table_task.cancel()
+
+    def _is_circuit_open(self) -> bool:
+        circuit = self._get_circuit_breaker("remote")
+        return circuit.open_until > time.time() and not circuit.half_open
+
+    @staticmethod
+    def _normalize_mode(mode: str) -> str:
+        text = str(mode or "").strip().lower()
+        mapping = {
+            "hybrid": "remote_then_rule",
+            "provider_only": "remote_only",
+        }
+        normalized = mapping.get(text, text)
+        valid = {
+            "rule_only",
+            "remote_only",
+            "remote_then_rule",
+            "cost_table_plus_markup",
+            "api_cost_plus_markup",
+        }
+        if normalized not in valid:
+            return "rule_only"
+        return normalized
+
+    @staticmethod
+    def _resolve_api_key_env_name(cfg: dict[str, Any]) -> str:
+        explicit = str(cfg.get("cost_api_key_env", "")).strip()
+        if explicit:
+            return explicit
+
+        raw = str(cfg.get("cost_api_key", "")).strip()
+        if raw.startswith("${") and raw.endswith("}") and len(raw) > 3:
+            return raw[2:-1]
+        return "QUOTE_COST_API_KEY"
+
+    @staticmethod
+    def _classify_failure(error: Exception | None) -> str:
+        if error is None:
+            return "unknown"
+        text = str(error).lower()
+        if "timeout" in text:
+            return "timeout"
+        if "disabled" in text or "circuit" in text:
+            return "unavailable"
+        if "temporary" in text:
+            return "transient"
+        return "provider_error"
+
     async def _refresh_cache_in_background(self, request: QuoteRequest, key: str) -> None:
         try:
             latest = await self._quote_multi_source(request)
@@ -414,6 +707,8 @@ class AutoQuoteEngine:
         circuit = self._get_circuit_breaker("remote")
         return {
             "rule_provider": await self.rule_provider.health_check(),
+            "cost_table_provider": await self.cost_table_provider.health_check(),
+            "api_cost_provider": await self.api_cost_provider.health_check(),
             "remote_provider": await self.remote_provider.health_check(),
             "circuit_breaker": {
                 "failures": circuit.failures,

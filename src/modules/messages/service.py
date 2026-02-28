@@ -6,6 +6,7 @@ Messages Service
 """
 
 import asyncio
+import os
 import random
 import re
 import time
@@ -46,6 +47,10 @@ class MessagesService:
             **app_config.get_section("quote", {}),
             **self.config.get("quote", {}),
         }
+        self.transport_mode = self._normalized_transport_mode(self.config.get("transport", "dom"))
+        self.ws_config = self.config.get("ws", {}) if isinstance(self.config.get("ws"), dict) else {}
+        self._ws_transport: Any | None = None
+        self._ws_unavailable_reason = ""
 
         browser_config = app_config.browser
         self.delay_range = (
@@ -94,13 +99,13 @@ class MessagesService:
         )
 
         self.quote_engine = AutoQuoteEngine(self.quote_config)
-        self.quote_intent_keywords = [
-            str(s).lower()
-            for s in self.config.get(
-                "quote_intent_keywords",
-                ["报价", "多少钱", "运费", "邮费", "快递费", "寄到", "到", "怎么寄"],
-            )
-        ]
+        default_quote_keywords = ["报价", "多少钱", "运费", "邮费", "快递费", "寄到", "到", "怎么寄"]
+        raw_quote_keywords = self.config.get("quote_intent_keywords")
+        if isinstance(raw_quote_keywords, list):
+            cleaned_quote_keywords = [str(s).strip().lower() for s in raw_quote_keywords if str(s).strip()]
+        else:
+            cleaned_quote_keywords = []
+        self.quote_intent_keywords = cleaned_quote_keywords or [str(s).lower() for s in default_quote_keywords]
         self.quote_missing_prompts = {
             "origin": "寄件城市",
             "destination": "收件城市",
@@ -131,6 +136,77 @@ class MessagesService:
 
         self.selectors = MessageSelectors()
 
+    @staticmethod
+    def _normalized_transport_mode(raw_mode: Any) -> str:
+        mode = str(raw_mode or "ws").strip().lower()
+        if mode not in {"dom", "ws", "auto"}:
+            return "ws"
+        return mode
+
+    def _resolve_ws_cookie(self) -> str:
+        raw_cookie = str(self.config.get("cookie", "") or "").strip()
+        if raw_cookie:
+            return raw_cookie
+
+        env_cookie = str(os.getenv("XIANYU_COOKIE_1", "") or "").strip()
+        if env_cookie:
+            return env_cookie
+
+        app_config = get_config()
+        for account in app_config.accounts:
+            if bool(account.get("enabled", True)):
+                cookie = str(account.get("cookie", "") or "").strip()
+                if cookie:
+                    return cookie
+        return ""
+
+    def _should_use_ws_transport(self) -> bool:
+        if self.transport_mode == "ws":
+            return True
+        if self.transport_mode == "auto":
+            return bool(self._resolve_ws_cookie())
+        return False
+
+    async def _ensure_ws_transport(self) -> Any | None:
+        if not self._should_use_ws_transport():
+            return None
+        if self._ws_transport is not None:
+            return self._ws_transport
+        if self._ws_unavailable_reason:
+            if self.transport_mode == "ws":
+                raise BrowserError(self._ws_unavailable_reason)
+            return None
+
+        cookie_text = self._resolve_ws_cookie()
+        if not cookie_text:
+            msg = "WebSocket transport requires XIANYU_COOKIE_1 (or messages.cookie)."
+            if self.transport_mode == "ws":
+                raise BrowserError(msg)
+            self._ws_unavailable_reason = msg
+            return None
+
+        try:
+            from src.modules.messages.ws_live import GoofishWsTransport
+
+            self._ws_transport = GoofishWsTransport(cookie_text=cookie_text, config=self.ws_config)
+            await self._ws_transport.start()
+            self.logger.info("MessagesService WebSocket transport enabled")
+            return self._ws_transport
+        except Exception as exc:
+            self._ws_unavailable_reason = str(exc)
+            if self.transport_mode == "ws":
+                raise BrowserError(f"Failed to initialize WebSocket transport: {exc}") from exc
+            self.logger.warning(f"WebSocket transport unavailable, fallback to DOM transport: {exc}")
+            return None
+
+    async def close(self) -> None:
+        if self._ws_transport is not None:
+            try:
+                await self._ws_transport.stop()
+            except Exception:
+                pass
+            self._ws_transport = None
+
     def _random_delay(self, min_factor: float = 1.0, max_factor: float = 1.0) -> float:
         min_delay = self.delay_range[0] * min_factor
         max_delay = self.delay_range[1] * max_factor
@@ -147,8 +223,7 @@ class MessagesService:
     async def _ensure_message_page(self, page_id: str) -> None:
         await self.controller.navigate(page_id, self.selectors.MESSAGE_PAGE)
 
-    async def get_unread_sessions(self, limit: int = 20) -> list[dict[str, Any]]:
-        """读取未读会话。"""
+    async def _get_unread_sessions_dom(self, limit: int = 20) -> list[dict[str, Any]]:
         if not self.controller:
             raise BrowserError("Browser controller is not initialized. Cannot fetch unread sessions.")
 
@@ -200,6 +275,16 @@ class MessagesService:
             return []
         finally:
             await self.controller.close_page(page_id)
+
+    async def get_unread_sessions(self, limit: int = 20) -> list[dict[str, Any]]:
+        """读取未读会话。"""
+        ws_transport = await self._ensure_ws_transport()
+        if ws_transport is not None:
+            ws_result = await ws_transport.get_unread_sessions(limit=limit)
+            if ws_result or not self.controller or self.transport_mode == "ws":
+                return ws_result
+
+        return await self._get_unread_sessions_dom(limit=limit)
 
     def _is_quote_request(self, message_text: str) -> bool:
         text = (message_text or "").strip().lower()
@@ -383,6 +468,12 @@ class MessagesService:
 
     async def reply_to_session(self, session_id: str, reply_text: str, page_id: str | None = None) -> bool:
         """向指定会话发送消息。"""
+        ws_transport = await self._ensure_ws_transport()
+        if ws_transport is not None:
+            ws_sent = await ws_transport.send_text(session_id=session_id, text=reply_text)
+            if ws_sent or not self.controller or self.transport_mode == "ws":
+                return ws_sent
+
         if not self.controller:
             raise BrowserError("Browser controller is not initialized. Cannot send reply.")
 

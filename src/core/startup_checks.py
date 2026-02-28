@@ -52,6 +52,28 @@ def check_runtime_mode() -> StartupCheckResult:
     return StartupCheckResult("浏览器运行时", True, f"当前运行时: {runtime}", critical=False)
 
 
+def resolve_runtime_mode() -> str:
+    env_runtime = str(os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
+    if env_runtime in {"auto", "lite", "pro"}:
+        return env_runtime
+
+    try:
+        from src.core.config import get_config
+
+        cfg_runtime = str(get_config().get("app.runtime", "auto")).strip().lower()
+        if cfg_runtime in {"auto", "lite", "pro"}:
+            return cfg_runtime
+    except Exception:
+        pass
+
+    return "auto"
+
+
+def check_runtime_mode() -> StartupCheckResult:
+    runtime = resolve_runtime_mode()
+    return StartupCheckResult("浏览器运行时", True, f"当前运行时: {runtime}", critical=False)
+
+
 def check_python_version() -> StartupCheckResult:
     v = sys.version_info
     ok = v.major == 3 and v.minor >= 10
@@ -319,8 +341,6 @@ def check_dependencies() -> StartupCheckResult:
             fix_hint="请安装依赖: pip install -r requirements.txt",
         )
     return StartupCheckResult("Python 依赖", True, "核心依赖已安装", critical=False)
-
-
 def check_lite_browser_dependency() -> StartupCheckResult:
     try:
         import playwright  # noqa: F401

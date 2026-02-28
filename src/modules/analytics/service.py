@@ -77,6 +77,15 @@ class AnalyticsService:
             raise ValueError(f"Invalid metric: {metric}. Must be one of {self._allowed_metrics}")
         return metric
 
+    async def _fetchone(self, db: aiosqlite.Connection, query: str, params: tuple[Any, ...] = ()) -> tuple[Any, ...]:
+        """兼容不同 aiosqlite 版本，统一单行查询。"""
+        cursor = await db.execute(query, params)
+        row = await cursor.fetchone()
+        await cursor.close()
+        if row is None:
+            return ()
+        return tuple(row)
+
     async def _init_db(self) -> None:
         """初始化数据库"""
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
@@ -456,27 +465,32 @@ class AnalyticsService:
         async with aiosqlite.connect(self.db_path, timeout=self._db_timeout) as db:
             db.row_factory = aiosqlite.Row
 
-            total_operations = await db.execute_fetchone("SELECT COUNT(*) as count FROM operation_logs")
+            total_operations = await self._fetchone(db, "SELECT COUNT(*) as count FROM operation_logs")
 
             today = datetime.now().strftime("%Y-%m-%d")
-            today_operations = await db.execute_fetchone(
-                "SELECT COUNT(*) as count FROM operation_logs WHERE date(timestamp) = ?", (today,)
+            today_operations = await self._fetchone(
+                db,
+                "SELECT COUNT(*) as count FROM operation_logs WHERE date(timestamp) = ?",
+                (today,),
             )
 
-            total_products = await db.execute_fetchone("SELECT COUNT(*) as count FROM products")
+            total_products = await self._fetchone(db, "SELECT COUNT(*) as count FROM products")
 
-            active_products = await db.execute_fetchone(
-                "SELECT COUNT(*) as count FROM products WHERE status = 'active'"
+            active_products = await self._fetchone(
+                db,
+                "SELECT COUNT(*) as count FROM products WHERE status = 'active'",
             )
 
-            sold_products = await db.execute_fetchone("SELECT COUNT(*) as count FROM products WHERE status = 'sold'")
+            sold_products = await self._fetchone(db, "SELECT COUNT(*) as count FROM products WHERE status = 'sold'")
 
-            total_revenue = await db.execute_fetchone(
-                "SELECT COALESCE(SUM(price), 0) as total FROM products WHERE status = 'sold'"
+            total_revenue = await self._fetchone(
+                db,
+                "SELECT COALESCE(SUM(price), 0) as total FROM products WHERE status = 'sold'",
             )
 
             today_start = f"{today} 00:00:00"
-            today_metrics = await db.execute_fetchone(
+            today_metrics = await self._fetchone(
+                db,
                 """
                 SELECT COALESCE(SUM(views), 0) as views, COALESCE(SUM(wants), 0) as wants
                 FROM product_metrics WHERE timestamp >= ?
@@ -485,14 +499,14 @@ class AnalyticsService:
             )
 
             return {
-                "total_operations": total_operations[0] or 0,
-                "today_operations": today_operations[0] or 0,
-                "total_products": total_products[0] or 0,
-                "active_products": active_products[0] or 0,
-                "sold_products": sold_products[0] or 0,
-                "total_revenue": round(total_revenue[0] or 0, 2),
-                "today_views": today_metrics[0] or 0,
-                "today_wants": today_metrics[1] or 0,
+                "total_operations": total_operations[0] if len(total_operations) > 0 else 0,
+                "today_operations": today_operations[0] if len(today_operations) > 0 else 0,
+                "total_products": total_products[0] if len(total_products) > 0 else 0,
+                "active_products": active_products[0] if len(active_products) > 0 else 0,
+                "sold_products": sold_products[0] if len(sold_products) > 0 else 0,
+                "total_revenue": round((total_revenue[0] if len(total_revenue) > 0 else 0) or 0, 2),
+                "today_views": today_metrics[0] if len(today_metrics) > 0 else 0,
+                "today_wants": today_metrics[1] if len(today_metrics) > 1 else 0,
             }
 
     async def get_daily_report(self, date: datetime | None = None) -> dict[str, Any]:
@@ -529,7 +543,8 @@ class AnalyticsService:
             price_updates = sum(op[1] for op in operations if "PRICE" in op[0])
             delisted = sum(op[1] for op in operations if op[0] == "DELIST")
 
-            metrics = await db.execute_fetchone(
+            metrics = await self._fetchone(
+                db,
                 """
                 SELECT COALESCE(SUM(views), 0) as views,
                        COALESCE(SUM(wants), 0) as wants,
@@ -546,9 +561,9 @@ class AnalyticsService:
                 "polished_count": polished,
                 "price_updates": price_updates,
                 "delisted_count": delisted,
-                "total_views": metrics[0] or 0,
-                "total_wants": metrics[1] or 0,
-                "total_sales": metrics[2] or 0,
+                "total_views": metrics[0] if len(metrics) > 0 else 0,
+                "total_wants": metrics[1] if len(metrics) > 1 else 0,
+                "total_sales": metrics[2] if len(metrics) > 2 else 0,
             }
 
     async def get_weekly_report(self, end_date: datetime | None = None) -> dict[str, Any]:
@@ -584,7 +599,8 @@ class AnalyticsService:
             polished = sum(op[1] for op in operations if "POLISH" in op[0])
             price_updates = sum(op[1] for op in operations if "PRICE" in op[0])
 
-            metrics = await db.execute_fetchone(
+            metrics = await self._fetchone(
+                db,
                 """
                 SELECT COALESCE(SUM(views), 0) as views,
                        COALESCE(SUM(wants), 0) as wants,
@@ -635,9 +651,9 @@ class AnalyticsService:
                     "new_listings": new_listings,
                     "polished_count": polished,
                     "price_updates": price_updates,
-                    "total_views": metrics[0] or 0,
-                    "total_wants": metrics[1] or 0,
-                    "total_sales": metrics[2] or 0,
+                    "total_views": metrics[0] if len(metrics) > 0 else 0,
+                    "total_wants": metrics[1] if len(metrics) > 1 else 0,
+                    "total_sales": metrics[2] if len(metrics) > 2 else 0,
                 },
                 "daily_breakdown": [dict(row) for row in daily_stats],
             }
