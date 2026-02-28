@@ -133,11 +133,11 @@ messages:
   inter_reply_delay_seconds: [0.4, 1.2]
   send_confirm_delay_seconds: [0.15, 0.35]
   reply_prefix: ""
-  default_reply: "您好，宝贝在的，感兴趣可以直接拍下。"
-  virtual_default_reply: "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。"
+  default_reply: "在的，支持快速处理。发我“寄件省-收件省-重量kg”，我马上给你可下单报价。"
+  virtual_default_reply: "在的，拍下后我会在聊天里快速发放兑换信息，并指导你完成下单。"
   quote_intent_keywords: ["报价", "多少钱", "价格", "运费", "邮费", "快递费", "寄到", "发到", "送到", "怎么寄"]
   standard_format_trigger_keywords: ["你好", "您好", "在吗", "在不", "hi", "hello", "哈喽", "有人吗"]
-  quote_missing_template: "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）"
+  quote_missing_template: "为了给你报最低且准确的价格，请按格式发送：\nxx省 - xx省 - 重量（kg）\n长宽高（单位cm，可选）\n示例：广东省 - 浙江省 - 3kg 30x20x15cm"
   strict_format_reply_enabled: true
   quote_reply_all_couriers: true
   quote_reply_max_couriers: 10
@@ -147,20 +147,24 @@ messages:
     - name: "card_code_delivery"
       priority: 10
       keywords: ["卡密", "兑换码", "激活码", "CDK", "授权码", "序列号"]
-      reply: "这是虚拟商品，付款后会通过平台聊天发卡密/兑换信息，请按商品说明使用。"
+      reply: "这是虚拟商品，付款后会优先处理并通过平台聊天发放兑换信息，全程站内可追踪。"
     - name: "online_fulfillment"
       priority: 20
       keywords: ["代下单", "代拍", "代充", "代购", "代订"]
-      reply: "支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。"
+      reply: "支持代下单服务，发我具体需求和时效，我会给你更省心的下单方案。"
     - name: "delivery_eta"
       priority: 30
       keywords: ["多久发", "发货时间", "什么时候发", "多久到账"]
       patterns: ["\\d+\\s*分钟", "\\d+\\s*小时"]
-      reply: "虚拟商品通常付款后几分钟内处理，高峰期会稍有延迟，我会尽快给你。"
+      reply: "通常付款后1-3分钟开始处理，高峰期可能略有排队，我会优先给你安排。"
   keyword_replies:
-    还在: "在的，商品还在，直接拍就可以。"
-    包邮: "默认不包邮，具体看地区可以商量。"
-    最低: "价格已经尽量实在了，诚心要的话可以小刀。"
+    还在: "在的，可直接拍；也可以先发路线和重量，我马上给你报价。"
+    包邮: "是否包邮和路线有关，你发下寄件地和收件地，我给你算到手价。"
+    最低: "可以给你走首单优惠价，发路线+重量我立刻算可下单价。"
+    韵达: "可以安排韵达，回复“确认韵达”我就按该渠道优先处理。"
+    申通: "可以安排申通，回复“确认申通”我就按该渠道优先处理。"
+    圆通: "可以安排圆通，回复“确认圆通”我就按该渠道优先处理。"
+    中通: "可以安排中通，回复“确认中通”我就按该渠道优先处理。"
   workflow:
     db_path: "data/workflow.db"
     poll_interval_seconds: 1.0

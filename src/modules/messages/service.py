@@ -38,19 +38,17 @@ class MessageSelectors:
 
 DEFAULT_WEIGHT_REPLY_TEMPLATE = (
     "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n"
-    "{courier}: {price} 元\n"
-    "预计时效：{eta_days}\n"
-    "重要提示：\n"
-    "体积重大于实际重量时按体积计费！"
+    "{courier}: {price} 元（预计{eta_days}）\n"
+    "说明：计费重取实际重和体积重较大值。\n"
+    "回复“选{courier}”可优先安排。"
 )
 
 DEFAULT_VOLUME_REPLY_TEMPLATE = (
     "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n"
     "体积重规则：{volume_formula}\n"
-    "{courier}: {price} 元\n"
-    "预计时效：{eta_days}\n"
-    "重要提示：\n"
-    "体积重大于实际重量时按体积计费！"
+    "{courier}: {price} 元（预计{eta_days}）\n"
+    "说明：计费重取实际重和体积重较大值。\n"
+    "回复“选{courier}”可优先安排。"
 )
 
 

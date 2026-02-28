@@ -1,5 +1,5 @@
 {
-  "weight_template": "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n{courier}: {price} 元\n预计时效：{eta_days}\n重要提示：\n体积重大于实际重量时按体积计费！",
-  "volume_template": "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n体积重规则：{volume_formula}\n{courier}: {price} 元\n预计时效：{eta_days}\n重要提示：\n体积重大于实际重量时按体积计费！",
-  "updated_at": "2026-02-28T19:00:00"
+  "weight_template": "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n{courier}: {price} 元（预计{eta_days}）\n说明：计费重取实际重和体积重较大值。\n回复“选{courier}”可优先安排。",
+  "volume_template": "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n体积重规则：{volume_formula}\n{courier}: {price} 元（预计{eta_days}）\n说明：计费重取实际重和体积重较大值。\n回复“选{courier}”可优先安排。",
+  "updated_at": "2026-02-28T21:20:00"
 }
