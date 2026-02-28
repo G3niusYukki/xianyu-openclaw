@@ -1,0 +1,10 @@
+Upstream: https://github.com/kairi003/Get-cookies.txt-LOCALLY
+Upstream commit: 0e9952ccb1b1d914c3dc42fa496219bb7285e2dc
+License: MIT (see LICENSE)
+Imported on: 2026-02-28
+
+Usage for local install (Chrome/Edge):
+1. Open chrome://extensions or edge://extensions
+2. Enable Developer mode
+3. Click "Load unpacked"
+4. Select this directory's src folder
