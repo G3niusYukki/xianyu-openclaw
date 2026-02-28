@@ -4,7 +4,7 @@ import argparse
 
 import pytest
 
-from src.cli import _module_check_summary, cmd_messages, cmd_module
+from src.cli import _module_check_summary, build_parser, cmd_messages, cmd_module
 
 
 def test_module_check_summary_blocks_when_base_required_check_fails(monkeypatch) -> None:
@@ -195,6 +195,46 @@ async def test_cmd_module_start_all_dispatches_each_target(monkeypatch) -> None:
     assert payload["target"] == "all"
     assert payload["action"] == "start"
     assert set(payload["modules"].keys()) == {"presales", "operations", "aftersales"}
+
+
+@pytest.mark.asyncio
+async def test_cmd_module_recover_presales_runs_stop_cleanup_start(monkeypatch) -> None:
+    calls: list[str] = []
+    outputs: list[dict] = []
+
+    def fake_stop(target: str, timeout_seconds: float = 6.0) -> dict:
+        _ = timeout_seconds
+        calls.append(f"stop:{target}")
+        return {"target": target, "stopped": True}
+
+    def fake_cleanup(target: str) -> dict:
+        calls.append(f"cleanup:{target}")
+        return {"target": target, "removed": [f"data/module_runtime/{target}.json"]}
+
+    def fake_start(target: str, args: argparse.Namespace) -> dict:
+        _ = args
+        calls.append(f"start:{target}")
+        return {"target": target, "started": True, "pid": 12345}
+
+    monkeypatch.setattr("src.cli._stop_background_module", fake_stop)
+    monkeypatch.setattr("src.cli._clear_module_runtime_state", fake_cleanup)
+    monkeypatch.setattr("src.cli._start_background_module", fake_start)
+    monkeypatch.setattr("src.cli._json_out", lambda data: outputs.append(data))
+
+    args = argparse.Namespace(action="recover", target="presales", stop_timeout=6.0)
+    await cmd_module(args)
+
+    assert calls == ["stop:presales", "cleanup:presales", "start:presales"]
+    assert len(outputs) == 1
+    assert outputs[0]["target"] == "presales"
+    assert outputs[0]["recovered"] is True
+
+
+def test_module_parser_supports_recover_action() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["module", "--action", "recover", "--target", "presales"])
+    assert args.action == "recover"
+    assert args.target == "presales"
 
 
 @pytest.mark.asyncio

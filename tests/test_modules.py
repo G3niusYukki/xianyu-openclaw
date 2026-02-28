@@ -197,8 +197,37 @@ async def test_messages_quote_request_generates_quote(mock_controller) -> None:
 
     assert detail["is_quote"] is True
     assert detail["quote_success"] is True
-    assert "预估报价" in detail["reply"]
+    assert "可选快递报价" in detail["reply"]
+    assert "预计" in detail["reply"]
+    assert len(detail.get("quote_all_couriers", [])) >= 1
     assert result["quote_success_rate"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_messages_quote_request_single_courier_mode(mock_controller) -> None:
+    service = MessagesService(
+        controller=mock_controller,
+        config={"max_replies_per_run": 3, "fast_reply_enabled": True, "quote_reply_all_couriers": False},
+    )
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "q_single",
+                "peer_name": "买家Q",
+                "item_title": "快递服务",
+                "last_message": "从上海寄到杭州 2kg 多少钱",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.auto_reply_unread(limit=5, dry_run=True)
+    detail = result["details"][0]
+
+    assert detail["is_quote"] is True
+    assert detail["quote_success"] is True
+    assert "首单价格" in detail["reply"]
+    assert "quote_all_couriers" not in detail
 
 
 @pytest.mark.asyncio
@@ -222,7 +251,7 @@ async def test_messages_quote_request_missing_fields_returns_followup_question(m
     assert detail["is_quote"] is True
     assert detail["quote_need_info"] is True
     assert detail["quote_success"] is False
-    assert "咨询格式" in detail["reply"]
+    assert "询价格式" in detail["reply"]
 
 
 @pytest.mark.asyncio
@@ -246,7 +275,7 @@ async def test_messages_strict_format_mode_forces_standard_template(mock_control
     assert detail["is_quote"] is True
     assert detail["quote_need_info"] is True
     assert detail["format_enforced"] is True
-    assert "咨询格式" in detail["reply"]
+    assert "询价格式" in detail["reply"]
 
 
 @pytest.mark.asyncio
@@ -268,7 +297,7 @@ async def test_messages_non_strict_mode_keeps_general_reply_for_non_quote(mock_c
     detail = result["details"][0]
 
     assert detail["is_quote"] is False
-    assert "咨询格式" not in detail["reply"]
+    assert "询价格式" not in detail["reply"]
 
 
 @pytest.mark.asyncio
@@ -293,7 +322,7 @@ async def test_messages_greeting_forces_standard_template_even_non_strict(mock_c
     assert detail["quote_need_info"] is True
     assert detail["format_enforced"] is True
     assert detail["format_enforced_reason"] == "greeting"
-    assert "咨询格式" in detail["reply"]
+    assert "询价格式" in detail["reply"]
 
 
 @pytest.mark.asyncio
@@ -330,7 +359,7 @@ async def test_messages_reply_to_session_fallback_to_dom_when_ws_send_failed(moc
     service._ensure_ws_transport = AsyncMock(return_value=ws_transport)
     service._send_reply_on_page = AsyncMock(return_value=True)
 
-    sent = await service.reply_to_session("session_dom_fallback", "咨询格式：寄件城市～收件城市～重量（多少kg）")
+    sent = await service.reply_to_session("session_dom_fallback", "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）")
 
     assert sent is True
     service._send_reply_on_page.assert_awaited_once()
@@ -344,7 +373,7 @@ async def test_messages_ws_mode_does_not_fallback_to_dom_when_ws_send_failed(moc
     service._ensure_ws_transport = AsyncMock(return_value=ws_transport)
     service._send_reply_on_page = AsyncMock(return_value=True)
 
-    sent = await service.reply_to_session("session_ws_only", "咨询格式：寄件城市～收件城市～重量（多少kg）")
+    sent = await service.reply_to_session("session_ws_only", "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）")
 
     assert sent is False
     service._send_reply_on_page.assert_not_called()

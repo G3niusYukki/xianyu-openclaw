@@ -74,7 +74,9 @@ class ContentService:
             or os.getenv("OPENAI_BASE_URL")
             or os.getenv("DEEPSEEK_BASE_URL")
         )
-        resolved_model = self._normalize_config_value(os.getenv("AI_MODEL") or PROVIDER_MODEL_MAP.get(self.provider, "deepseek-chat"))
+        resolved_model = self._normalize_config_value(
+            os.getenv("AI_MODEL") or PROVIDER_MODEL_MAP.get(self.provider, "deepseek-chat")
+        )
 
         configured_api_key = self._normalize_config_value(self.config.get("api_key"))
         configured_base_url = self._normalize_config_value(self.config.get("base_url"))

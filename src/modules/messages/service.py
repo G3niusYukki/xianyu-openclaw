@@ -6,10 +6,12 @@ Messages Service
 """
 
 import asyncio
+import json
 import os
 import random
 import re
 import time
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -20,7 +22,7 @@ from src.core.logger import get_logger
 from src.modules.compliance.center import ComplianceCenter
 from src.modules.messages.reply_engine import ReplyStrategyEngine
 from src.modules.quote.engine import AutoQuoteEngine
-from src.modules.quote.models import QuoteRequest
+from src.modules.quote.models import QuoteRequest, QuoteResult
 from src.modules.quote.providers import QuoteProviderError
 
 
@@ -32,6 +34,24 @@ class MessageSelectors:
     SESSION_LIST = "[class*='session'], [class*='conversation'], [data-session-id]"
     MESSAGE_INPUT = "textarea, [contenteditable='true'], input[placeholder*='消息']"
     SEND_BUTTON = "button:has-text('发送'), button:has-text('Send'), [class*='send']"
+
+
+DEFAULT_WEIGHT_REPLY_TEMPLATE = (
+    "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n"
+    "{courier}: {price} 元\n"
+    "预计时效：{eta_days}\n"
+    "重要提示：\n"
+    "体积重大于实际重量时按体积计费！"
+)
+
+DEFAULT_VOLUME_REPLY_TEMPLATE = (
+    "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n"
+    "体积重规则：{volume_formula}\n"
+    "{courier}: {price} 元\n"
+    "预计时效：{eta_days}\n"
+    "重要提示：\n"
+    "体积重大于实际重量时按体积计费！"
+)
 
 
 class MessagesService:
@@ -51,6 +71,12 @@ class MessagesService:
         self.ws_config = self.config.get("ws", {}) if isinstance(self.config.get("ws"), dict) else {}
         self._ws_transport: Any | None = None
         self._ws_unavailable_reason = ""
+        self._reply_templates_path = self._resolve_reply_templates_path()
+        self._reply_templates_cache: dict[str, str] = {
+            "weight_template": DEFAULT_WEIGHT_REPLY_TEMPLATE,
+            "volume_template": DEFAULT_VOLUME_REPLY_TEMPLATE,
+        }
+        self._reply_templates_mtime: float = -1.0
 
         browser_config = app_config.browser
         self.delay_range = (
@@ -104,9 +130,7 @@ class MessagesService:
         raw_quote_keywords = self.config.get("quote_intent_keywords")
         if isinstance(raw_quote_keywords, list):
             cleaned_quote_keywords = [
-                str(s).strip().lower()
-                for s in raw_quote_keywords
-                if str(s).strip() and len(str(s).strip()) >= 2
+                str(s).strip().lower() for s in raw_quote_keywords if str(s).strip() and len(str(s).strip()) >= 2
             ]
         else:
             cleaned_quote_keywords = []
@@ -114,9 +138,7 @@ class MessagesService:
         raw_standard_triggers = self.config.get("standard_format_trigger_keywords")
         if isinstance(raw_standard_triggers, list):
             cleaned_standard_triggers = [
-                str(s).strip().lower()
-                for s in raw_standard_triggers
-                if str(s).strip() and len(str(s).strip()) >= 2
+                str(s).strip().lower() for s in raw_standard_triggers if str(s).strip() and len(str(s).strip()) >= 2
             ]
         else:
             cleaned_standard_triggers = []
@@ -130,9 +152,11 @@ class MessagesService:
         }
         self.quote_missing_template = self.config.get(
             "quote_missing_template",
-            "咨询格式：寄件城市～收件城市～重量（多少kg）",
+            "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
         )
         self.strict_format_reply_enabled = bool(self.config.get("strict_format_reply_enabled", False))
+        self.quote_reply_all_couriers = bool(self.config.get("quote_reply_all_couriers", True))
+        self.quote_reply_max_couriers = max(1, int(self.config.get("quote_reply_max_couriers", 10)))
         self.quote_failed_template = self.config.get(
             "quote_failed_template",
             "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
@@ -178,6 +202,156 @@ class MessagesService:
                     return cookie
         return ""
 
+    def _resolve_reply_templates_path(self) -> Path:
+        app_config = get_config()
+        content_cfg = app_config.get_section("content", {})
+        templates_cfg = content_cfg.get("templates", {}) if isinstance(content_cfg, dict) else {}
+        if not isinstance(templates_cfg, dict):
+            templates_cfg = {}
+        raw_template_dir = str(templates_cfg.get("path") or "config/templates")
+        root = Path(__file__).resolve().parents[3]
+        template_dir = Path(raw_template_dir)
+        if not template_dir.is_absolute():
+            template_dir = root / template_dir
+        return template_dir / "reply_templates.json"
+
+    def _load_reply_templates(self) -> dict[str, str]:
+        path = self._reply_templates_path
+        if not path.exists():
+            return self._reply_templates_cache
+
+        try:
+            mtime = float(path.stat().st_mtime)
+        except OSError:
+            return self._reply_templates_cache
+
+        if abs(mtime - self._reply_templates_mtime) < 1e-6:
+            return self._reply_templates_cache
+
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            weight = str(raw.get("weight_template") or DEFAULT_WEIGHT_REPLY_TEMPLATE).strip()
+            volume = str(raw.get("volume_template") or DEFAULT_VOLUME_REPLY_TEMPLATE).strip()
+            self._reply_templates_cache = {
+                "weight_template": weight or DEFAULT_WEIGHT_REPLY_TEMPLATE,
+                "volume_template": volume or DEFAULT_VOLUME_REPLY_TEMPLATE,
+            }
+            self._reply_templates_mtime = mtime
+        except Exception as exc:
+            self.logger.warning("Load reply templates failed: %s", exc)
+        return self._reply_templates_cache
+
+    @staticmethod
+    def _safe_float(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _select_quote_reply_template(self, explain: dict[str, Any]) -> str:
+        templates = self._load_reply_templates()
+        actual_weight = self._safe_float(explain.get("actual_weight_kg"))
+        billing_weight = self._safe_float(explain.get("billing_weight_kg"))
+        use_volume_template = billing_weight > (actual_weight + 1e-6)
+        return templates["volume_template"] if use_volume_template else templates["weight_template"]
+
+    @staticmethod
+    def _format_eta_days(minutes: int | float | None) -> str:
+        try:
+            raw = float(minutes or 0)
+        except (TypeError, ValueError):
+            raw = 0.0
+        if raw <= 0:
+            return "1天"
+        days = max(1.0, raw / 1440.0)
+        rounded = round(days, 1)
+        if abs(rounded - round(rounded)) < 1e-9:
+            return f"{round(rounded)}天"
+        return f"{rounded:.1f}天"
+
+    def _resolve_quote_candidate_couriers(self, request: QuoteRequest) -> list[str]:
+        couriers: list[str] = []
+        seen: set[str] = set()
+
+        preferred = self.quote_config.get("preferred_couriers", [])
+        if isinstance(preferred, list):
+            for item in preferred:
+                name = str(item or "").strip()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                couriers.append(name)
+
+        provider = getattr(self.quote_engine, "cost_table_provider", None)
+        repo = getattr(provider, "repo", None)
+        if repo is not None:
+            try:
+                rows = repo.find_candidates(
+                    origin=request.origin,
+                    destination=request.destination,
+                    courier=None,
+                    limit=max(24, self.quote_reply_max_couriers * 8),
+                )
+                for row in rows:
+                    name = str(getattr(row, "courier", "") or "").strip()
+                    if not name or name in seen:
+                        continue
+                    seen.add(name)
+                    couriers.append(name)
+            except Exception as exc:
+                self.logger.warning("Resolve candidate couriers failed: %s", exc)
+
+        return couriers[: self.quote_reply_max_couriers]
+
+    async def _quote_all_couriers(self, request: QuoteRequest) -> list[tuple[str, QuoteResult]]:
+        couriers = self._resolve_quote_candidate_couriers(request)
+        if not couriers:
+            return []
+
+        async def _one(courier_name: str) -> tuple[str, QuoteResult | None]:
+            sub_request = QuoteRequest(
+                origin=request.origin,
+                destination=request.destination,
+                weight=request.weight,
+                volume=request.volume,
+                volume_weight=request.volume_weight,
+                service_level=request.service_level,
+                courier=courier_name,
+                item_type=request.item_type,
+                time_window=request.time_window,
+            )
+            try:
+                result = await self.quote_engine.get_quote(sub_request)
+                return courier_name, result
+            except Exception:
+                return courier_name, None
+
+        pairs = await asyncio.gather(*[_one(name) for name in couriers])
+        ok_pairs: list[tuple[str, QuoteResult]] = []
+        for courier_name, result in pairs:
+            if result is None:
+                continue
+            ok_pairs.append((courier_name, result))
+        ok_pairs.sort(key=lambda item: (float(item[1].total_fee), str(item[0])))
+        return ok_pairs
+
+    def _compose_multi_courier_quote_reply(self, quote_rows: list[tuple[str, QuoteResult]]) -> str:
+        if not quote_rows:
+            return ""
+
+        first_explain = quote_rows[0][1].explain if isinstance(quote_rows[0][1].explain, dict) else {}
+        origin = str(first_explain.get("matched_origin") or first_explain.get("normalized_origin") or "寄件地")
+        destination = str(
+            first_explain.get("matched_destination") or first_explain.get("normalized_destination") or "收件地"
+        )
+
+        lines = [f"{origin} -> {destination} 可选快递报价（可自行挑选）："]
+        for index, (courier_name, result) in enumerate(quote_rows, start=1):
+            eta = self._format_eta_days(result.eta_minutes)
+            lines.append(f"{index}. {courier_name}：{float(result.total_fee):.2f}元（预计{eta}）")
+        lines.append("回复“选XX快递”即可按对应渠道安排。")
+        return "\n".join(lines)
+
     def _should_use_ws_transport(self) -> bool:
         if self.transport_mode == "ws":
             return True
@@ -206,7 +380,11 @@ class MessagesService:
         try:
             from src.modules.messages.ws_live import GoofishWsTransport
 
-            self._ws_transport = GoofishWsTransport(cookie_text=cookie_text, config=self.ws_config)
+            self._ws_transport = GoofishWsTransport(
+                cookie_text=cookie_text,
+                config=self.ws_config,
+                cookie_supplier=self._resolve_ws_cookie,
+            )
             await self._ws_transport.start()
             self.logger.info("MessagesService WebSocket transport enabled")
             return self._ws_transport
@@ -501,7 +679,9 @@ class MessagesService:
                 "is_quote": True,
                 "quote_need_info": True,
                 "format_enforced": bool(strict_enforced or force_standard_format),
-                "format_enforced_reason": "greeting" if force_standard_format else ("strict_mode" if strict_enforced else ""),
+                "format_enforced_reason": "greeting"
+                if force_standard_format
+                else ("strict_mode" if strict_enforced else ""),
                 "quote_missing_fields": missing,
                 "quote_success": False,
                 "quote_fallback": False,
@@ -524,9 +704,47 @@ class MessagesService:
 
         start = perf_counter()
         try:
+            multi_quote_rows: list[tuple[str, QuoteResult]] = []
+            if self.quote_reply_all_couriers:
+                multi_quote_rows = await self._quote_all_couriers(request)
+
+            if multi_quote_rows:
+                best_courier, best_result = multi_quote_rows[0]
+                reply = self._compose_multi_courier_quote_reply(multi_quote_rows)
+                latency_ms = int((perf_counter() - start) * 1000)
+                return self._sanitize_reply(reply), {
+                    "is_quote": True,
+                    "quote_need_info": False,
+                    "quote_success": True,
+                    "quote_fallback": any(bool(r.fallback_used) for _, r in multi_quote_rows),
+                    "quote_cache_hit": all(bool(r.cache_hit) for _, r in multi_quote_rows),
+                    "quote_stale": any(bool(r.stale) for _, r in multi_quote_rows),
+                    "quote_latency_ms": latency_ms,
+                    "quote_all_couriers": [
+                        {
+                            "courier": courier_name,
+                            "total_fee": round(float(result.total_fee), 2),
+                            "eta_minutes": int(result.eta_minutes),
+                            "eta_days": self._format_eta_days(result.eta_minutes),
+                            "fallback_used": bool(result.fallback_used),
+                            "cache_hit": bool(result.cache_hit),
+                        }
+                        for courier_name, result in multi_quote_rows
+                    ],
+                    "quote_result": {
+                        **best_result.to_dict(),
+                        "selected_courier": best_courier,
+                    },
+                }
+
             result = await self.quote_engine.get_quote(request)
             latency_ms = int((perf_counter() - start) * 1000)
-            reply = result.compose_reply(validity_minutes=int(self.quote_config.get("validity_minutes", 30)))
+            explain = result.explain if isinstance(result.explain, dict) else {}
+            selected_template = self._select_quote_reply_template(explain)
+            reply = result.compose_reply(
+                validity_minutes=int(self.quote_config.get("validity_minutes", 30)),
+                template=selected_template,
+            )
             return self._sanitize_reply(reply), {
                 "is_quote": True,
                 "quote_need_info": False,

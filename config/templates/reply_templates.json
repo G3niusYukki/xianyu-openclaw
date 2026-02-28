@@ -1,5 +1,5 @@
 {
-  "weight_template": "您好，{origin} 到 {destination}，按实际重量 {weight}kg 预估，{courier} 报价约 ¥{price}，可直接拍下。",
-  "volume_template": "您好，{origin} 到 {destination}，按体积重规则（{volume_formula}）预估，{courier} 报价约 ¥{price}，可直接拍下。",
-  "updated_at": "2026-02-28T12:20:12"
+  "weight_template": "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n{courier}: {price} 元\n预计时效：{eta_days}\n重要提示：\n体积重大于实际重量时按体积计费！",
+  "volume_template": "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n体积重规则：{volume_formula}\n{courier}: {price} 元\n预计时效：{eta_days}\n重要提示：\n体积重大于实际重量时按体积计费！",
+  "updated_at": "2026-02-28T19:00:00"
 }

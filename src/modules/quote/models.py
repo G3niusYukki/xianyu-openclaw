@@ -1,7 +1,7 @@
 """自动报价领域模型。"""
 
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 DEFAULT_QUOTE_REPLY_TEMPLATE = (
@@ -120,15 +120,37 @@ class QuoteResult:
         divisor = explain.get("volume_divisor")
         volume_formula = f"体积(cm³)/{int(divisor)}" if isinstance(divisor, (int, float)) and divisor else "体积重规则"
         eta_days = self._format_days_from_minutes(self.eta_minutes)
+        price_value = f"{self.total_fee:.2f}"
+        weight_value = explain.get("actual_weight_kg", "")
+        billing_weight_value = explain.get("billing_weight_kg", "")
+        volume_weight_value = explain.get("volume_weight_kg", "")
+        additional_units = 0.0
+        try:
+            additional_units = max(0.0, float(billing_weight_value or 0.0) - 1.0)
+        except (TypeError, ValueError):
+            additional_units = 0.0
+        first_price_value = f"{self.base_fee:.2f}"
+        remaining_price_value = f"{self.surcharges.get('续重', 0.0):.2f}"
         tpl = str(template or DEFAULT_QUOTE_REPLY_TEMPLATE)
         try:
             rendered = tpl.format(
                 origin=origin,
                 destination=destination,
-                weight=explain.get("actual_weight_kg", ""),
-                billing_weight=explain.get("billing_weight_kg", ""),
+                origin_province=origin,
+                dest_province=destination,
+                origin_city=origin,
+                dest_city=destination,
+                weight=weight_value,
+                actual_weight=weight_value,
+                billing_weight=billing_weight_value,
+                volume_weight=volume_weight_value,
+                additional_units=f"{additional_units:.1f}",
                 courier=courier,
-                price=f"{self.total_fee:.2f}",
+                courier_name=courier,
+                price=price_value,
+                total_price=price_value,
+                first_price=first_price_value,
+                remaining_price=remaining_price_value,
                 currency=self.currency,
                 price_breakdown=price_breakdown,
                 eta_days=eta_days,

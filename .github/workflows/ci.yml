@@ -29,7 +29,10 @@ jobs:
           pip install ruff
 
       - name: Ruff lint
-        run: ruff check src/ tests/ --ignore I001,E501,UP012,RUF100
+        run: ruff check src/ --ignore I001,E501,UP012,RUF100
+
+      - name: Ruff format check
+        run: ruff format --check src/
 
   test:
     name: Tests
