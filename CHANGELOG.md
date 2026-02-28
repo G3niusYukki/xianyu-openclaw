@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- CI workflow 调整为只拦截真实问题：
+  - `ruff check` 覆盖 `src/` 与 `tests/`
+  - 忽略纯样式类告警（`I001`、`E501`、`UP012`、`RUF100`）
+  - 移除单独的 `ruff format --check` 步骤，避免样式噪音阻塞发布
+- 清理 `startup_checks` 中重复定义的 `resolve_runtime_mode` / `check_runtime_mode`，避免静态检查误报并减少维护风险
+
+## [4.8.0] - 2026-02-28
+
+### Added
+- 消息链路新增 WebSocket 实时传输：售前/售后可在有 Cookie 的情况下绕过 DOM 抓取直接读写会话。
+- Dashboard 集成 Cookie 插件资源导入/导出能力，内置 `Get-cookies.txt-LOCALLY` 插件包。
+- `messages` CLI 新增 `sla-benchmark`，可评估首响 SLA、报价成功率与慢样本。
+- 自动报价新增成本表/API 成本加价模式：
+  - `cost_table_plus_markup`
+  - `api_cost_plus_markup`
+
+### Changed
+- `module check` 在售前/售后使用 `messages.transport=ws` 时，不再把浏览器运行时作为阻塞项。
+- `automation setup` 默认把消息传输模式设置为 `ws`，并将默认轮询间隔调整为 1 秒。
+- `dashboard_server` 增加 Python 3.13+/3.14 下 multipart 兼容解析，避免 `cgi` 移除导致导入失败。
+- README / USER_GUIDE 同步为 4.8.0 版本说明，并补齐当前 CI 检查命令。
+
+## [4.7.0] - 2026-02-27
+
+### Added
+- 两阶段报价工作流：优先快速首响，再补发精确报价，保障消息 SLA。
+- 报价引擎新增多源容灾：
+  - API
+  - 热缓存
+  - 本地成本表
+  - 兜底模板
+- 新增跟进引擎：
+  - 已读未回自动跟进
+  - 每日频控
+  - 静默时段
+  - DND 退订
+  - 审计回放
+- 新增 `doctor` 自检命令与 `followup` CLI 命令。
+
+### Changed
+- `AutoQuoteEngine` 增加熔断、半开恢复、报价快照追溯与回退失败分类。
+- CI workflow 改为失败即阻断，测试步骤不再容忍失败继续。
+
 ## [4.6.0] - 2026-02-27
 
 ### Added

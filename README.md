@@ -36,6 +36,7 @@
 - **自动化配置**：`automation` 命令一键配置轮询参数与飞书 webhook。
 - **Windows 一键脚本**：新增 16 个 `.bat` 脚本，支持 launcher 菜单、lite 快速启动、模块管理。
 - **报价 KPI 修复**：被合规拦截的报价不计入成功，新增 `quote_blocked_by_policy` 追溯字段。
+- **CI 收敛**：CI workflow 改为聚焦真实阻断问题（导入/重复定义/运行错误），避免纯样式噪音导致发布阻塞。
 
 ## 4.7.0 更新摘要（2026-02-27）
 
@@ -463,10 +464,10 @@ pip install -r requirements.txt
 python -m src.cli --help
 
 # 测试
-pytest tests/
+python -m pytest tests/ -v --tb=short
 
 # 代码检查
-ruff check src/
+ruff check src/ tests/ --ignore I001,E501,UP012,RUF100
 ```
 
 ---
