@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import cgi
 import csv
 import hashlib
 import io
@@ -626,7 +625,10 @@ class MimicOps:
                 candidates.append({"format": source, "cookie": cookie_text, "count": count})
 
         if not candidates:
-            return {"success": False, "error": "Unable to parse cookie text. Please use header/json/cookies.txt format."}
+            return {
+                "success": False,
+                "error": "Unable to parse cookie text. Please use header/json/cookies.txt format.",
+            }
 
         candidates.sort(key=lambda x: (int(x.get("count", 0)), x.get("format") == "header"), reverse=True)
         best = candidates[0]
@@ -908,7 +910,9 @@ class MimicOps:
         length = int(payload.get("length", 0) or 0)
         return required_hit, cookie_items, length
 
-    def import_cookie_plugin_files(self, files: list[tuple[str, bytes]], *, auto_recover: bool = False) -> dict[str, Any]:
+    def import_cookie_plugin_files(
+        self, files: list[tuple[str, bytes]], *, auto_recover: bool = False
+    ) -> dict[str, Any]:
         if not files:
             return {"success": False, "error": "No files uploaded"}
 
@@ -1555,7 +1559,9 @@ class MimicOps:
 
         return best_map, best_end
 
-    def _build_markup_rule(self, row_payload: dict[str, Any], fallback_numbers: list[float] | None = None) -> dict[str, float]:
+    def _build_markup_rule(
+        self, row_payload: dict[str, Any], fallback_numbers: list[float] | None = None
+    ) -> dict[str, float]:
         default_row = dict(DEFAULT_MARKUP_RULES.get("default", {}))
         ordered_numbers = list(fallback_numbers or [])
         built: dict[str, float] = {}
@@ -1578,7 +1584,10 @@ class MimicOps:
             row_payload: dict[str, Any] = {}
             hit_count = 0
             for field in self._MARKUP_REQUIRED_FIELDS:
-                aliases = [self._clean_markup_token(field), *[self._clean_markup_token(x) for x in self._MARKUP_FIELD_ALIASES[field]]]
+                aliases = [
+                    self._clean_markup_token(field),
+                    *[self._clean_markup_token(x) for x in self._MARKUP_FIELD_ALIASES[field]],
+                ]
                 value_found: Any | None = None
                 for alias in aliases:
                     if alias in cleaned:
@@ -1702,7 +1711,9 @@ class MimicOps:
 
         for line in lines:
             courier = self._normalize_markup_courier(line)
-            numbers = [n for n in (self._markup_float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", line)) if n is not None]
+            numbers = [
+                n for n in (self._markup_float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", line)) if n is not None
+            ]
 
             if courier and len(numbers) >= 4:
                 parsed[courier] = self._build_markup_rule({}, fallback_numbers=numbers)
@@ -2017,10 +2028,18 @@ class MimicOps:
                 continue
             payload = raw if isinstance(raw, dict) else {}
             normalized[courier] = {
-                "normal_first_add": self._to_non_negative_float(payload.get("normal_first_add"), base_default.get("normal_first_add", 0.5)),
-                "member_first_add": self._to_non_negative_float(payload.get("member_first_add"), base_default.get("member_first_add", 0.25)),
-                "normal_extra_add": self._to_non_negative_float(payload.get("normal_extra_add"), base_default.get("normal_extra_add", 0.5)),
-                "member_extra_add": self._to_non_negative_float(payload.get("member_extra_add"), base_default.get("member_extra_add", 0.3)),
+                "normal_first_add": self._to_non_negative_float(
+                    payload.get("normal_first_add"), base_default.get("normal_first_add", 0.5)
+                ),
+                "member_first_add": self._to_non_negative_float(
+                    payload.get("member_first_add"), base_default.get("member_first_add", 0.25)
+                ),
+                "normal_extra_add": self._to_non_negative_float(
+                    payload.get("normal_extra_add"), base_default.get("normal_extra_add", 0.5)
+                ),
+                "member_extra_add": self._to_non_negative_float(
+                    payload.get("member_extra_add"), base_default.get("member_extra_add", 0.3)
+                ),
             }
 
         if "default" not in normalized:
@@ -2446,8 +2465,10 @@ class MimicOps:
             service_status = "running"
 
         alive_count = int(module_status.get("alive_count", 0)) if isinstance(module_status, dict) else 0
-        total_modules = int(module_status.get("total_modules", len(MODULE_TARGETS))) if isinstance(module_status, dict) else len(
-            MODULE_TARGETS
+        total_modules = (
+            int(module_status.get("total_modules", len(MODULE_TARGETS)))
+            if isinstance(module_status, dict)
+            else len(MODULE_TARGETS)
         )
 
         presales_mod = modules.get("presales", {}) if isinstance(modules.get("presales"), dict) else {}
@@ -2455,7 +2476,9 @@ class MimicOps:
         presales_process = presales_mod.get("process", {}) if isinstance(presales_mod.get("process"), dict) else {}
         workflow = presales_mod.get("workflow", {}) if isinstance(presales_mod.get("workflow"), dict) else {}
         route_stat_payload = route_stats.get("stats", {}) if isinstance(route_stats, dict) else {}
-        route_stats_by_courier = route_stat_payload.get("courier_details", {}) if isinstance(route_stat_payload, dict) else {}
+        route_stats_by_courier = (
+            route_stat_payload.get("courier_details", {}) if isinstance(route_stat_payload, dict) else {}
+        )
         risk_level = str(risk_control.get("level", "unknown") or "unknown").lower()
         risk_signals = risk_control.get("signals", [])
         risk_signal_text = " ".join(str(x) for x in risk_signals) if isinstance(risk_signals, list) else ""
@@ -2464,7 +2487,9 @@ class MimicOps:
 
         workflow_states = workflow.get("states", {}) if isinstance(workflow.get("states"), dict) else {}
         workflow_jobs = workflow.get("jobs", {}) if isinstance(workflow.get("jobs"), dict) else {}
-        fallback_total_replied = int(workflow_states.get("REPLIED", 0) or 0) + int(workflow_states.get("QUOTED", 0) or 0)
+        fallback_total_replied = int(workflow_states.get("REPLIED", 0) or 0) + int(
+            workflow_states.get("QUOTED", 0) or 0
+        )
         fallback_total_conversations = sum(int(v or 0) for v in workflow_states.values())
         fallback_total_messages = sum(int(v or 0) for v in workflow_jobs.values())
         message_stats = self._query_message_stats_from_workflow() or {
@@ -2489,7 +2514,9 @@ class MimicOps:
 
         cookie_update_required = bool(token_error == "FAIL_SYS_USER_VALIDATE")
         token_available = bool(cookie.get("success", False)) and token_error is None
-        xianyu_connected = bool(presales_process.get("alive", False)) and token_error is None and risk_level != "blocked"
+        xianyu_connected = (
+            bool(presales_process.get("alive", False)) and token_error is None and risk_level != "blocked"
+        )
         if service_status == "running" and (not xianyu_connected or risk_level in {"warning", "blocked"}):
             service_status = "degraded"
         recovery = self._maybe_auto_recover_presales(
@@ -2623,7 +2650,9 @@ class MimicOps:
         check = self.module_console.check(skip_gateway=True)
         status_after = self.service_status()
 
-        can_work = bool(status_after.get("xianyu_connected", False)) and not bool(status_after.get("cookie_update_required", False))
+        can_work = bool(status_after.get("xianyu_connected", False)) and not bool(
+            status_after.get("cookie_update_required", False)
+        )
         return {
             "success": bool(can_work),
             "action": "auto_fix",
@@ -3615,6 +3644,22 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
           <button class="btn-secondary" title="读取当前已保存的 Cookie 到输入框" onclick="loadCurrentCookie()">查看当前</button>
         </div>
         <div class="inline-note">只用上面3个按钮就够用。导入成功后，回首页刷新状态即可。</div>
+        <details class="cookie-help" style="margin-top: 12px;">
+          <summary>Cookie 详细获取步骤（推荐按这个顺序）</summary>
+          <div class="cookie-help-content">
+            <p><strong>0基础 Cookie 复制方式：</strong></p>
+            <ol style="margin-left: 20px; margin-top: 8px;">
+              <li>登录闲鱼网页版</li>
+              <li>按 F12 打开开发者工具</li>
+              <li>切换到 Network（网络）标签</li>
+              <li>刷新页面，点击任意请求</li>
+              <li>在 Request Headers 中找到 Cookie</li>
+              <li>建议确保包含关键字段：<code>_tb_token_</code>、<code>cookie2</code>、<code>sgcookie</code>、<code>unb</code></li>
+            </ol>
+            <p style="margin-top: 10px;"><strong>更新后如何确认生效：</strong>导入成功后，回到首页点击"刷新状态"按钮，确认账号状态正常。</p>
+            <p style="margin-top: 10px;"><strong>插件一键导入并更新：</strong>在下方"高级选项"中下载内置插件包，加载后导出 Cookie，再通过"插件导出文件"按钮一键导入。</p>
+          </div>
+        </details>
         <details class="cookie-help" style="margin-top: 12px;">
           <summary>高级选项：插件安装与手动解析</summary>
           <div class="cookie-help-content">
@@ -5192,6 +5237,8 @@ MIMIC_LOGS_REALTIME_HTML = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     repo: DashboardRepository
     module_console: ModuleConsole
@@ -5242,21 +5289,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in content_type:
             return []
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ={
-                "REQUEST_METHOD": "POST",
-                "CONTENT_TYPE": content_type,
-            },
-        )
-        items: list[cgi.FieldStorage] = []
-        for key in form.keys():
-            field = form[key]
-            if isinstance(field, list):
-                items.extend([x for x in field if isinstance(x, cgi.FieldStorage)])
-            elif isinstance(field, cgi.FieldStorage):
-                items.append(field)
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_data = self.rfile.read(content_length)
+        except Exception:
+            return []
+
+        from email import policy
+        from email.parser import BytesParser
+
+        msg = BytesParser(policy=policy.default).parsebytes(raw_data)
+        items = []
+        for part in msg.walk():
+            if part.get_content_disposition() == "attachment":
+                filename = part.get_filename()
+                if filename:
+                    payload = part.get_payload(decode=True)
+                    items.append((filename, payload) if payload else (filename, b""))
 
         files: list[tuple[str, bytes]] = []
         for item in items:
@@ -5384,8 +5433,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 size_raw = (query.get("size") or [None])[0]
                 search = str((query.get("search") or [""])[0]).strip()
                 if page_raw is not None or size_raw is not None or search:
-                    page = _safe_int(str(page_raw) if page_raw is not None else None, default=1, min_value=1, max_value=100000)
-                    size = _safe_int(str(size_raw) if size_raw is not None else None, default=100, min_value=10, max_value=2000)
+                    page = _safe_int(
+                        str(page_raw) if page_raw is not None else None, default=1, min_value=1, max_value=100000
+                    )
+                    size = _safe_int(
+                        str(size_raw) if size_raw is not None else None, default=100, min_value=10, max_value=2000
+                    )
                     payload = self.mimic_ops.read_log_content(
                         file_name=file_name,
                         page=page,
@@ -5410,10 +5463,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 try:
                     for _ in range(180):
                         payload = self.mimic_ops.read_log_content(file_name=file_name, tail=tail)
-                        lines = payload.get("lines", []) if payload.get("success") else [payload.get("error", "log not found")]
+                        lines = (
+                            payload.get("lines", [])
+                            if payload.get("success")
+                            else [payload.get("error", "log not found")]
+                        )
                         text = "\n".join(lines)
                         if text != last:
-                            event = json.dumps({"success": True, "lines": lines, "updated_at": _now_iso()}, ensure_ascii=False)
+                            event = json.dumps(
+                                {"success": True, "lines": lines, "updated_at": _now_iso()}, ensure_ascii=False
+                            )
                             self.wfile.write(f"data: {event}\n\n".encode("utf-8"))
                             self.wfile.flush()
                             last = text
