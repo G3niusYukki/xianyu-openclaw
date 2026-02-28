@@ -43,15 +43,17 @@ class AutoQuoteEngine:
         self._remote_failures = 0
         self._circuit_open_until = 0.0
 
-        self.rule_provider: IQuoteProvider = RuleTableQuoteProvider(
-            volume_divisor_default=self.volume_divisor_default
-        )
-        self.cost_table_provider: IQuoteProvider = CostTableMarkupQuoteProvider(
+        cost_table_provider = CostTableMarkupQuoteProvider(
             table_dir=str(cfg.get("cost_table_dir", "data/quote_costs")),
             include_patterns=cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
             markup_rules=cfg.get("markup_rules", {}),
             pricing_profile=str(cfg.get("pricing_profile", "normal")),
             volume_divisor_default=self.volume_divisor_default,
+        )
+        self.cost_table_provider: IQuoteProvider = cost_table_provider
+        self.rule_provider: IQuoteProvider = RuleTableQuoteProvider(
+            volume_divisor_default=self.volume_divisor_default,
+            route_repo=cost_table_provider.repo,
         )
         self.api_cost_provider: IQuoteProvider = ApiCostMarkupQuoteProvider(
             api_url=str(cfg.get("cost_api_url", "")),

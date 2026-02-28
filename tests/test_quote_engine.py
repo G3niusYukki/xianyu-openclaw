@@ -21,8 +21,16 @@ async def test_quote_engine_rule_mode_returns_explainable_result() -> None:
 
 
 @pytest.mark.asyncio
-async def test_quote_engine_rule_mode_uses_max_of_actual_and_volume_weight() -> None:
-    engine = AutoQuoteEngine({"mode": "rule_only", "analytics_log_enabled": False, "volume_divisor_default": 6000})
+async def test_quote_engine_rule_mode_uses_max_of_actual_and_volume_weight(tmp_path) -> None:
+    engine = AutoQuoteEngine(
+        {
+            "mode": "rule_only",
+            "analytics_log_enabled": False,
+            "volume_divisor_default": 6000,
+            "cost_table_dir": str(tmp_path),
+            "cost_table_patterns": ["*.csv"],
+        }
+    )
     req = QuoteRequest(origin="上海", destination="上海", weight=1.0, volume=18000.0, service_level="standard")
 
     result = await engine.get_quote(req)
@@ -33,6 +41,35 @@ async def test_quote_engine_rule_mode_uses_max_of_actual_and_volume_weight() -> 
     assert result.explain.get("actual_weight_kg") == 1.0
     assert result.explain.get("volume_weight_kg") == 3.0
     assert result.explain.get("billing_weight_kg") == 3.0
+    assert result.explain.get("volume_divisor") == 6000.0
+
+
+@pytest.mark.asyncio
+async def test_quote_engine_rule_mode_prefers_throw_ratio_from_cost_table(tmp_path) -> None:
+    csv_path = tmp_path / "rule_throw.csv"
+    csv_path.write_text(
+        "快递公司,始发地,目的地,首重,续重,抛比\n圆通,上海,上海,3.00,2.00,12000\n",
+        encoding="utf-8",
+    )
+    engine = AutoQuoteEngine(
+        {
+            "mode": "rule_only",
+            "analytics_log_enabled": False,
+            "volume_divisor_default": 6000,
+            "cost_table_dir": str(tmp_path),
+            "cost_table_patterns": ["*.csv"],
+        }
+    )
+    req = QuoteRequest(origin="上海", destination="上海", weight=1.0, volume=18000.0, courier="圆通")
+
+    result = await engine.get_quote(req)
+
+    assert result.provider == "rule_table"
+    assert result.surcharges.get("weight") == 1.0
+    assert result.total_fee == 9.0
+    assert result.explain.get("volume_weight_kg") == 1.5
+    assert result.explain.get("billing_weight_kg") == 1.5
+    assert result.explain.get("volume_divisor") == 12000.0
 
 
 @pytest.mark.asyncio

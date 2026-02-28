@@ -40,9 +40,30 @@ class IQuoteProvider(ABC):
 class RuleTableQuoteProvider(IQuoteProvider):
     """本地规则表报价 provider。"""
 
-    def __init__(self, *, volume_divisor_default: float = 6000.0) -> None:
+    def __init__(
+        self,
+        *,
+        volume_divisor_default: float = 6000.0,
+        route_repo: CostTableRepository | None = None,
+    ) -> None:
         self.remote_area_keywords = {"西藏", "新疆", "青海", "内蒙古", "甘肃", "宁夏", "海南", "偏远"}
         self.volume_divisor_default = float(volume_divisor_default or 6000.0)
+        self.route_repo = route_repo
+
+    def _resolve_volume_divisor(self, request: QuoteRequest) -> float:
+        if self.route_repo is not None:
+            requested_courier = _requested_courier(request.courier)
+            candidates = self.route_repo.find_candidates(
+                origin=request.origin,
+                destination=request.destination,
+                courier=requested_courier,
+                limit=8,
+            )
+            for row in candidates:
+                throw_ratio = _to_float(getattr(row, "throw_ratio", None))
+                if throw_ratio is not None and throw_ratio > 0:
+                    return float(throw_ratio)
+        return self.volume_divisor_default if self.volume_divisor_default > 0 else 0.0
 
     async def get_quote(self, request: QuoteRequest, timeout_ms: int = 3000) -> QuoteResult:
         service_level = request.service_level.lower()
@@ -66,10 +87,11 @@ class RuleTableQuoteProvider(IQuoteProvider):
             distance_fee += 3.0
 
         actual_weight = max(0.0, float(request.weight or 0.0))
+        volume_divisor = self._resolve_volume_divisor(request)
         volume_weight = _derive_volume_weight_kg(
             volume_cm3=float(request.volume or 0.0),
             explicit_volume_weight=float(request.volume_weight or 0.0),
-            divisor=self.volume_divisor_default,
+            divisor=volume_divisor,
         )
         billing_weight = max(actual_weight, volume_weight)
         extra_weight = max(0.0, billing_weight - 1.0)
@@ -103,7 +125,7 @@ class RuleTableQuoteProvider(IQuoteProvider):
                 "actual_weight_kg": round(actual_weight, 3),
                 "volume_weight_kg": round(volume_weight, 3),
                 "billing_weight_kg": round(billing_weight, 3),
-                "volume_divisor": self.volume_divisor_default if self.volume_divisor_default > 0 else None,
+                "volume_divisor": volume_divisor if volume_divisor > 0 else None,
             },
         )
 
