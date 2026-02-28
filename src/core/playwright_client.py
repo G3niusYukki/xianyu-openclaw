@@ -350,7 +350,9 @@ class PlaywrightBrowserClient:
         ]
 
         if not cookies:
-            self.logger.warning("No valid cookies parsed from XIANYU_COOKIE_1; skip cookie seeding for Playwright context")
+            self.logger.warning(
+                "No valid cookies parsed from XIANYU_COOKIE_1; skip cookie seeding for Playwright context"
+            )
             return
 
         try:

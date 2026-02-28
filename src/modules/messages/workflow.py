@@ -488,7 +488,9 @@ class WorkflowStore:
                 (cutoff,),
             ).fetchall()
 
-        first_reply_samples = [int(r["latency_ms"]) for r in rows if str(r["stage"]) in {"reply", "quote", "quote_need_info"}]
+        first_reply_samples = [
+            int(r["latency_ms"]) for r in rows if str(r["stage"]) in {"reply", "quote", "quote_need_info"}
+        ]
         quote_rows = [r for r in rows if str(r["stage"]) == "quote"]
         quote_need_info_rows = [r for r in rows if str(r["stage"]) == "quote_need_info"]
         quote_success = sum(1 for r in quote_rows if str(r["outcome"]) == "success")

@@ -11,7 +11,8 @@ import random
 import re
 import struct
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
@@ -202,7 +203,9 @@ class MessagePackDecoder:
 
 
 def decode_sync_payload(raw_text: str) -> Any | None:
-    text = "".join(ch for ch in str(raw_text or "") if ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=-_")
+    text = "".join(
+        ch for ch in str(raw_text or "") if ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=-_"
+    )
     if not text:
         return None
     while len(text) % 4 != 0:
@@ -672,7 +675,7 @@ class GoofishWsTransport:
         if int(time.time() * 1000) - create_time > self.event_expire_ms:
             return
 
-        dedupe_key = hashlib.sha1(f"{chat_id}:{create_time}:{text}".encode("utf-8")).hexdigest()[:20]
+        dedupe_key = hashlib.sha1(f"{chat_id}:{create_time}:{text}".encode()).hexdigest()[:20]
         if dedupe_key in self._seen_event:
             return
 

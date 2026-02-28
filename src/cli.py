@@ -25,8 +25,8 @@
 import argparse
 import asyncio
 import json
-import random
 import os
+import random
 import signal
 import subprocess
 import sys
@@ -1374,6 +1374,7 @@ async def cmd_module(args: argparse.Namespace) -> None:
         return
 
     if action == "recover":
+
         def _recover_one(single_target: str) -> dict[str, Any]:
             stopped = _stop_background_module(target=single_target, timeout_seconds=float(args.stop_timeout or 6.0))
             cleanup = _clear_module_runtime_state(target=single_target)
@@ -1718,7 +1719,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # module
     p = sub.add_parser("module", help="模块化可用性检查与启动（售前/运营/售后）")
-    p.add_argument("--action", required=True, choices=["check", "status", "start", "stop", "restart", "recover", "logs"])
+    p.add_argument(
+        "--action", required=True, choices=["check", "status", "start", "stop", "restart", "recover", "logs"]
+    )
     p.add_argument("--target", required=True, choices=["presales", "operations", "aftersales", "all"])
     p.add_argument("--strict", action="store_true", help="check 未通过时返回非0")
     p.add_argument("--mode", choices=["once", "daemon"], default="once", help="start 运行模式")

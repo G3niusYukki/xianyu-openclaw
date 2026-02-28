@@ -1,7 +1,7 @@
 """自动报价领域模型。"""
 
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 DEFAULT_QUOTE_REPLY_TEMPLATE = (

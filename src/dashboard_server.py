@@ -811,7 +811,7 @@ class MimicOps:
 
         normalized = str(parsed.get("cookie") or "")
         cookie_map = {k: v for k, v in self._extract_cookie_pairs_from_header(normalized)}
-        required_all = list(self._COOKIE_REQUIRED_KEYS) + ["_m_h5_tk", "_m_h5_tk_enc"]
+        required_all = [*list(self._COOKIE_REQUIRED_KEYS), "_m_h5_tk", "_m_h5_tk_enc"]
         required_present = [k for k in required_all if k in cookie_map]
         required_missing = [k for k in required_all if k not in cookie_map]
         recommended_present = [k for k in self._COOKIE_RECOMMENDED_KEYS if k in cookie_map]
@@ -5473,7 +5473,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                             event = json.dumps(
                                 {"success": True, "lines": lines, "updated_at": _now_iso()}, ensure_ascii=False
                             )
-                            self.wfile.write(f"data: {event}\n\n".encode("utf-8"))
+                            self.wfile.write(f"data: {event}\n\n".encode())
                             self.wfile.flush()
                             last = text
                         time.sleep(1)

@@ -130,9 +130,7 @@ class MessagesService:
         raw_quote_keywords = self.config.get("quote_intent_keywords")
         if isinstance(raw_quote_keywords, list):
             cleaned_quote_keywords = [
-                str(s).strip().lower()
-                for s in raw_quote_keywords
-                if str(s).strip() and len(str(s).strip()) >= 2
+                str(s).strip().lower() for s in raw_quote_keywords if str(s).strip() and len(str(s).strip()) >= 2
             ]
         else:
             cleaned_quote_keywords = []
@@ -140,9 +138,7 @@ class MessagesService:
         raw_standard_triggers = self.config.get("standard_format_trigger_keywords")
         if isinstance(raw_standard_triggers, list):
             cleaned_standard_triggers = [
-                str(s).strip().lower()
-                for s in raw_standard_triggers
-                if str(s).strip() and len(str(s).strip()) >= 2
+                str(s).strip().lower() for s in raw_standard_triggers if str(s).strip() and len(str(s).strip()) >= 2
             ]
         else:
             cleaned_standard_triggers = []
@@ -270,7 +266,7 @@ class MessagesService:
         days = max(1.0, raw / 1440.0)
         rounded = round(days, 1)
         if abs(rounded - round(rounded)) < 1e-9:
-            return f"{int(round(rounded))}天"
+            return f"{round(rounded)}天"
         return f"{rounded:.1f}天"
 
     def _resolve_quote_candidate_couriers(self, request: QuoteRequest) -> list[str]:
@@ -345,7 +341,9 @@ class MessagesService:
 
         first_explain = quote_rows[0][1].explain if isinstance(quote_rows[0][1].explain, dict) else {}
         origin = str(first_explain.get("matched_origin") or first_explain.get("normalized_origin") or "寄件地")
-        destination = str(first_explain.get("matched_destination") or first_explain.get("normalized_destination") or "收件地")
+        destination = str(
+            first_explain.get("matched_destination") or first_explain.get("normalized_destination") or "收件地"
+        )
 
         lines = [f"{origin} -> {destination} 可选快递报价（可自行挑选）："]
         for index, (courier_name, result) in enumerate(quote_rows, start=1):
@@ -681,7 +679,9 @@ class MessagesService:
                 "is_quote": True,
                 "quote_need_info": True,
                 "format_enforced": bool(strict_enforced or force_standard_format),
-                "format_enforced_reason": "greeting" if force_standard_format else ("strict_mode" if strict_enforced else ""),
+                "format_enforced_reason": "greeting"
+                if force_standard_format
+                else ("strict_mode" if strict_enforced else ""),
                 "quote_missing_fields": missing,
                 "quote_success": False,
                 "quote_fallback": False,
