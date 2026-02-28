@@ -39,11 +39,13 @@ class AutoQuoteEngine:
         self.circuit_open_seconds = int(cfg.get("circuit_open_seconds", 30))
         self.api_fallback_to_table_parallel = bool(cfg.get("api_fallback_to_table_parallel", True))
         self.api_prefer_max_wait_seconds = max(0.05, float(cfg.get("api_prefer_max_wait_seconds", 1.2)))
-        self.volume_divisor_default = float(cfg.get("volume_divisor_default", 0.0) or 0.0)
+        self.volume_divisor_default = float(cfg.get("volume_divisor_default", 6000) or 6000)
         self._remote_failures = 0
         self._circuit_open_until = 0.0
 
-        self.rule_provider: IQuoteProvider = RuleTableQuoteProvider()
+        self.rule_provider: IQuoteProvider = RuleTableQuoteProvider(
+            volume_divisor_default=self.volume_divisor_default
+        )
         self.cost_table_provider: IQuoteProvider = CostTableMarkupQuoteProvider(
             table_dir=str(cfg.get("cost_table_dir", "data/quote_costs")),
             include_patterns=cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
@@ -62,6 +64,7 @@ class AutoQuoteEngine:
             enabled=bool(providers_cfg.get("remote", {}).get("enabled", False)),
             simulated_latency_ms=int(providers_cfg.get("remote", {}).get("simulated_latency_ms", 120)),
             failure_rate=float(providers_cfg.get("remote", {}).get("failure_rate", 0.0)),
+            volume_divisor_default=self.volume_divisor_default,
         )
 
         self.cache = QuoteCache(

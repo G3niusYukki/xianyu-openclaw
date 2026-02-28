@@ -40,8 +40,9 @@ class IQuoteProvider(ABC):
 class RuleTableQuoteProvider(IQuoteProvider):
     """本地规则表报价 provider。"""
 
-    def __init__(self) -> None:
+    def __init__(self, *, volume_divisor_default: float = 6000.0) -> None:
         self.remote_area_keywords = {"西藏", "新疆", "青海", "内蒙古", "甘肃", "宁夏", "海南", "偏远"}
+        self.volume_divisor_default = float(volume_divisor_default or 6000.0)
 
     async def get_quote(self, request: QuoteRequest, timeout_ms: int = 3000) -> QuoteResult:
         service_level = request.service_level.lower()
@@ -64,7 +65,14 @@ class RuleTableQuoteProvider(IQuoteProvider):
         if request.origin[:2] != request.destination[:2] and not same_city:
             distance_fee += 3.0
 
-        extra_weight = max(0.0, request.weight - 1.0)
+        actual_weight = max(0.0, float(request.weight or 0.0))
+        volume_weight = _derive_volume_weight_kg(
+            volume_cm3=float(request.volume or 0.0),
+            explicit_volume_weight=float(request.volume_weight or 0.0),
+            divisor=self.volume_divisor_default,
+        )
+        billing_weight = max(actual_weight, volume_weight)
+        extra_weight = max(0.0, billing_weight - 1.0)
         weight_fee = extra_weight * 2.0
 
         remote_fee = 0.0
@@ -92,6 +100,10 @@ class RuleTableQuoteProvider(IQuoteProvider):
                 "service_level": service_level,
                 "same_city": same_city,
                 "weight_kg": request.weight,
+                "actual_weight_kg": round(actual_weight, 3),
+                "volume_weight_kg": round(volume_weight, 3),
+                "billing_weight_kg": round(billing_weight, 3),
+                "volume_divisor": self.volume_divisor_default if self.volume_divisor_default > 0 else None,
             },
         )
 
@@ -310,10 +322,12 @@ class RemoteQuoteProvider(IQuoteProvider):
         enabled: bool = True,
         simulated_latency_ms: int = 120,
         failure_rate: float = 0.0,
+        volume_divisor_default: float = 6000.0,
     ):
         self.enabled = enabled
         self.simulated_latency_ms = max(0, simulated_latency_ms)
         self.failure_rate = min(max(failure_rate, 0.0), 1.0)
+        self.volume_divisor_default = float(volume_divisor_default or 6000.0)
 
     async def get_quote(self, request: QuoteRequest, timeout_ms: int = 3000) -> QuoteResult:
         if not self.enabled:
@@ -327,8 +341,16 @@ class RemoteQuoteProvider(IQuoteProvider):
         if random.random() < self.failure_rate:
             raise QuoteProviderError("Remote provider temporary failure")
 
+        actual_weight = max(0.0, float(request.weight or 0.0))
+        volume_weight = _derive_volume_weight_kg(
+            volume_cm3=float(request.volume or 0.0),
+            explicit_volume_weight=float(request.volume_weight or 0.0),
+            divisor=self.volume_divisor_default,
+        )
+        billing_weight = max(actual_weight, volume_weight)
+
         base_fee = 10.0 if request.service_level != "urgent" else 16.0
-        dynamic = (request.weight * 2.2) + (0 if request.origin == request.destination else 3.5)
+        dynamic = (billing_weight * 2.2) + (0 if request.origin == request.destination else 3.5)
         fuel = round((base_fee + dynamic) * 0.08, 2)
         total = round(base_fee + dynamic + fuel, 2)
         eta = 16 * 60 if request.service_level == "express" else 30 * 60
@@ -345,6 +367,10 @@ class RemoteQuoteProvider(IQuoteProvider):
                 "origin": request.origin,
                 "destination": request.destination,
                 "weight_kg": request.weight,
+                "actual_weight_kg": round(actual_weight, 3),
+                "volume_weight_kg": round(volume_weight, 3),
+                "billing_weight_kg": round(billing_weight, 3),
+                "volume_divisor": self.volume_divisor_default if self.volume_divisor_default > 0 else None,
             },
         )
 

@@ -21,6 +21,21 @@ async def test_quote_engine_rule_mode_returns_explainable_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_quote_engine_rule_mode_uses_max_of_actual_and_volume_weight() -> None:
+    engine = AutoQuoteEngine({"mode": "rule_only", "analytics_log_enabled": False, "volume_divisor_default": 6000})
+    req = QuoteRequest(origin="上海", destination="上海", weight=1.0, volume=18000.0, service_level="standard")
+
+    result = await engine.get_quote(req)
+
+    assert result.provider == "rule_table"
+    assert result.surcharges.get("weight") == 4.0
+    assert result.total_fee == 12.0
+    assert result.explain.get("actual_weight_kg") == 1.0
+    assert result.explain.get("volume_weight_kg") == 3.0
+    assert result.explain.get("billing_weight_kg") == 3.0
+
+
+@pytest.mark.asyncio
 async def test_quote_engine_remote_failure_falls_back_to_rule_provider() -> None:
     engine = AutoQuoteEngine(
         {
