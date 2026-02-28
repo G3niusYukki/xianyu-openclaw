@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-02-28
+
+### Added
+- **售前会话流程优化**：
+  - 对齐业务模型：报价 → 选择快递 → 下单（不支付）→ 卖家改价 → 买家支付 → 自动兑换码
+  - 移除选择快递后的地址/电话收集分支，替换为结账引导回复
+  - 新增会话上下文记忆，用于后续报价解析（origin/destination/weight/courier choice）
+- **新增配置项**：
+  - `messages.force_non_empty_reply`：确保回复不为空（默认 true）
+  - `messages.non_empty_reply_fallback`：空回复时的后备内容
+  - `messages.context_memory_enabled`：启用会话上下文记忆（默认 true）
+  - `messages.context_memory_ttl_seconds`：上下文记忆 TTL（默认 3600）
+  - `messages.courier_lock_template`：快递锁定回复模板
+- **Lite Mode 架构提案**：新增 `docs/architecture/lite-mode-proposal.md`
+
 ## [5.0.0] - 2026-02-28
 
 ### Added

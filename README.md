@@ -27,6 +27,19 @@
 
 ---
 
+## 5.1.0 更新摘要（2026-02-28）
+
+- **售前会话流程优化**：
+  - 对齐业务模型：报价 → 选择快递 → 下单（不支付）→ 卖家改价 → 买家支付 → 自动兑换码
+  - 移除选择快递后的地址/电话收集分支，替换为结账引导回复
+  - 新增会话上下文记忆，用于后续报价解析（origin/destination/weight/courier choice）
+- **新增配置项**：
+  - `force_non_empty_reply`：确保回复不为空
+  - `non_empty_reply_fallback`：空回复时的后备内容
+  - `context_memory_enabled`：启用会话上下文记忆
+  - `context_memory_ttl_seconds`：上下文记忆 TTL
+  - `courier_lock_template`：快递锁定回复模板
+
 ## 5.0.0 更新摘要（2026-02-28）
 
 - **售前运行时强化**：
