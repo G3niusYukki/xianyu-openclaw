@@ -10,6 +10,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from src.core.logger import get_logger
 
 logger = get_logger()
@@ -24,6 +26,8 @@ class StartupCheckResult:
 
 
 def resolve_runtime_mode() -> str:
+    # Ensure `.env` values (e.g. OPENCLAW_RUNTIME) are visible before runtime resolution.
+    load_dotenv(override=False)
     env_runtime = str(os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
     if env_runtime in {"auto", "lite", "pro"}:
         return env_runtime

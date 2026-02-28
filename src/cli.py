@@ -443,6 +443,20 @@ def _module_logs(target: str, tail_lines: int = 80) -> dict[str, Any]:
     return {"target": target, "log_file": str(log_file), "lines": lines[-max(int(tail_lines), 1) :]}
 
 
+def _clear_module_runtime_state(target: str) -> dict[str, Any]:
+    """清理模块运行态文件，避免 pid 状态残留导致误判。"""
+    removed: list[str] = []
+    for suffix in (".json", ".pid", ".lock"):
+        fp = _MODULE_RUNTIME_DIR / f"{target}{suffix}"
+        try:
+            if fp.exists():
+                fp.unlink()
+                removed.append(str(fp))
+        except Exception:
+            continue
+    return {"target": target, "removed": removed}
+
+
 def _resolve_workflow_state(stage: str | None) -> Any:
     if not stage:
         return None
@@ -1359,6 +1373,28 @@ async def cmd_module(args: argparse.Namespace) -> None:
         _json_out({"target": target, "stopped": stopped, "started": started})
         return
 
+    if action == "recover":
+        def _recover_one(single_target: str) -> dict[str, Any]:
+            stopped = _stop_background_module(target=single_target, timeout_seconds=float(args.stop_timeout or 6.0))
+            cleanup = _clear_module_runtime_state(target=single_target)
+            started = _start_background_module(target=single_target, args=args)
+            recovered = bool(started.get("started")) or str(started.get("reason", "")) == "already_running"
+            return {
+                "target": single_target,
+                "stopped": stopped,
+                "cleanup": cleanup,
+                "started": started,
+                "recovered": recovered,
+            }
+
+        if target == "all":
+            modules = {name: _recover_one(name) for name in _MODULE_TARGETS}
+            _json_out({"target": "all", "action": "recover", "modules": modules})
+            return
+
+        _json_out(_recover_one(target))
+        return
+
     if action == "logs":
         if target == "all":
             _json_out(
@@ -1682,7 +1718,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # module
     p = sub.add_parser("module", help="模块化可用性检查与启动（售前/运营/售后）")
-    p.add_argument("--action", required=True, choices=["check", "status", "start", "stop", "restart", "logs"])
+    p.add_argument("--action", required=True, choices=["check", "status", "start", "stop", "restart", "recover", "logs"])
     p.add_argument("--target", required=True, choices=["presales", "operations", "aftersales", "all"])
     p.add_argument("--strict", action="store_true", help="check 未通过时返回非0")
     p.add_argument("--mode", choices=["once", "daemon"], default="once", help="start 运行模式")

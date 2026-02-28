@@ -231,6 +231,7 @@ python -m src.cli module --action start  --target operations --mode daemon --ini
 python -m src.cli module --action start  --target aftersales --mode daemon --limit 20 --interval 15 --issue-type delay
 python -m src.cli module --action start  --target all --mode daemon --background
 python -m src.cli module --action stop   --target all
+python -m src.cli module --action recover --target presales --stop-timeout 6
 python -m src.cli module --action logs   --target all --tail-lines 80
 python -m src.dashboard_server --port 8091
 ```
@@ -246,6 +247,15 @@ scripts\windows\start_all_lite.bat
 scripts\windows\start_presales.bat daemon 20 5
 scripts\windows\start_operations.bat daemon 30
 scripts\windows\start_aftersales.bat daemon 20 15 delay
+scripts\windows\module_recover.bat presales
+```
+
+macOS/Linux 可用轻量脚本：
+
+```bash
+scripts/unix/dashboard.sh 8091
+scripts/unix/start_all_lite.sh
+scripts/unix/recover_presales.sh
 ```
 
 ### 消息自动回复策略（虚拟商品 + 快递自动报价）
@@ -267,7 +277,7 @@ messages:
   inter_reply_delay_seconds: [0.4, 1.2]
   send_confirm_delay_seconds: [0.15, 0.35]
   quote_intent_keywords: ["报价", "多少钱", "运费", "寄到"]
-  quote_missing_template: "为了给您准确报价，请补充：{fields}。"
+  quote_missing_template: "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）"
   quote_failed_template: "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。"
   reply_prefix: "【自动回复】"
   default_reply: "您好，宝贝在的，感兴趣可以直接拍下。"

@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import cgi
 import csv
+import hashlib
 import io
 import json
 import os
@@ -13,6 +14,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 from datetime import datetime, timedelta
@@ -257,7 +259,7 @@ class ModuleConsole:
         act = str(action or "").strip().lower()
         tgt = str(target or "").strip().lower()
 
-        if act not in {"start", "stop", "restart"}:
+        if act not in {"start", "stop", "restart", "recover"}:
             return {"error": f"Unsupported module action: {act}"}
         if tgt not in {"all", *MODULE_TARGETS}:
             return {"error": f"Unsupported module target: {tgt}"}
@@ -298,6 +300,24 @@ class ModuleConsole:
                     "--init-default-tasks",
                 ]
             )
+        elif act == "recover":
+            args.extend(
+                [
+                    "--mode",
+                    "daemon",
+                    "--interval",
+                    "5",
+                    "--limit",
+                    "20",
+                    "--claim-limit",
+                    "10",
+                    "--issue-type",
+                    "delay",
+                    "--stop-timeout",
+                    "6",
+                    "--init-default-tasks",
+                ]
+            )
         else:
             args.extend(["--stop-timeout", "6"])
 
@@ -305,12 +325,19 @@ class ModuleConsole:
 
 
 DEFAULT_WEIGHT_TEMPLATE = (
-    "您好，{origin} 到 {destination}，按实际重量 {weight}kg 预估，"
-    "{courier} 报价约 ¥{price}（{price_breakdown}）。预计时效约 {eta_days}。"
+    "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n"
+    "{courier}: {price} 元\n"
+    "预计时效：{eta_days}\n"
+    "重要提示：\n"
+    "体积重大于实际重量时按体积计费！"
 )
 DEFAULT_VOLUME_TEMPLATE = (
-    "您好，{origin} 到 {destination}，按体积重规则（{volume_formula}）预估，"
-    "{courier} 报价约 ¥{price}（{price_breakdown}）。预计时效约 {eta_days}。"
+    "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n"
+    "体积重规则：{volume_formula}\n"
+    "{courier}: {price} 元\n"
+    "预计时效：{eta_days}\n"
+    "重要提示：\n"
+    "体积重大于实际重量时按体积计费！"
 )
 
 
@@ -377,8 +404,33 @@ class MimicOps:
         ),
     }
     _COOKIE_REQUIRED_KEYS = ("_tb_token_", "cookie2", "sgcookie", "unb")
-    _COOKIE_IMPORT_EXTS = {".txt", ".json", ".log", ".cookies"}
+    _COOKIE_RECOMMENDED_KEYS = ("XSRF-TOKEN", "last_u_xianyu_web", "tfstk", "t", "cna")
+    _COOKIE_DOMAIN_ALLOWLIST = ("goofish.com", "passport.goofish.com")
+    _COOKIE_IMPORT_EXTS = {".txt", ".json", ".log", ".cookies", ".csv", ".tsv", ".har"}
+    _COOKIE_HINT_KEYS = ("_tb_token_", "cookie2", "sgcookie", "unb", "_m_h5_tk", "_m_h5_tk_enc")
     _COOKIE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+    _ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+    _LOG_TIME_RE = re.compile(r"(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})")
+    _RISK_BLOCK_PATTERNS = (
+        "fail_sys_user_validate",
+        "rgv587",
+        "账号异常",
+        "账号风险",
+        "安全验证",
+        "访问受限",
+        "封控",
+        "封禁",
+    )
+    _RISK_WARN_PATTERNS = (
+        "http 400",
+        "http 403",
+        "forbidden",
+        "unauthorized",
+        "token api failed",
+        "需要验证码",
+        "验证码",
+        "校验失败",
+    )
 
     def __init__(self, project_root: str | Path, module_console: ModuleConsole):
         self.project_root = Path(project_root).resolve()
@@ -389,6 +441,12 @@ class MimicOps:
             "stopped": False,
             "updated_at": _now_iso(),
         }
+        self._last_cookie_fp = ""
+        self._last_token_error: str | None = None
+        self._last_auto_recover_cookie_fp = ""
+        self._last_auto_recover_at = ""
+        self._last_auto_recover_result: dict[str, Any] = {}
+        self._recover_lock = threading.Lock()
 
     @property
     def env_path(self) -> Path:
@@ -436,6 +494,13 @@ class MimicOps:
             "cookie": cookie,
             "length": len(cookie),
         }
+
+    @staticmethod
+    def _cookie_fingerprint(cookie_text: str) -> str:
+        raw = str(cookie_text or "").strip()
+        if not raw:
+            return ""
+        return hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
     @classmethod
     def _cookie_pairs_to_text(cls, pairs: list[tuple[str, str]]) -> tuple[str, int]:
@@ -489,6 +554,13 @@ class MimicOps:
         return pairs
 
     @classmethod
+    def _is_allowed_cookie_domain(cls, domain: str) -> bool:
+        value = str(domain or "").strip().lower().lstrip(".")
+        if not value:
+            return True
+        return any(value.endswith(allowed) for allowed in cls._COOKIE_DOMAIN_ALLOWLIST)
+
+    @classmethod
     def _extract_cookie_pairs_from_header(cls, raw_text: str) -> list[tuple[str, str]]:
         text = str(raw_text or "").replace("\ufeff", "").replace("\x00", "").strip()
         if not text:
@@ -517,9 +589,13 @@ class MimicOps:
             if "\t" in s:
                 cols = [c.strip() for c in s.split("\t") if c.strip()]
                 if len(cols) >= 7:
-                    pairs.append((cols[5], cols[6]))
+                    if cls._is_allowed_cookie_domain(cols[0]):
+                        pairs.append((cols[5], cols[6]))
                     continue
                 if len(cols) >= 2 and cls._COOKIE_NAME_RE.fullmatch(cols[0]):
+                    # DevTools 表格常见格式：name value domain ...
+                    if len(cols) >= 3 and not cls._is_allowed_cookie_domain(cols[2]):
+                        continue
                     pairs.append((cols[0], cols[1]))
                     continue
 
@@ -566,7 +642,61 @@ class MimicOps:
             "missing_required": missing_required,
         }
 
-    def update_cookie(self, cookie: str) -> dict[str, Any]:
+    def _recovery_stage_label(self, stage: str) -> str:
+        mapping = {
+            "healthy": "链路正常",
+            "token_error": "鉴权异常",
+            "waiting_cookie_update": "等待更新 Cookie",
+            "waiting_reconnect": "等待重连",
+            "recover_triggered": "已触发自动恢复",
+            "inactive": "服务未运行",
+            "monitoring": "监控中",
+        }
+        key = str(stage or "").strip().lower()
+        return mapping.get(key, "状态未知")
+
+    def _recovery_advice(self, stage: str, token_error: str | None = None) -> str:
+        s = str(stage or "").strip().lower()
+        t = str(token_error or "").strip().upper()
+        if s == "recover_triggered":
+            return "已触发售前恢复，建议等待 5-20 秒后刷新状态。"
+        if s == "waiting_reconnect":
+            return "Cookie 已更新但尚未连通，可点击“售前一键恢复”立即重试。"
+        if s == "waiting_cookie_update":
+            if t == "FAIL_SYS_USER_VALIDATE":
+                return "请在闲鱼网页重新登录后导出最新 Cookie，再执行“售前一键恢复”。"
+            return "请更新 Cookie 后重试恢复。"
+        if s == "token_error":
+            if t == "WS_HTTP_400":
+                return "连接通道异常，请先点“售前一键恢复”；若持续失败再更新 Cookie。"
+            return "存在鉴权错误，建议更新 Cookie 后重连。"
+        if s == "inactive":
+            return "服务未运行，请先在首页启动服务。"
+        if s == "healthy":
+            return "当前链路可用，可正常自动回复。"
+        return "监控中，请刷新状态查看最新结果。"
+
+    def _trigger_presales_recover_after_cookie_update(self, cookie_text: str) -> dict[str, Any]:
+        cookie_fp = self._cookie_fingerprint(cookie_text)
+        if not cookie_fp:
+            return {"triggered": False, "message": "cookie_empty"}
+
+        result = self.module_console.control(action="recover", target="presales")
+        has_error = bool(result.get("error")) if isinstance(result, dict) else True
+        now = _now_iso()
+        with self._recover_lock:
+            self._last_auto_recover_cookie_fp = cookie_fp
+            self._last_auto_recover_at = now
+            self._last_auto_recover_result = result if isinstance(result, dict) else {}
+            self._last_cookie_fp = cookie_fp
+        return {
+            "triggered": not has_error,
+            "result": result,
+            "at": now,
+            "message": "recover_ok" if not has_error else "recover_failed",
+        }
+
+    def update_cookie(self, cookie: str, *, auto_recover: bool = False) -> dict[str, Any]:
         parsed = self.parse_cookie_text(str(cookie or ""))
         if not parsed.get("success"):
             return parsed
@@ -574,18 +704,200 @@ class MimicOps:
         if not cookie_text:
             return {"success": False, "error": "Cookie string cannot be empty"}
         self._set_env_value("XIANYU_COOKIE_1", cookie_text)
-        return {
+        diagnosis = self.diagnose_cookie(cookie_text)
+        payload: dict[str, Any] = {
             "success": True,
             "message": "Cookie updated",
             "length": len(cookie_text),
             "cookie_items": int(parsed.get("cookie_items", 0) or 0),
             "detected_format": str(parsed.get("detected_format") or "header"),
             "missing_required": parsed.get("missing_required", []),
+            "cookie_grade": diagnosis.get("grade", "未知"),
+            "cookie_actions": diagnosis.get("actions", []),
+            "cookie_diagnosis": diagnosis,
+        }
+        should_recover = auto_recover and str(diagnosis.get("grade") or "") != "不可用"
+        if should_recover:
+            recover = self._trigger_presales_recover_after_cookie_update(cookie_text)
+            payload["auto_recover"] = recover
+            if recover.get("triggered"):
+                payload["message"] = "Cookie updated and presales recovery triggered"
+            else:
+                payload["message"] = "Cookie updated, but presales recovery failed"
+        return payload
+
+    @classmethod
+    def _cookie_domain_filter_stats(cls, raw_text: str) -> dict[str, Any]:
+        text = str(raw_text or "").replace("\ufeff", "").replace("\x00", "")
+        checked = 0
+        rejected = 0
+        samples: list[str] = []
+
+        def _check_domain(domain: str) -> None:
+            nonlocal checked, rejected
+            dom = str(domain or "").strip().lower()
+            if not dom:
+                return
+            checked += 1
+            if not cls._is_allowed_cookie_domain(dom):
+                rejected += 1
+                if len(samples) < 5:
+                    samples.append(dom)
+
+        # 文本行（Netscape / 表格）
+        for line in text.splitlines():
+            s = str(line or "").strip()
+            if not s or s.startswith("#"):
+                continue
+            if "\t" not in s:
+                continue
+            cols = [c.strip() for c in s.split("\t") if c.strip()]
+            if len(cols) >= 7:
+                _check_domain(cols[0])
+            elif len(cols) >= 3:
+                _check_domain(cols[2])
+
+        # JSON 结构中的 domain 字段
+        try:
+            payload = json.loads(text)
+        except Exception:
+            payload = None
+        if payload is not None:
+            queue: list[Any] = [payload]
+            while queue:
+                item = queue.pop()
+                if isinstance(item, dict):
+                    if "domain" in item:
+                        _check_domain(str(item.get("domain") or ""))
+                    for v in item.values():
+                        if isinstance(v, (dict, list)):
+                            queue.append(v)
+                elif isinstance(item, list):
+                    queue.extend(item)
+
+        return {
+            "allowlist": list(cls._COOKIE_DOMAIN_ALLOWLIST),
+            "checked": checked,
+            "rejected": rejected,
+            "applied": True,
+            "rejected_samples": samples,
+        }
+
+    def diagnose_cookie(self, cookie_text: str) -> dict[str, Any]:
+        raw = str(cookie_text or "").strip()
+        if not raw:
+            return {
+                "success": False,
+                "grade": "不可用",
+                "error": "Cookie text is empty",
+                "actions": ["请先粘贴 Cookie 文本，或上传插件导出的 cookies 文件。"],
+            }
+
+        parsed = self.parse_cookie_text(raw)
+        domain_filter = self._cookie_domain_filter_stats(raw)
+        if not parsed.get("success"):
+            return {
+                "success": False,
+                "grade": "不可用",
+                "error": str(parsed.get("error") or "解析失败"),
+                "domain_filter": domain_filter,
+                "actions": [
+                    "请使用 headers/json/cookies.txt 任一格式重试。",
+                    "建议在登录闲鱼后立即导出 Cookie，再上传。",
+                ],
+            }
+
+        normalized = str(parsed.get("cookie") or "")
+        cookie_map = {k: v for k, v in self._extract_cookie_pairs_from_header(normalized)}
+        required_all = list(self._COOKIE_REQUIRED_KEYS) + ["_m_h5_tk", "_m_h5_tk_enc"]
+        required_present = [k for k in required_all if k in cookie_map]
+        required_missing = [k for k in required_all if k not in cookie_map]
+        recommended_present = [k for k in self._COOKIE_RECOMMENDED_KEYS if k in cookie_map]
+        recommended_missing = [k for k in self._COOKIE_RECOMMENDED_KEYS if k not in cookie_map]
+        critical_missing = [k for k in self._COOKIE_REQUIRED_KEYS if k in required_missing]
+        session_missing = [k for k in ("_m_h5_tk", "_m_h5_tk_enc") if k in required_missing]
+
+        length = int(parsed.get("length", 0) or 0)
+        cookie_items = int(parsed.get("cookie_items", 0) or 0)
+        grade = "可用"
+        if critical_missing or cookie_items < 4:
+            grade = "不可用"
+        elif session_missing or length < 80:
+            grade = "高风险"
+        elif len(recommended_missing) >= 2:
+            grade = "高风险"
+
+        actions: list[str] = []
+        if critical_missing:
+            actions.append(f"缺少关键字段：{', '.join(critical_missing)}，请重新登录后导出完整 Cookie。")
+        if session_missing:
+            actions.append("缺少 _m_h5_tk/_m_h5_tk_enc，建议刷新页面后重新导出。")
+        if domain_filter.get("rejected", 0):
+            actions.append("检测到非 goofish 域 Cookie，系统已自动过滤。")
+        if recommended_missing:
+            actions.append(
+                "缺少会话增强字段："
+                + ", ".join(recommended_missing)
+                + "；建议在插件中使用 Export All Cookies（全量导出）后重试。"
+            )
+        if grade == "可用":
+            actions.append("可直接保存并在首页执行“售前一键恢复”。")
+
+        return {
+            "success": True,
+            "grade": grade,
+            "detected_format": str(parsed.get("detected_format") or "unknown"),
+            "length": length,
+            "cookie_items": cookie_items,
+            "required_present": required_present,
+            "required_missing": required_missing,
+            "recommended_present": recommended_present,
+            "recommended_missing": recommended_missing,
+            "domain_filter": domain_filter,
+            "actions": actions,
         }
 
     @classmethod
     def _is_cookie_import_file(cls, filename: str) -> bool:
-        return Path(filename).suffix.lower() in cls._COOKIE_IMPORT_EXTS
+        suffix = Path(filename).suffix.lower()
+        if suffix in cls._COOKIE_IMPORT_EXTS:
+            return True
+        # 一些插件/工具导出的文件无后缀（如 `cookies`），允许走内容识别。
+        return suffix == "" and bool(Path(filename).name)
+
+    @classmethod
+    def _looks_like_cookie_plugin_bundle(cls, member_names: list[str]) -> bool:
+        names = [str(name or "").replace("\\", "/").strip().lower() for name in member_names if str(name or "").strip()]
+        if not names:
+            return False
+
+        if any("get-cookies.txt-locally/src/manifest.json" in item for item in names):
+            return True
+
+        basenames = {Path(item).name for item in names}
+        has_manifest = "manifest.json" in basenames
+        has_popup = "popup.mjs" in basenames or "popup.js" in basenames
+        has_background = "background.mjs" in basenames or "background.js" in basenames
+        if has_manifest and (has_popup or has_background):
+            return True
+
+        # 插件源码常见特征文件，manifest + 任一特征可判定为安装包而非导出 cookie。
+        plugin_markers = (
+            "get-cookies.txt-locally",
+            "cookie_format.mjs",
+            "get_all_cookies.mjs",
+            "save_to_file.mjs",
+            "popup-options.css",
+        )
+        if has_manifest and any(any(marker in item for marker in plugin_markers) for item in names):
+            return True
+        return False
+
+    @classmethod
+    def _cookie_hint_hit_keys(cls, cookie_text: str) -> list[str]:
+        text = str(cookie_text or "")
+        hits = [k for k in cls._COOKIE_HINT_KEYS if f"{k}=" in text]
+        return hits
 
     @classmethod
     def _score_cookie_candidate(cls, payload: dict[str, Any]) -> tuple[int, int, int]:
@@ -596,7 +908,7 @@ class MimicOps:
         length = int(payload.get("length", 0) or 0)
         return required_hit, cookie_items, length
 
-    def import_cookie_plugin_files(self, files: list[tuple[str, bytes]]) -> dict[str, Any]:
+    def import_cookie_plugin_files(self, files: list[tuple[str, bytes]], *, auto_recover: bool = False) -> dict[str, Any]:
         if not files:
             return {"success": False, "error": "No files uploaded"}
 
@@ -604,6 +916,7 @@ class MimicOps:
         imported_files: list[str] = []
         skipped_files: list[str] = []
         details: list[str] = []
+        plugin_bundle_detected = False
 
         def _collect_text_candidate(source_name: str, raw: bytes) -> None:
             text = self._decode_text_bytes(raw)
@@ -612,11 +925,17 @@ class MimicOps:
                 skipped_files.append(source_name)
                 details.append(f"{source_name} -> {parsed.get('error', 'parse failed')}")
                 return
+            hit_keys = self._cookie_hint_hit_keys(str(parsed.get("cookie") or ""))
+            if not hit_keys:
+                skipped_files.append(source_name)
+                details.append(f"{source_name} -> parsed but missing known keys ({', '.join(self._COOKIE_HINT_KEYS)})")
+                return
 
             candidates.append(
                 {
                     "source_file": source_name,
                     "parsed": parsed,
+                    "hit_keys": hit_keys,
                 }
             )
             imported_files.append(source_name)
@@ -628,6 +947,9 @@ class MimicOps:
             if suffix == ".zip":
                 try:
                     with zipfile.ZipFile(io.BytesIO(content), mode="r") as zf:
+                        member_names = [str(info.filename or "") for info in zf.infolist()]
+                        if self._looks_like_cookie_plugin_bundle(member_names):
+                            plugin_bundle_detected = True
                         for info in zf.infolist():
                             if info.is_dir():
                                 continue
@@ -643,6 +965,10 @@ class MimicOps:
                                 continue
                             try:
                                 raw = zf.read(info)
+                                if not raw:
+                                    skipped_files.append(f"{file_name}:{repaired_name}")
+                                    details.append(f"{file_name}:{repaired_name} -> empty file")
+                                    continue
                                 _collect_text_candidate(f"{file_name}:{member_name}", raw)
                             except Exception as exc:
                                 skipped_files.append(f"{file_name}:{repaired_name}")
@@ -661,6 +987,15 @@ class MimicOps:
             _collect_text_candidate(file_name, content)
 
         if not candidates:
+            if plugin_bundle_detected:
+                return {
+                    "success": False,
+                    "error": "Detected plugin installation bundle, not exported cookies.",
+                    "hint": "请先在浏览器安装插件并导出 cookies.txt/JSON，再上传导出文件。",
+                    "imported_files": imported_files,
+                    "skipped_files": skipped_files,
+                    "details": details,
+                }
             return {
                 "success": False,
                 "error": "No valid cookie content found in uploaded files.",
@@ -682,7 +1017,8 @@ class MimicOps:
             }
 
         self._set_env_value("XIANYU_COOKIE_1", cookie_text)
-        return {
+        diagnosis = self.diagnose_cookie(cookie_text)
+        payload: dict[str, Any] = {
             "success": True,
             "message": "Cookie imported from plugin export",
             "source_file": str(best.get("source_file") or ""),
@@ -694,7 +1030,20 @@ class MimicOps:
             "imported_files": imported_files,
             "skipped_files": skipped_files,
             "details": details,
+            "cookie_grade": diagnosis.get("grade", "未知"),
+            "cookie_actions": diagnosis.get("actions", []),
+            "cookie_diagnosis": diagnosis,
+            "recognized_key_hits": best.get("hit_keys", []),
         }
+        should_recover = auto_recover and str(diagnosis.get("grade") or "") != "不可用"
+        if should_recover:
+            recover = self._trigger_presales_recover_after_cookie_update(cookie_text)
+            payload["auto_recover"] = recover
+            if recover.get("triggered"):
+                payload["message"] = "Cookie imported and presales recovery triggered"
+            else:
+                payload["message"] = "Cookie imported, but presales recovery failed"
+        return payload
 
     def export_cookie_plugin_bundle(self) -> tuple[bytes, str]:
         base = self.cookie_plugin_dir
@@ -1838,6 +2187,134 @@ class MimicOps:
         tail_n = max(1, min(int(tail), 5000))
         return {"success": True, "file": str(fp), "lines": lines[-tail_n:], "total_lines": len(lines)}
 
+    @classmethod
+    def _strip_ansi(cls, text: str) -> str:
+        return cls._ANSI_ESCAPE_RE.sub("", str(text or "")).strip()
+
+    @classmethod
+    def _extract_log_time(cls, text: str) -> str:
+        cleaned = cls._strip_ansi(text)
+        m = cls._LOG_TIME_RE.search(cleaned)
+        return str(m.group(1)) if m else ""
+
+    def _risk_control_status_from_logs(self, target: str = "presales", tail_lines: int = 300) -> dict[str, Any]:
+        fp = self._module_runtime_log(target)
+        if not fp.exists():
+            return {
+                "level": "unknown",
+                "label": "未检测（无日志）",
+                "score": 0,
+                "signals": ["日志文件不存在"],
+                "last_event": "",
+                "last_event_at": "",
+                "checked_lines": 0,
+                "source_log": str(fp),
+                "updated_at": _now_iso(),
+            }
+
+        try:
+            lines = fp.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception as e:
+            return {
+                "level": "unknown",
+                "label": "未检测（读取失败）",
+                "score": 0,
+                "signals": [f"日志读取失败: {e}"],
+                "last_event": "",
+                "last_event_at": "",
+                "checked_lines": 0,
+                "source_log": str(fp),
+                "updated_at": _now_iso(),
+            }
+
+        tail_n = max(50, min(int(tail_lines or 300), 2000))
+        recent = [self._strip_ansi(line) for line in lines[-tail_n:] if str(line or "").strip()]
+        if not recent:
+            return {
+                "level": "unknown",
+                "label": "未检测（空日志）",
+                "score": 0,
+                "signals": ["日志内容为空"],
+                "last_event": "",
+                "last_event_at": "",
+                "checked_lines": 0,
+                "source_log": str(fp),
+                "updated_at": _now_iso(),
+            }
+
+        block_hits: list[tuple[int, str]] = []
+        warn_hits: list[tuple[int, str]] = []
+        ws_400_lines: list[tuple[int, str]] = []
+        connected_hits: list[tuple[int, str]] = []
+
+        for idx, line in enumerate(recent):
+            lowered = line.lower()
+            if "connected to goofish websocket transport" in lowered:
+                connected_hits.append((idx, line))
+            if any(token in lowered for token in self._RISK_BLOCK_PATTERNS):
+                block_hits.append((idx, line))
+                continue
+            if any(token in lowered for token in self._RISK_WARN_PATTERNS):
+                warn_hits.append((idx, line))
+            if "websocket" in lowered and "http 400" in lowered:
+                ws_400_lines.append((idx, line))
+
+        level = "normal"
+        label = "正常"
+        score = 0
+        signals: list[str] = ["未发现封控信号"]
+        last_event = recent[-1]
+        if block_hits:
+            level = "blocked"
+            label = "疑似封控"
+            score = min(100, 75 + len(block_hits) * 4)
+            signals = [f"高风险信号 x{len(block_hits)}"]
+            if ws_400_lines:
+                signals.append(f"WebSocket HTTP 400 x{len(ws_400_lines)}")
+            last_event = block_hits[-1][1]
+        elif len(ws_400_lines) >= 5 or warn_hits:
+            level = "warning"
+            label = "风险预警"
+            score = min(85, 30 + len(warn_hits) * 4 + len(ws_400_lines) * 2)
+            signals = []
+            if ws_400_lines:
+                signals.append(f"WebSocket HTTP 400 x{len(ws_400_lines)}")
+            if warn_hits:
+                signals.append(f"异常告警 x{len(warn_hits)}")
+            last_event = (warn_hits or ws_400_lines)[-1][1]
+
+        last_connected_at = ""
+        if connected_hits:
+            last_connected_line = connected_hits[-1][1]
+            last_connected_idx = connected_hits[-1][0]
+            last_connected_at = self._extract_log_time(last_connected_line)
+            last_risk_idx = -1
+            if block_hits:
+                last_risk_idx = max(last_risk_idx, block_hits[-1][0])
+            if warn_hits:
+                last_risk_idx = max(last_risk_idx, warn_hits[-1][0])
+            if ws_400_lines:
+                last_risk_idx = max(last_risk_idx, ws_400_lines[-1][0])
+            if last_connected_idx > last_risk_idx >= 0:
+                level = "normal"
+                label = "已恢复连接"
+                score = 0
+                signals = ["最近已恢复连接"]
+                last_event = last_connected_line
+
+        return {
+            "level": level,
+            "label": label,
+            "score": int(score),
+            "signals": signals,
+            "last_event": str(last_event)[-180:],
+            "last_event_at": self._extract_log_time(last_event),
+            "last_connected_at": last_connected_at,
+            "checked_lines": len(recent),
+            "source_log": str(fp),
+            "updated_at": _now_iso(),
+        }
+
     def test_reply(self, payload: dict[str, Any]) -> dict[str, Any]:
         started = time.perf_counter()
         msg_cfg = get_config().get_section("messages", {})
@@ -1894,10 +2371,69 @@ class MimicOps:
             "response_time": response_time_ms,
         }
 
+    def _maybe_auto_recover_presales(
+        self,
+        *,
+        service_status: str,
+        token_error: str | None,
+        cookie_text: str,
+    ) -> dict[str, Any]:
+        cookie_fp = self._cookie_fingerprint(cookie_text)
+        auto_triggered = False
+        reason = "monitoring"
+        stage = "monitoring"
+        result: dict[str, Any] = {}
+
+        if service_status in {"stopped", "suspended"}:
+            reason = "service_not_running"
+            stage = "inactive"
+        elif token_error != "FAIL_SYS_USER_VALIDATE":
+            reason = "token_healthy_or_non_validate_error"
+            stage = "healthy" if token_error is None else "token_error"
+        elif not cookie_fp:
+            reason = "cookie_empty"
+            stage = "waiting_cookie_update"
+        elif cookie_fp == self._last_auto_recover_cookie_fp:
+            reason = "same_cookie_already_recovered"
+            stage = "waiting_reconnect"
+        elif self._last_token_error == "FAIL_SYS_USER_VALIDATE" and cookie_fp != self._last_cookie_fp:
+            stage = "recover_triggered"
+            reason = "cookie_updated_after_validate_error"
+            with self._recover_lock:
+                # 双重检查，避免并发请求重复触发 recover。
+                if cookie_fp != self._last_auto_recover_cookie_fp:
+                    result = self.module_console.control(action="recover", target="presales")
+                    auto_triggered = not bool(result.get("error")) if isinstance(result, dict) else False
+                    self._last_auto_recover_cookie_fp = cookie_fp
+                    self._last_auto_recover_at = _now_iso()
+                    self._last_auto_recover_result = result if isinstance(result, dict) else {}
+                else:
+                    reason = "same_cookie_already_recovered"
+                    stage = "waiting_reconnect"
+        else:
+            reason = "waiting_cookie_update"
+            stage = "waiting_cookie_update"
+
+        # 更新快照，供下一轮识别“cookie 是否发生变化”。
+        self._last_cookie_fp = cookie_fp
+        self._last_token_error = token_error
+
+        return {
+            "stage": stage,
+            "stage_label": self._recovery_stage_label(stage),
+            "auto_recover_triggered": auto_triggered,
+            "reason": reason,
+            "advice": self._recovery_advice(stage, token_error),
+            "last_auto_recover_at": self._last_auto_recover_at,
+            "last_auto_recover_result": self._last_auto_recover_result,
+        }
+
     def service_status(self) -> dict[str, Any]:
         module_status = self.module_console.status(window_minutes=60, limit=20)
         cookie = self.get_cookie()
+        cookie_text = str(cookie.get("cookie", "") or "")
         route_stats = self.route_stats()
+        risk_control = self._risk_control_status_from_logs(target="presales", tail_lines=300)
         modules = module_status.get("modules") if isinstance(module_status, dict) else {}
         if not isinstance(modules, dict):
             modules = {}
@@ -1920,6 +2456,11 @@ class MimicOps:
         workflow = presales_mod.get("workflow", {}) if isinstance(presales_mod.get("workflow"), dict) else {}
         route_stat_payload = route_stats.get("stats", {}) if isinstance(route_stats, dict) else {}
         route_stats_by_courier = route_stat_payload.get("courier_details", {}) if isinstance(route_stat_payload, dict) else {}
+        risk_level = str(risk_control.get("level", "unknown") or "unknown").lower()
+        risk_signals = risk_control.get("signals", [])
+        risk_signal_text = " ".join(str(x) for x in risk_signals) if isinstance(risk_signals, list) else ""
+        risk_event_text = str(risk_control.get("last_event", "") or "")
+        risk_text = f"{risk_signal_text} {risk_event_text}".lower()
 
         workflow_states = workflow.get("states", {}) if isinstance(workflow.get("states"), dict) else {}
         workflow_jobs = workflow.get("jobs", {}) if isinstance(workflow.get("jobs"), dict) else {}
@@ -1935,6 +2476,34 @@ class MimicOps:
             "hourly_replies": {},
             "daily_replies": {},
         }
+
+        token_error: str | None = None
+        if "fail_sys_user_validate" in risk_text:
+            token_error = "FAIL_SYS_USER_VALIDATE"
+        elif "rgv587" in risk_text or "被挤爆" in risk_text:
+            token_error = "RGV587_SERVER_BUSY"
+        elif "token api failed" in risk_text:
+            token_error = "TOKEN_API_FAILED"
+        elif "websocket" in risk_text and "http 400" in risk_text:
+            token_error = "WS_HTTP_400"
+
+        cookie_update_required = bool(token_error == "FAIL_SYS_USER_VALIDATE")
+        token_available = bool(cookie.get("success", False)) and token_error is None
+        xianyu_connected = bool(presales_process.get("alive", False)) and token_error is None and risk_level != "blocked"
+        if service_status == "running" and (not xianyu_connected or risk_level in {"warning", "blocked"}):
+            service_status = "degraded"
+        recovery = self._maybe_auto_recover_presales(
+            service_status=service_status,
+            token_error=token_error,
+            cookie_text=cookie_text,
+        )
+
+        user_id = None
+        for key, value in self._extract_cookie_pairs_from_header(cookie_text):
+            if str(key or "").strip() == "unb":
+                user_id = str(value or "").strip() or None
+                break
+
         return {
             "success": True,
             "service": dict(self._service_state),
@@ -1942,16 +2511,18 @@ class MimicOps:
             "cookie_exists": bool(cookie.get("success", False)),
             "cookie_valid": bool(cookie.get("success", False)),
             "cookie_length": int(cookie.get("length", 0) or 0),
-            "xianyu_connected": bool(presales_process.get("alive", False)),
-            "token_available": bool(cookie.get("success", False)),
-            "token_error": None,
-            "cookie_update_required": False,
-            "user_id": None,
-            "last_token_refresh": None,
+            "xianyu_connected": xianyu_connected,
+            "token_available": token_available,
+            "token_error": token_error,
+            "cookie_update_required": cookie_update_required,
+            "user_id": user_id,
+            "last_token_refresh": risk_control.get("last_event_at") if token_error is None else None,
             "service_start_time": self._service_started_at,
             "route_stats": route_stat_payload,
             "route_stats_by_courier": route_stats_by_courier,
             "message_stats": message_stats,
+            "risk_control": risk_control,
+            "recovery": recovery,
             "system_running": alive_count > 0,
             "alive_count": alive_count,
             "total_modules": total_modules,
@@ -2004,6 +2575,67 @@ class MimicOps:
             "service": dict(self._service_state),
         }
 
+    def service_recover(self, target: str = "presales") -> dict[str, Any]:
+        tgt = str(target or "presales").strip().lower()
+        if tgt not in MODULE_TARGETS:
+            return {"success": False, "error": f"Unsupported target: {tgt}"}
+
+        result = self.module_console.control(action="recover", target=tgt)
+        has_error = bool(result.get("error")) if isinstance(result, dict) else True
+        status = self.service_status()
+        return {
+            "success": not has_error,
+            "target": tgt,
+            "action": "recover",
+            "result": result,
+            "service_status": status.get("service_status"),
+            "xianyu_connected": bool(status.get("xianyu_connected", False)),
+            "token_error": status.get("token_error"),
+            "cookie_update_required": bool(status.get("cookie_update_required", False)),
+            "message": "售前链路恢复完成" if not has_error else f"恢复失败: {result.get('error', 'unknown')}",
+        }
+
+    def service_auto_fix(self) -> dict[str, Any]:
+        actions: list[str] = []
+        status_before = self.service_status()
+        svc_state = str(status_before.get("service_status") or "")
+
+        if svc_state == "stopped":
+            _ = self.service_control("start")
+            actions.append("start_service")
+        elif svc_state == "suspended":
+            _ = self.service_control("resume")
+            actions.append("resume_service")
+
+        if bool(status_before.get("cookie_update_required", False)):
+            return {
+                "success": False,
+                "action": "auto_fix",
+                "actions": actions,
+                "needs_cookie_update": True,
+                "message": "当前为鉴权失效，需先更新 Cookie，系统无法自动修复此项。",
+                "status_before": status_before,
+                "status_after": self.service_status(),
+            }
+
+        recover = self.service_recover("presales")
+        actions.append("recover_presales")
+        check = self.module_console.check(skip_gateway=True)
+        status_after = self.service_status()
+
+        can_work = bool(status_after.get("xianyu_connected", False)) and not bool(status_after.get("cookie_update_required", False))
+        return {
+            "success": bool(can_work),
+            "action": "auto_fix",
+            "actions": actions,
+            "recover": recover,
+            "doctor": check,
+            "status_before": status_before,
+            "status_after": status_after,
+            "needs_cookie_update": bool(status_after.get("cookie_update_required", False)),
+            "message": "自动修复完成" if can_work else "已执行自动修复，但仍需检查 Cookie 或平台风控状态。",
+        }
+
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2045,6 +2677,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
     .quickstart strong { color: #1d4ed8; }
     .quickstart code { background: #dbeafe; padding: 1px 5px; border-radius: 4px; }
+    .action-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+      margin-bottom: 16px;
+    }
+    .action-btn {
+      border: none;
+      padding: 10px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      background: #3b82f6;
+    }
+    .action-btn.warning { background: #f59e0b; }
+    .action-btn:hover { opacity: 0.92; }
     .service-box {
       margin-bottom: 26px;
       padding: 18px;
@@ -2210,6 +2861,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="container">
     <h1>XianyuAutoAgent Control Panel</h1>
     <div class="quickstart">
+      <strong>3步上手（推荐）</strong><br>
+      1. 配置管理里导入 Cookie。<br>
+      2. 配置管理里导入路线数据与加价数据。<br>
+      3. 首页点“启动服务”并执行“全链路体检”。<br>
+      体检失败时：先更新 Cookie，再点“售前一键恢复”。<br>
+    </div>
+    <div class="quickstart">
       <strong>0基础快速上手（建议按顺序）</strong><br>
       1. 先点“配置管理”填写 Cookie。<br>
       2. 在“路线数据”导入报价表。<br>
@@ -2275,7 +2933,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div id="messageStatusContent"></div>
     </div>
 
-    <button class="refresh-btn" onclick="loadStatus()">刷新所有状态</button>
+    <div class="action-row">
+      <button class="refresh-btn" onclick="loadStatus()">刷新所有状态</button>
+      <button class="action-btn" onclick="runFullCheck()">全链路体检</button>
+      <button class="action-btn" onclick="runAutoFix()">一键修复</button>
+      <button class="action-btn warning" onclick="recoverPresales()">售前一键恢复</button>
+    </div>
+
+    <div class="status-box" id="doctorStatusBox" style="display:none;">
+      <h2>全链路体检结果</h2>
+      <div id="doctorStatusContent"></div>
+    </div>
 
     <div class="charts-grid" id="chartsContainer" style="display:none;">
       <div class="chart-box">
@@ -2310,8 +2978,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     function statusClassByService(v) {
       if (v === "running") return "success";
+      if (v === "degraded") return "warning";
       if (v === "suspended") return "warning";
       return "error";
+    }
+
+    function statusClassByRisk(level) {
+      if (level === "blocked") return "error";
+      if (level === "warning") return "warning";
+      if (level === "normal") return "success";
+      return "info";
+    }
+
+    function statusClassByRecovery(stage) {
+      if (stage === "healthy") return "success";
+      if (stage === "recover_triggered") return "warning";
+      if (stage === "waiting_cookie_update" || stage === "waiting_reconnect") return "warning";
+      if (stage === "inactive") return "info";
+      return "info";
+    }
+
+    function recoveryStageText(stage, stageLabel) {
+      const s = String(stage || "").trim();
+      if (stageLabel) return String(stageLabel);
+      if (s === "healthy") return "链路正常";
+      if (s === "recover_triggered") return "已触发自动恢复";
+      if (s === "waiting_cookie_update") return "等待更新 Cookie";
+      if (s === "waiting_reconnect") return "等待重连";
+      if (s === "token_error") return "鉴权异常";
+      if (s === "inactive") return "服务未运行";
+      if (s === "monitoring") return "监控中";
+      return "状态未知";
     }
 
     function row(label, value, cls) {
@@ -2344,6 +3041,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         startBtn.style.display = "none";
         stopBtn.style.display = "inline-block";
         messageEl.textContent = "服务正在运行，正常处理消息";
+      } else if (status === "degraded") {
+        badge.textContent = "降级运行";
+        badge.style.background = "#f59e0b";
+        suspendBtn.style.display = "inline-block";
+        resumeBtn.style.display = "none";
+        startBtn.style.display = "none";
+        stopBtn.style.display = "inline-block";
+        messageEl.textContent = "服务在运行，但鉴权或风控异常导致自动回复受限";
       } else if (status === "suspended") {
         badge.textContent = "已挂起";
         badge.style.background = "#f59e0b";
@@ -2482,6 +3187,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       const routeStats = data.route_stats || {};
       const msgStats = data.message_stats || {};
       const modules = (data.module && data.module.modules) || {};
+      const risk = data.risk_control || {};
       const aliveCount = Number(data.alive_count || 0);
       const totalModules = Number(data.total_modules || 0);
 
@@ -2493,11 +3199,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       ].join("");
 
       const presalesAlive = !!((modules.presales || {}).process || {}).alive;
+      const riskLevel = String(risk.level || "unknown");
+      const riskScore = Number(risk.score || 0);
+      const signalText = Array.isArray(risk.signals) && risk.signals.length ? risk.signals.join(" | ") : "-";
+      const riskEvent = ((risk.last_event_at || "") + " " + (risk.last_event || "-")).trim();
+      const tokenError = data.token_error || "-";
+      const recovery = data.recovery || {};
+      const recoveryStage = String(recovery.stage || "monitoring");
+      const recoveryStageLabel = String(recovery.stage_label || "");
+      const recoveryTriggered = !!recovery.auto_recover_triggered;
+      const recoveryReason = String(recovery.reason || "-");
+      const recoveryAdvice = String(recovery.advice || "-");
+      const recoveryAt = String(recovery.last_auto_recover_at || "-");
       document.getElementById("xianyuStatusContent").innerHTML = [
         row("Cookie存在", data.cookie_exists ? "是" : "否", statusClassByBool(!!data.cookie_exists)),
         row("Cookie长度", formatCount(data.cookie_length || 0), "info"),
-        row("售前模块连接", presalesAlive ? "已连接" : "未连接", statusClassByBool(presalesAlive)),
-        row("Token可用", data.token_available ? "是" : "否", statusClassByBool(!!data.token_available))
+        row("售前模块进程", presalesAlive ? "已连接" : "未连接", statusClassByBool(presalesAlive)),
+        row("闲鱼链路连接", data.xianyu_connected ? "可用" : "不可用", statusClassByBool(!!data.xianyu_connected)),
+        row("Token可用", data.token_available ? "是" : "否", statusClassByBool(!!data.token_available)),
+        row("Token异常", tokenError, tokenError === "-" ? "info" : "error"),
+        row("需更新Cookie", data.cookie_update_required ? "是" : "否", data.cookie_update_required ? "warning" : "success"),
+        row("封控状态", risk.label || "未知", statusClassByRisk(riskLevel)),
+        row("风险分/信号", String(riskScore) + " / " + signalText, statusClassByRisk(riskLevel)),
+        row("最近封控事件", riskEvent, riskLevel === "blocked" ? "error" : "info"),
+        row("恢复阶段", recoveryStageText(recoveryStage, recoveryStageLabel), statusClassByRecovery(recoveryStage)),
+        row("自动恢复触发", recoveryTriggered ? "是" : "否", recoveryTriggered ? "warning" : "info"),
+        row("恢复原因", recoveryReason, "info"),
+        row("建议操作", recoveryAdvice, "info"),
+        row("最近恢复时间", recoveryAt, "info")
       ].join("");
 
       document.getElementById("routeStatusContent").innerHTML = [
@@ -2526,6 +3255,79 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       .catch(err => {
         document.getElementById("systemStatusContent").innerHTML = row("错误", err.message, "error");
       });
+    }
+
+    function renderDoctorStatus(data) {
+      const box = document.getElementById("doctorStatusBox");
+      const el = document.getElementById("doctorStatusContent");
+      box.style.display = "block";
+
+      const ready = !!data.ready;
+      const blockers = Array.isArray(data.blockers) ? data.blockers : [];
+      const nextSteps = Array.isArray(data.next_steps) ? data.next_steps : [];
+      const summary = data.doctor_summary || {};
+      const statusText = ready ? "通过" : "未通过";
+      const statusClass = ready ? "success" : "error";
+      const blockerNames = blockers
+        .slice(0, 4)
+        .map(item => {
+          const target = item && item.target ? "[" + item.target + "] " : "";
+          return target + String(item.name || "unknown");
+        })
+        .join(" | ") || "-";
+      const stepText = nextSteps.slice(0, 3).join(" | ") || "无";
+
+      el.innerHTML = [
+        row("体检状态", statusText, statusClass),
+        row("关键失败", String(summary.critical_failed || 0), Number(summary.critical_failed || 0) > 0 ? "error" : "success"),
+        row("警告项", String(summary.warning_failed || 0), Number(summary.warning_failed || 0) > 0 ? "warning" : "success"),
+        row("阻塞项", blockerNames, blockers.length > 0 ? "warning" : "success"),
+        row("建议动作", stepText, "info"),
+      ].join("");
+    }
+
+    async function runFullCheck() {
+      try {
+        const res = await fetch("/api/module/check?skip_gateway=1");
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        renderDoctorStatus(data);
+      } catch (err) {
+        alert("体检失败: " + err.message);
+      }
+    }
+
+    async function recoverPresales() {
+      try {
+        const res = await fetch("/api/service/recover", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: "presales" })
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || data.message || "恢复失败");
+        await loadStatus();
+        alert("售前恢复已触发。当前状态: " + (data.service_status || "unknown"));
+      } catch (err) {
+        alert("恢复失败: " + err.message);
+      }
+    }
+
+    async function runAutoFix() {
+      try {
+        const res = await fetch("/api/service/auto-fix", { method: "POST" });
+        const data = await res.json();
+        await loadStatus();
+        if (data.success) {
+          alert("一键修复完成: " + (data.message || "成功"));
+        } else {
+          const msg = data.message || "修复未完成";
+          const needCookie = data.needs_cookie_update ? "（请先更新 Cookie）" : "";
+          alert("一键修复结果: " + msg + needCookie);
+        }
+      } catch (err) {
+        alert("一键修复失败: " + err.message);
+      }
     }
 
     loadStatus();
@@ -2799,8 +3601,8 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
         <h2 class="section-title">Cookie管理（极简）</h2>
         <div class="form-group">
           <label for="cookiePluginFile">插件导出文件（支持多选）</label>
-          <input type="file" id="cookiePluginFile" accept=".txt,.json,.log,.cookies,.zip" multiple>
-          <div class="hint">推荐：直接上传插件导出的 cookies 文件，系统会自动识别并更新。</div>
+          <input type="file" id="cookiePluginFile" accept=".txt,.json,.log,.cookies,.csv,.tsv,.har,.zip" multiple>
+          <div class="hint">推荐：上传插件导出的 cookies.txt/JSON（也支持 csv/tsv/har/zip，自动识别）。</div>
         </div>
         <div class="form-group">
           <label for="cookie">Cookie字符串</label>
@@ -2809,12 +3611,18 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
         <div class="button-group">
           <button class="btn-primary" title="上传插件导出文件并自动更新到系统 Cookie" onclick="importCookiePlugin()">上传并一键更新</button>
           <button class="btn-primary" title="保存当前输入的 Cookie 到系统配置" onclick="saveCookie()">粘贴并更新</button>
+          <button class="btn-secondary" title="检测 Cookie 可用性分级与修复建议" onclick="diagnoseCookie()">诊断可用性</button>
           <button class="btn-secondary" title="读取当前已保存的 Cookie 到输入框" onclick="loadCurrentCookie()">查看当前</button>
         </div>
         <div class="inline-note">只用上面3个按钮就够用。导入成功后，回首页刷新状态即可。</div>
         <details class="cookie-help" style="margin-top: 12px;">
           <summary>高级选项：插件安装与手动解析</summary>
           <div class="cookie-help-content">
+            <p><strong>0基础 Cookie 复制方式：</strong>登录后按 F12，点 Network，任选一个请求，在 Request Headers 里复制整段 Cookie。</p>
+            <p><strong>Cookie 详细获取步骤：</strong>打开 goofish 并登录账号 → 按 F12 打开开发者工具 → Network 任意请求复制 Cookie 请求头。</p>
+            <p><strong>关键字段检查：</strong>请确认 Cookie 至少包含 <code>unb</code>、<code>_m_h5_tk</code>、<code>_m_h5_tk_enc</code>、<code>cookie2</code>、<code>_tb_token_</code>。</p>
+            <p><strong>更新后如何确认生效：</strong>回到首页点击“刷新所有状态”，确认 Cookie 存在、长度正常、风险状态为低风险。</p>
+            <p><strong>插件一键导入并更新：</strong>优先使用上方“上传并一键更新”，系统会自动解析 txt/json/zip 并写入配置。</p>
             <p><strong>插件安装：</strong>下载内置插件包 → 浏览器扩展页加载 <code>Get-cookies.txt-LOCALLY/src</code>。</p>
             <div class="button-group" style="margin-top: 8px;">
               <button class="btn-secondary" onclick="window.location.href='/api/download-cookie-plugin'">下载内置插件包</button>
@@ -2822,7 +3630,7 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
             <p><a href="https://github.com/kairi003/Get-cookies.txt-LOCALLY" target="_blank" rel="noopener">插件项目地址（GitHub）</a></p>
             <div class="form-group" style="margin-top: 10px;">
               <label for="cookieFile">手动导入 Cookie 文件</label>
-              <input type="file" id="cookieFile" accept=".txt,.json,.log,.cookies">
+              <input type="file" id="cookieFile" accept=".txt,.json,.log,.cookies,.csv,.tsv,.har">
             </div>
             <div class="button-group">
               <button class="btn-secondary" onclick="importCookieFile()">导入文件到输入框</button>
@@ -2901,6 +3709,8 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
         <div class="info-box" style="margin-bottom: 14px;">
           <p><strong>重量版模板：</strong>按实际重量报价。</p>
           <p><strong>体积版模板：</strong>按体积重报价，可包含 {volume_formula}。</p>
+          <p><strong>常用变量：</strong>{origin}/{destination}、{origin_province}/{dest_province}、{weight}/{billing_weight}、{courier}、{price}、{eta_days}、{volume_formula}</p>
+          <p><strong>兼容变量：</strong>{first_price}、{remaining_price}、{volume_weight}、{additional_units}、{courier_name}、{total_price}</p>
         </div>
         <div class="form-group">
           <label for="weightTemplateContent">重量版模板</label>
@@ -2988,7 +3798,10 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
       try {
         const res = await fetch("/api/import-cookie-plugin", { method: "POST", body: fd });
         const data = await res.json();
-        if (!data.success) throw new Error(data.error || "导入失败");
+        if (!data.success) {
+          const msg = [data.error || "导入失败", data.hint || ""].filter(Boolean).join(" | ");
+          throw new Error(msg);
+        }
 
         document.getElementById("cookie").value = data.cookie || "";
 
@@ -2997,10 +3810,27 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
         text += "识别格式: " + (data.detected_format || "-") + "\\n";
         text += "Cookie 项数: " + (data.cookie_items || 0) + "\\n";
         text += "字符长度: " + (data.length || 0) + "\\n";
+        text += "可用性分级: " + (data.cookie_grade || "未知") + "\\n";
         if ((data.missing_required || []).length > 0) {
           text += "关键字段缺失: " + data.missing_required.join(", ") + "\\n";
         } else {
           text += "关键字段检查: 通过\\n";
+        }
+        if ((data.cookie_actions || []).length > 0) {
+          text += "建议动作: " + data.cookie_actions.join(" | ") + "\\n";
+        }
+        const pluginRecover = data.auto_recover || {};
+        if (Object.keys(pluginRecover).length > 0) {
+          text += "自动恢复: " + (pluginRecover.triggered ? "已触发" : "未触发/失败") + "\\n";
+          if (pluginRecover.at) {
+            text += "恢复时间: " + pluginRecover.at + "\\n";
+          }
+          if (pluginRecover.result && pluginRecover.result.error) {
+            text += "恢复错误: " + pluginRecover.result.error + "\\n";
+          }
+        }
+        if ((data.recognized_key_hits || []).length > 0) {
+          text += "识别关键字段: " + data.recognized_key_hits.join(", ") + "\\n";
         }
         if ((data.imported_files || []).length > 0) {
           text += "已识别文件: " + data.imported_files.join(", ") + "\\n";
@@ -3078,13 +3908,64 @@ MIMIC_COOKIE_HTML = """<!DOCTYPE html>
         if (data.cookie_items) {
           msg += "\\n识别项数: " + data.cookie_items + "（格式: " + (data.detected_format || "-") + "）";
         }
+        if (data.cookie_grade) {
+          msg += "\\n可用性分级: " + data.cookie_grade;
+        }
         if ((data.missing_required || []).length > 0) {
           msg += "\\n缺少关键字段: " + data.missing_required.join(", ");
+        }
+        if ((data.cookie_actions || []).length > 0) {
+          msg += "\\n建议动作: " + data.cookie_actions.join(" | ");
+        }
+        const manualRecover = data.auto_recover || {};
+        if (Object.keys(manualRecover).length > 0) {
+          msg += "\\n自动恢复: " + (manualRecover.triggered ? "已触发" : "未触发/失败");
+          if (manualRecover.result && manualRecover.result.error) {
+            msg += "\\n恢复错误: " + manualRecover.result.error;
+          }
         }
         showMessage(msg, "success");
         await initCookiePreview();
       } catch (err) {
         showMessage("更新Cookie失败: " + err.message, "error");
+      }
+    }
+
+    async function diagnoseCookie() {
+      const raw = document.getElementById("cookie").value.trim();
+      if (!raw) {
+        showMessage("请先粘贴 Cookie 再诊断", "error");
+        return;
+      }
+      const panel = document.getElementById("cookieParseResult");
+      panel.style.display = "block";
+      panel.textContent = "诊断中...";
+
+      try {
+        const res = await fetch("/api/cookie-diagnose", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: raw })
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || "诊断失败");
+
+        let text = "Cookie 诊断结果\\n";
+        text += "可用性分级: " + (data.grade || "-") + "\\n";
+        text += "识别格式: " + (data.detected_format || "-") + "\\n";
+        text += "Cookie 项数: " + (data.cookie_items || 0) + "\\n";
+        text += "字符长度: " + (data.length || 0) + "\\n";
+        text += "缺失字段: " + ((data.required_missing || []).join(", ") || "无") + "\\n";
+        const domainFilter = data.domain_filter || {};
+        text += "域过滤: checked=" + (domainFilter.checked || 0) + ", rejected=" + (domainFilter.rejected || 0) + "\\n";
+        if ((data.actions || []).length > 0) {
+          text += "建议: " + data.actions.join(" | ");
+        }
+        panel.textContent = text.trim();
+        showMessage("Cookie 诊断完成", "success");
+      } catch (err) {
+        panel.textContent = "诊断失败: " + err.message;
+        showMessage("诊断失败: " + err.message, "error");
       }
     }
 
@@ -4568,10 +5449,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(payload, status=200 if payload.get("success") else 400)
                 return
 
+            if path == "/api/service/recover":
+                body = self._read_json_body()
+                target = str(body.get("target") or "presales").strip().lower()
+                payload = self.mimic_ops.service_recover(target=target)
+                self._send_json(payload, status=200 if payload.get("success") else 400)
+                return
+
+            if path == "/api/service/auto-fix":
+                payload = self.mimic_ops.service_auto_fix()
+                self._send_json(payload, status=200 if payload.get("success") else 400)
+                return
+
             if path == "/api/update-cookie":
                 body = self._read_json_body()
                 cookie = str(body.get("cookie") or "").strip()
-                payload = self.mimic_ops.update_cookie(cookie)
+                payload = self.mimic_ops.update_cookie(cookie, auto_recover=True)
                 self._send_json(payload, status=200 if payload.get("success") else 400)
                 return
 
@@ -4590,7 +5483,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     return
 
                 try:
-                    payload = self.mimic_ops.import_cookie_plugin_files(files)
+                    payload = self.mimic_ops.import_cookie_plugin_files(files, auto_recover=True)
                 except Exception as exc:
                     self._send_json(
                         {
@@ -4609,6 +5502,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 cookie_text = str(body.get("text") or body.get("cookie") or "").strip()
                 payload = self.mimic_ops.parse_cookie_text(cookie_text)
+                self._send_json(payload, status=200 if payload.get("success") else 400)
+                return
+
+            if path == "/api/cookie-diagnose":
+                body = self._read_json_body()
+                cookie_text = str(body.get("text") or body.get("cookie") or "").strip()
+                payload = self.mimic_ops.diagnose_cookie(cookie_text)
                 self._send_json(payload, status=200 if payload.get("success") else 400)
                 return
 

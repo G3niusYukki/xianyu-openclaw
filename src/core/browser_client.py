@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
@@ -600,6 +601,12 @@ async def create_browser_client(config: dict[str, Any] | None = None) -> "Browse
 
 
 def _resolve_runtime(config: dict[str, Any] | None = None) -> str:
+    # 保证 create_browser_client 与 doctor/startup_checks 读取到同一套 .env 运行时。
+    try:
+        load_dotenv(override=False)
+    except Exception:
+        pass
+
     raw = str(os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
     if raw in {"auto", "lite", "pro"}:
         return raw

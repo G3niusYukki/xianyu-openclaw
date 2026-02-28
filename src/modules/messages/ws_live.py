@@ -6,11 +6,12 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 import random
 import re
 import struct
 import time
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -279,7 +280,12 @@ def extract_chat_event(message: Any) -> dict[str, Any] | None:
 class GoofishWsTransport:
     """闲鱼消息 WebSocket 收发通道。"""
 
-    def __init__(self, cookie_text: str, config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        cookie_text: str,
+        config: dict[str, Any] | None = None,
+        cookie_supplier: Callable[[], str] | None = None,
+    ):
         if websockets is None:
             raise BrowserError("WebSocket transport requires `websockets`. Install: pip install websockets")
 
@@ -294,14 +300,20 @@ class GoofishWsTransport:
         self.queue_wait_seconds = float(self.config.get("queue_wait_seconds", 0.3))
         self.token_refresh_interval_seconds = int(self.config.get("token_refresh_interval_seconds", 3600))
         self.token_retry_seconds = int(self.config.get("token_retry_seconds", 300))
+        self.cookie_watch_interval_seconds = float(self.config.get("cookie_watch_interval_seconds", 5.0))
+        self.max_reconnect_delay_seconds = float(self.config.get("max_reconnect_delay_seconds", 90.0))
+        self.auth_failure_backoff_seconds = float(
+            self.config.get("auth_failure_backoff_seconds", max(30.0, float(self.token_retry_seconds)))
+        )
 
-        self.cookie_text = str(cookie_text or "").strip()
-        self.cookies = parse_cookie_header(self.cookie_text)
-        self.my_user_id = str(self.cookies.get("unb", "") or "").strip()
-        if not self.cookie_text or not self.my_user_id:
-            raise BrowserError("Invalid XIANYU_COOKIE_1. Missing cookie text or `unb`.")
+        self.cookie_supplier = cookie_supplier
+        self.cookie_text = ""
+        self.cookies: dict[str, str] = {}
+        self.my_user_id = ""
+        self.device_id = ""
+        self._cookie_fp = ""
+        self._apply_cookie_text(cookie_text, reason="init")
 
-        self.device_id = generate_device_id(self.my_user_id)
         self._token: str = ""
         self._token_ts: float = 0.0
 
@@ -316,6 +328,94 @@ class GoofishWsTransport:
         self._ready = asyncio.Event()
         self._last_heartbeat_sent = 0.0
         self._last_heartbeat_ack = 0.0
+        self._connect_failures = 0
+        self._last_disconnect_reason = ""
+
+    def _apply_cookie_text(self, cookie_text: str, reason: str = "") -> bool:
+        text = str(cookie_text or "").strip()
+        if not text:
+            raise BrowserError("Invalid XIANYU_COOKIE_1. Missing cookie text.")
+
+        parsed = parse_cookie_header(text)
+        user_id = str(parsed.get("unb", "") or "").strip()
+        if not user_id:
+            raise BrowserError("Invalid XIANYU_COOKIE_1. Missing `unb`.")
+
+        fingerprint = hashlib.sha1(text.encode("utf-8")).hexdigest()
+        changed = fingerprint != self._cookie_fp
+        self.cookie_text = text
+        self.cookies = parsed
+        self.my_user_id = user_id
+        self.device_id = generate_device_id(self.my_user_id)
+        self._cookie_fp = fingerprint
+        if changed:
+            self._token = ""
+            self._token_ts = 0.0
+            if reason:
+                self.logger.info(
+                    f"WS cookie applied ({reason}), uid={self.my_user_id[:10]}..., fields={len(self.cookies)}"
+                )
+        return changed
+
+    def _maybe_reload_cookie(self, reason: str = "") -> bool:
+        supplier = self.cookie_supplier
+        if supplier is None:
+            return False
+        try:
+            latest = str(supplier() or "").strip()
+        except Exception as exc:
+            self.logger.debug(f"WS cookie supplier failed: {exc}")
+            return False
+        if not latest:
+            return False
+
+        latest_fp = hashlib.sha1(latest.encode("utf-8")).hexdigest()
+        if latest_fp == self._cookie_fp:
+            return False
+
+        try:
+            changed = self._apply_cookie_text(latest, reason=reason or "reload")
+            if changed:
+                # 清理映射，避免新登录账号复用旧会话的对端映射
+                self._session_peer.clear()
+                self._seen_event.clear()
+            return changed
+        except Exception as exc:
+            self.logger.warning(f"WS cookie reload ignored ({reason}): {exc}")
+            return False
+
+    @staticmethod
+    def _is_auth_related_error(exc: Exception) -> bool:
+        lowered = str(exc or "").lower()
+        markers = (
+            "fail_sys_user_validate",
+            "rgv587",
+            "token api failed",
+            "cookie missing `_m_h5_tk`",
+            "invalid xianyu_cookie_1",
+            "http 400",
+            "http 401",
+            "http 403",
+            "forbidden",
+            "unauthorized",
+        )
+        return any(marker in lowered for marker in markers)
+
+    def _next_reconnect_delay(self, auth_error: bool = False) -> float:
+        if auth_error:
+            return max(5.0, float(self.auth_failure_backoff_seconds))
+        base = max(0.5, float(self.reconnect_delay))
+        delay = base * (2 ** min(self._connect_failures, 5))
+        return min(delay, max(5.0, float(self.max_reconnect_delay_seconds)))
+
+    async def _wait_for_cookie_update(self, timeout_seconds: float) -> bool:
+        deadline = time.time() + max(1.0, float(timeout_seconds))
+        interval = max(1.0, float(self.cookie_watch_interval_seconds))
+        while time.time() < deadline and not self._stop_event.is_set():
+            if self._maybe_reload_cookie(reason="watch"):
+                return True
+            await asyncio.sleep(min(interval, max(0.5, deadline - time.time())))
+        return False
 
     def _base_headers(self) -> dict[str, str]:
         return {
@@ -339,58 +439,153 @@ class GoofishWsTransport:
             "cookie": self.cookie_text,
         }
 
+    async def _preflight_has_login(self) -> bool:
+        """调用 hasLogin 预热会话，并吸收服务端补发的关键 cookie。"""
+        params = {"appName": "xianyu", "fromSite": "77"}
+        data = {
+            "hid": self.cookies.get("unb", ""),
+            "ltl": "true",
+            "appName": "xianyu",
+            "appEntrance": "web",
+            "_csrf_token": self.cookies.get("XSRF-TOKEN", ""),
+            "umidToken": "",
+            "hsiz": self.cookies.get("cookie2", ""),
+            "bizParams": "taobaoBizLoginFrom=web",
+            "mainPage": "false",
+            "isMobile": "false",
+            "lang": "zh_CN",
+            "returnUrl": "",
+            "fromSite": "77",
+            "isIframe": "true",
+            "documentReferer": "https://www.goofish.com/",
+            "defaultView": "hasLogin",
+            "umidTag": "SERVER",
+            "deviceId": self.cookies.get("cna", "") or self.device_id,
+        }
+
+        async with httpx.AsyncClient(
+            timeout=12.0,
+            headers=self._base_headers(),
+            cookies=self.cookies,
+            follow_redirects=True,
+        ) as client:
+            resp = await client.post("https://passport.goofish.com/newlogin/hasLogin.do", params=params, data=data)
+            try:
+                payload = resp.json()
+            except Exception:
+                payload = {}
+
+            content = payload.get("content", {}) if isinstance(payload, dict) else {}
+            success = bool(content.get("success")) if isinstance(content, dict) else False
+            if not success:
+                return False
+
+            merged = dict(self.cookies)
+            for ck in client.cookies.jar:
+                name = str(getattr(ck, "name", "") or "").strip()
+                value = str(getattr(ck, "value", "") or "").strip()
+                if not name or not value:
+                    continue
+                merged[name] = value
+
+            if merged != self.cookies:
+                merged_text = "; ".join(f"{k}={v}" for k, v in merged.items() if str(k).strip() and str(v).strip())
+                self._apply_cookie_text(merged_text, reason="has_login_refresh")
+                os.environ["XIANYU_COOKIE_1"] = self.cookie_text
+            return True
+
     async def _fetch_token(self) -> str:
+        # 每次取 token 前先尝试热更新 cookie（如果用户在面板里更新了）。
+        self._maybe_reload_cookie(reason="token_fetch")
+        try:
+            await self._preflight_has_login()
+        except Exception as exc:
+            self.logger.debug(f"WS hasLogin preflight failed: {exc}")
+
         now = time.time()
         if self._token and (now - self._token_ts) < self.token_refresh_interval_seconds:
             return self._token
 
-        token_cookie = str(self.cookies.get("_m_h5_tk", "") or "")
-        token_seed = token_cookie.split("_")[0].strip()
-        if not token_seed:
-            raise BrowserError("Cookie missing `_m_h5_tk`.")
+        max_attempts = max(1, int(self.config.get("token_max_attempts", 3)))
+        last_error: Exception | None = None
 
-        t = str(int(time.time() * 1000))
-        data_val = json.dumps(
-            {"appKey": "444e9908a51d1cb236a27862abc769c9", "deviceId": self.device_id},
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        params = {
-            "jsv": "2.7.2",
-            "appKey": "34839810",
-            "t": t,
-            "sign": generate_sign(t, token_seed, data_val),
-            "v": "1.0",
-            "type": "originaljson",
-            "accountSite": "xianyu",
-            "dataType": "json",
-            "timeout": "20000",
-            "api": "mtop.taobao.idlemessage.pc.login.token",
-            "sessionOption": "AutoLoginOnly",
-            "spm_cnt": "a21ybx.im.0.0",
-        }
+        for attempt in range(1, max_attempts + 1):
+            token_cookie = str(self.cookies.get("_m_h5_tk", "") or "")
+            token_seed = token_cookie.split("_")[0].strip()
+            if not token_seed:
+                self._maybe_reload_cookie(reason="missing_m_h5_tk")
+                token_cookie = str(self.cookies.get("_m_h5_tk", "") or "")
+                token_seed = token_cookie.split("_")[0].strip()
+                if not token_seed:
+                    raise BrowserError("Cookie missing `_m_h5_tk`.")
 
-        headers = self._base_headers()
-        data = {"data": data_val}
-        async with httpx.AsyncClient(timeout=12.0, headers=headers) as client:
-            resp = await client.post(
-                "https://h5api.m.goofish.com/h5/mtop.taobao.idlemessage.pc.login.token/1.0/",
-                params=params,
-                data=data,
+            t = str(int(time.time() * 1000))
+            data_val = json.dumps(
+                {"appKey": "444e9908a51d1cb236a27862abc769c9", "deviceId": self.device_id},
+                ensure_ascii=False,
+                separators=(",", ":"),
             )
-            payload = resp.json()
+            params = {
+                "jsv": "2.7.2",
+                "appKey": "34839810",
+                "t": t,
+                "sign": generate_sign(t, token_seed, data_val),
+                "v": "1.0",
+                "type": "originaljson",
+                "accountSite": "xianyu",
+                "dataType": "json",
+                "timeout": "20000",
+                "api": "mtop.taobao.idlemessage.pc.login.token",
+                "sessionOption": "AutoLoginOnly",
+                "spm_cnt": "a21ybx.im.0.0",
+            }
 
-        ret = payload.get("ret", []) if isinstance(payload, dict) else []
-        if not any("SUCCESS::调用成功" in str(item) for item in ret):
-            raise BrowserError(f"Token API failed: {ret}")
+            headers = self._base_headers()
+            data = {"data": data_val}
+            try:
+                async with httpx.AsyncClient(timeout=12.0, headers=headers) as client:
+                    resp = await client.post(
+                        "https://h5api.m.goofish.com/h5/mtop.taobao.idlemessage.pc.login.token/1.0/",
+                        params=params,
+                        data=data,
+                    )
+                    payload = resp.json()
+            except Exception as exc:
+                last_error = BrowserError(f"Token API request failed: {exc}")
+                await asyncio.sleep(min(2.0 * attempt, 6.0))
+                continue
 
-        token = str(payload.get("data", {}).get("accessToken", "") or "").strip()
-        if not token:
-            raise BrowserError("Token API success but accessToken missing.")
+            ret = payload.get("ret", []) if isinstance(payload, dict) else []
+            if not any("SUCCESS::调用成功" in str(item) for item in ret):
+                ret_text = " | ".join(str(item) for item in ret)
+                last_error = BrowserError(f"Token API failed: {ret}")
+                # 认证类异常优先触发一次 cookie 热更新再重试
+                if "FAIL_SYS_USER_VALIDATE" in ret_text or "RGV587" in ret_text:
+                    self._maybe_reload_cookie(reason="token_ret_fail")
+                    try:
+                        await self._preflight_has_login()
+                    except Exception as exc:
+                        self.logger.debug(f"WS hasLogin retry failed: {exc}")
+                if attempt < max_attempts:
+                    await asyncio.sleep(min(2.0 * attempt, 6.0))
+                    continue
+                break
 
-        self._token = token
-        self._token_ts = time.time()
-        return token
+            token = str(payload.get("data", {}).get("accessToken", "") or "").strip()
+            if not token:
+                last_error = BrowserError("Token API success but accessToken missing.")
+                if attempt < max_attempts:
+                    await asyncio.sleep(min(2.0 * attempt, 6.0))
+                    continue
+                break
+
+            self._token = token
+            self._token_ts = time.time()
+            return token
+
+        if last_error is not None:
+            raise last_error
+        raise BrowserError("Token fetch failed.")
 
     async def _send_reg(self) -> None:
         if self._ws is None:
@@ -532,6 +727,7 @@ class GoofishWsTransport:
 
         while not self._stop_event.is_set():
             try:
+                self._maybe_reload_cookie(reason="connect")
                 headers = self._base_headers()
                 try:
                     self._ws = await websockets.connect(
@@ -556,6 +752,7 @@ class GoofishWsTransport:
                 self._last_heartbeat_sent = 0.0
                 await self._send_reg()
                 self._ready.set()
+                self._connect_failures = 0
                 self.logger.info("Connected to Goofish WebSocket transport")
 
                 while not self._stop_event.is_set():
@@ -582,8 +779,20 @@ class GoofishWsTransport:
                 break
             except Exception as exc:
                 self._ready.clear()
-                self.logger.warning(f"Goofish WebSocket disconnected, retrying: {exc}")
-                await asyncio.sleep(max(0.5, self.reconnect_delay))
+                self._connect_failures += 1
+                auth_error = self._is_auth_related_error(exc)
+                reason = str(exc or "").strip() or "unknown error"
+                self._last_disconnect_reason = reason
+                self.logger.warning(f"Goofish WebSocket disconnected, retrying: {reason}")
+
+                if auth_error:
+                    # 认证失败优先等待 Cookie 更新，避免持续重试触发更高风险。
+                    if await self._wait_for_cookie_update(self.auth_failure_backoff_seconds):
+                        self._connect_failures = 0
+                        self.logger.info("Detected cookie update, retrying WS connection immediately")
+                        continue
+
+                await asyncio.sleep(self._next_reconnect_delay(auth_error=auth_error))
             finally:
                 if self._ws is not None:
                     try:

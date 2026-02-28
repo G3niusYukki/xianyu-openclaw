@@ -230,7 +230,7 @@ class Config:
                 "send_confirm_delay_seconds": [0.15, 0.35],
                 "quote_intent_keywords": ["报价", "多少钱", "价格", "运费", "邮费", "快递费", "寄到", "发到", "送到", "怎么寄"],
                 "standard_format_trigger_keywords": ["你好", "您好", "在吗", "在不", "hi", "hello", "哈喽", "有人吗"],
-                "quote_missing_template": "咨询格式：寄件城市～收件城市～重量（多少kg）",
+                "quote_missing_template": "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
                 "strict_format_reply_enabled": True,
                 "quote_failed_template": "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
                 "quote": {},

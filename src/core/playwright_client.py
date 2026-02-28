@@ -54,7 +54,15 @@ class PlaywrightBrowserClient:
             "height": int(viewport_cfg.get("height", 800)),
         }
         self.user_agent = str(browser_cfg.get("user_agent", "") or "").strip()
-        self._cookies_seed = os.getenv("XIANYU_COOKIE_1", "")
+        cookie_seed = str(os.getenv("XIANYU_COOKIE_1", "") or "").strip()
+        if not cookie_seed:
+            for account in app_config.accounts:
+                if bool(account.get("enabled", True)):
+                    raw_cookie = str(account.get("cookie", "") or "").strip()
+                    if raw_cookie:
+                        cookie_seed = raw_cookie
+                        break
+        self._cookies_seed = cookie_seed
 
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None

@@ -6,10 +6,12 @@ Messages Service
 """
 
 import asyncio
+import json
 import os
 import random
 import re
 import time
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -34,6 +36,24 @@ class MessageSelectors:
     SEND_BUTTON = "button:has-text('发送'), button:has-text('Send'), [class*='send']"
 
 
+DEFAULT_WEIGHT_REPLY_TEMPLATE = (
+    "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n"
+    "{courier}: {price} 元\n"
+    "预计时效：{eta_days}\n"
+    "重要提示：\n"
+    "体积重大于实际重量时按体积计费！"
+)
+
+DEFAULT_VOLUME_REPLY_TEMPLATE = (
+    "{origin_province}到{dest_province} {billing_weight}kg 首单价格\n"
+    "体积重规则：{volume_formula}\n"
+    "{courier}: {price} 元\n"
+    "预计时效：{eta_days}\n"
+    "重要提示：\n"
+    "体积重大于实际重量时按体积计费！"
+)
+
+
 class MessagesService:
     """闲鱼会话自动回复服务。"""
 
@@ -51,6 +71,12 @@ class MessagesService:
         self.ws_config = self.config.get("ws", {}) if isinstance(self.config.get("ws"), dict) else {}
         self._ws_transport: Any | None = None
         self._ws_unavailable_reason = ""
+        self._reply_templates_path = self._resolve_reply_templates_path()
+        self._reply_templates_cache: dict[str, str] = {
+            "weight_template": DEFAULT_WEIGHT_REPLY_TEMPLATE,
+            "volume_template": DEFAULT_VOLUME_REPLY_TEMPLATE,
+        }
+        self._reply_templates_mtime: float = -1.0
 
         browser_config = app_config.browser
         self.delay_range = (
@@ -130,7 +156,7 @@ class MessagesService:
         }
         self.quote_missing_template = self.config.get(
             "quote_missing_template",
-            "咨询格式：寄件城市～收件城市～重量（多少kg）",
+            "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
         )
         self.strict_format_reply_enabled = bool(self.config.get("strict_format_reply_enabled", False))
         self.quote_failed_template = self.config.get(
@@ -178,6 +204,59 @@ class MessagesService:
                     return cookie
         return ""
 
+    def _resolve_reply_templates_path(self) -> Path:
+        app_config = get_config()
+        content_cfg = app_config.get_section("content", {})
+        templates_cfg = content_cfg.get("templates", {}) if isinstance(content_cfg, dict) else {}
+        if not isinstance(templates_cfg, dict):
+            templates_cfg = {}
+        raw_template_dir = str(templates_cfg.get("path") or "config/templates")
+        root = Path(__file__).resolve().parents[3]
+        template_dir = Path(raw_template_dir)
+        if not template_dir.is_absolute():
+            template_dir = root / template_dir
+        return template_dir / "reply_templates.json"
+
+    def _load_reply_templates(self) -> dict[str, str]:
+        path = self._reply_templates_path
+        if not path.exists():
+            return self._reply_templates_cache
+
+        try:
+            mtime = float(path.stat().st_mtime)
+        except OSError:
+            return self._reply_templates_cache
+
+        if abs(mtime - self._reply_templates_mtime) < 1e-6:
+            return self._reply_templates_cache
+
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            weight = str(raw.get("weight_template") or DEFAULT_WEIGHT_REPLY_TEMPLATE).strip()
+            volume = str(raw.get("volume_template") or DEFAULT_VOLUME_REPLY_TEMPLATE).strip()
+            self._reply_templates_cache = {
+                "weight_template": weight or DEFAULT_WEIGHT_REPLY_TEMPLATE,
+                "volume_template": volume or DEFAULT_VOLUME_REPLY_TEMPLATE,
+            }
+            self._reply_templates_mtime = mtime
+        except Exception as exc:
+            self.logger.warning("Load reply templates failed: %s", exc)
+        return self._reply_templates_cache
+
+    @staticmethod
+    def _safe_float(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _select_quote_reply_template(self, explain: dict[str, Any]) -> str:
+        templates = self._load_reply_templates()
+        actual_weight = self._safe_float(explain.get("actual_weight_kg"))
+        billing_weight = self._safe_float(explain.get("billing_weight_kg"))
+        use_volume_template = billing_weight > (actual_weight + 1e-6)
+        return templates["volume_template"] if use_volume_template else templates["weight_template"]
+
     def _should_use_ws_transport(self) -> bool:
         if self.transport_mode == "ws":
             return True
@@ -206,7 +285,11 @@ class MessagesService:
         try:
             from src.modules.messages.ws_live import GoofishWsTransport
 
-            self._ws_transport = GoofishWsTransport(cookie_text=cookie_text, config=self.ws_config)
+            self._ws_transport = GoofishWsTransport(
+                cookie_text=cookie_text,
+                config=self.ws_config,
+                cookie_supplier=self._resolve_ws_cookie,
+            )
             await self._ws_transport.start()
             self.logger.info("MessagesService WebSocket transport enabled")
             return self._ws_transport
@@ -526,7 +609,12 @@ class MessagesService:
         try:
             result = await self.quote_engine.get_quote(request)
             latency_ms = int((perf_counter() - start) * 1000)
-            reply = result.compose_reply(validity_minutes=int(self.quote_config.get("validity_minutes", 30)))
+            explain = result.explain if isinstance(result.explain, dict) else {}
+            selected_template = self._select_quote_reply_template(explain)
+            reply = result.compose_reply(
+                validity_minutes=int(self.quote_config.get("validity_minutes", 30)),
+                template=selected_template,
+            )
             return self._sanitize_reply(reply), {
                 "is_quote": True,
                 "quote_need_info": False,

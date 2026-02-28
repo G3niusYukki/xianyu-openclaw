@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
 from src.core.config import get_config
-from src.core.startup_checks import run_all_checks
+from src.core.startup_checks import resolve_runtime_mode, run_all_checks
 from src.modules.quote import CostTableRepository
 
 _SUGGESTIONS = {
@@ -22,6 +25,7 @@ _SUGGESTIONS = {
     "AI服务": "可配置 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY`，未配置将退化到模板模式。",
     ".env 文件": "请复制 `.env.example` 为 `.env`，并补齐关键配置。",
     "配置文件": "请确保 `config/config.yaml` 存在，或从 `config/config.example.yaml` 复制生成。",
+    "Dashboard守护状态": "请使用 `python3 -m src.dashboard_server --port 8091` 或对应 bat 脚本启动面板服务。",
     "消息首响SLA": "建议开启 `messages.fast_reply_enabled=true` 且 `reply_target_seconds<=3`。",
     "自动报价成本源": "请提供成本表（data/quote_costs）或配置 `quote.cost_api_url`。",
 }
@@ -66,6 +70,7 @@ def _append_check(
 
 def _extra_checks(skip_quote: bool = False) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
+    runtime = resolve_runtime_mode()
 
     env_exists = Path(".env").exists()
     _append_check(
@@ -87,16 +92,26 @@ def _extra_checks(skip_quote: bool = False) -> list[dict[str, Any]]:
     )
 
     web_port = int(os.getenv("OPENCLAW_WEB_PORT", "8080"))
-    web_listening = _check_port_open(web_port)
-    _append_check(
-        checks,
-        name="Web UI 端口",
-        passed=web_listening,
-        message=f"检测到监听 127.0.0.1:{web_port}" if web_listening else f"未检测到监听 127.0.0.1:{web_port}",
-        critical=False,
-        suggestion="如需启动 Web UI，请执行 `docker compose up -d`。",
-        meta={"port": web_port},
-    )
+    if runtime == "lite":
+        _append_check(
+            checks,
+            name="Web UI 端口",
+            passed=True,
+            message=f"lite 模式默认跳过 127.0.0.1:{web_port} 检查",
+            critical=False,
+            meta={"port": web_port, "skipped": True, "runtime": runtime},
+        )
+    else:
+        web_listening = _check_port_open(web_port)
+        _append_check(
+            checks,
+            name="Web UI 端口",
+            passed=web_listening,
+            message=f"检测到监听 127.0.0.1:{web_port}" if web_listening else f"未检测到监听 127.0.0.1:{web_port}",
+            critical=False,
+            suggestion="如需启动 Web UI，请执行 `docker compose up -d`。",
+            meta={"port": web_port},
+        )
 
     dashboard_port = int(os.getenv("DASHBOARD_PORT", "8091"))
     dashboard_listening = _check_port_open(dashboard_port)
@@ -112,6 +127,34 @@ def _extra_checks(skip_quote: bool = False) -> list[dict[str, Any]]:
         critical=False,
         suggestion="如需可视化后台，请执行 `python3 -m src.dashboard_server --port 8091`。",
         meta={"port": dashboard_port},
+    )
+
+    dashboard_api_ok = False
+    dashboard_api_msg = "Dashboard API 未检测"
+    if dashboard_listening:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{dashboard_port}/api/status", timeout=8.0) as resp:
+                raw = resp.read().decode("utf-8", errors="ignore")
+                payload = json.loads(raw)
+                if isinstance(payload, dict) and "service_status" in payload:
+                    dashboard_api_ok = True
+                    dashboard_api_msg = "Dashboard API 正常"
+                else:
+                    dashboard_api_msg = "Dashboard API 响应缺少 service_status"
+        except urllib.error.URLError as exc:
+            dashboard_api_msg = f"Dashboard API 不可用: {exc.reason}"
+        except Exception as exc:
+            dashboard_api_msg = f"Dashboard API 检查失败: {exc}"
+    else:
+        dashboard_api_msg = "Dashboard 端口未监听，跳过 API 连通性检查"
+
+    _append_check(
+        checks,
+        name="Dashboard守护状态",
+        passed=dashboard_api_ok,
+        message=dashboard_api_msg,
+        critical=False,
+        meta={"port": dashboard_port, "port_listening": dashboard_listening},
     )
 
     try:

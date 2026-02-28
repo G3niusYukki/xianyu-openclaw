@@ -155,13 +155,13 @@ class MessagesConfig(BaseModel):
     )
     standard_format_trigger_keywords: list[str] = Field(
         default_factory=lambda: ["你好", "您好", "在吗", "在不", "hi", "hello", "哈喽", "有人吗"],
-        description="触发标准咨询格式的关键词（如招呼语）",
+        description="触发标准询价格式模板的关键词（如招呼语）",
     )
     quote_missing_template: str = Field(
-        default="咨询格式：寄件城市～收件城市～重量（多少kg）",
+        default="询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
         description="询价缺参补问模板",
     )
-    strict_format_reply_enabled: bool = Field(default=True, description="是否对非标准输入强制回复标准咨询格式模板")
+    strict_format_reply_enabled: bool = Field(default=True, description="是否对非标准输入强制回复标准询价格式模板")
     quote_failed_template: str = Field(
         default="报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
         description="报价失败降级模板",
