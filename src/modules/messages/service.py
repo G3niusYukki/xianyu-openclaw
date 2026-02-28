@@ -51,6 +51,16 @@ DEFAULT_VOLUME_REPLY_TEMPLATE = (
     "回复“选{courier}”可优先安排。"
 )
 
+DEFAULT_NON_EMPTY_REPLY_FALLBACK = "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）"
+DEFAULT_COURIER_LOCK_TEMPLATE = (
+    "已为你锁定 {courier}（{price}，预计{eta_days}）。\n"
+    "下单流程：\n"
+    "1. 先拍下链接，先不要付款；\n"
+    "2. 我改价后你再付款；\n"
+    "3. 付款后系统自动发放兑换码，用兑换码到小程序下单即可。\n"
+    "付款后的地址和手机号在小程序填写，这里无需提供。"
+)
+
 
 class MessagesService:
     """闲鱼会话自动回复服务。"""
@@ -156,6 +166,10 @@ class MessagesService:
             "quote_missing_template",
             "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
         )
+        self.force_non_empty_reply = bool(self.config.get("force_non_empty_reply", True))
+        self.non_empty_reply_fallback = str(
+            self.config.get("non_empty_reply_fallback", self.quote_missing_template or DEFAULT_NON_EMPTY_REPLY_FALLBACK)
+        ).strip() or DEFAULT_NON_EMPTY_REPLY_FALLBACK
         self.strict_format_reply_enabled = bool(self.config.get("strict_format_reply_enabled", False))
         self.quote_reply_all_couriers = bool(self.config.get("quote_reply_all_couriers", True))
         self.quote_reply_max_couriers = max(1, int(self.config.get("quote_reply_max_couriers", 10)))
@@ -163,6 +177,10 @@ class MessagesService:
             "quote_failed_template",
             "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
         )
+        self.context_memory_enabled = bool(self.config.get("context_memory_enabled", True))
+        self.context_memory_ttl_seconds = max(300, int(self.config.get("context_memory_ttl_seconds", 3600)))
+        self.courier_lock_template = str(self.config.get("courier_lock_template", DEFAULT_COURIER_LOCK_TEMPLATE))
+        self._quote_context_memory: dict[str, dict[str, Any]] = {}
 
         self.compliance_guard = get_compliance_guard()
         self.compliance_center = ComplianceCenter()
@@ -635,12 +653,267 @@ class MessagesService:
 
         return origin, dest
 
-    def _build_quote_request(self, message_text: str) -> tuple[QuoteRequest | None, list[str]]:
+    def _prune_quote_context_memory(self) -> None:
+        if not self.context_memory_enabled or not self._quote_context_memory:
+            return
+        now_ts = time.time()
+        stale_ids = [
+            session_id
+            for session_id, payload in self._quote_context_memory.items()
+            if (now_ts - float(payload.get("updated_at", 0.0))) > self.context_memory_ttl_seconds
+        ]
+        for session_id in stale_ids:
+            self._quote_context_memory.pop(session_id, None)
+
+    def _get_quote_context(self, session_id: str) -> dict[str, Any]:
+        if not self.context_memory_enabled or not session_id:
+            return {}
+        self._prune_quote_context_memory()
+        payload = self._quote_context_memory.get(session_id)
+        if not isinstance(payload, dict):
+            return {}
+        return dict(payload)
+
+    def _update_quote_context(self, session_id: str, **kwargs: Any) -> None:
+        if not self.context_memory_enabled or not session_id:
+            return
+        self._prune_quote_context_memory()
+        payload = dict(self._quote_context_memory.get(session_id) or {})
+        for key, value in kwargs.items():
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            payload[key] = value
+        payload["updated_at"] = time.time()
+        self._quote_context_memory[session_id] = payload
+
+    def _has_quote_context(self, session_id: str) -> bool:
+        context = self._get_quote_context(session_id)
+        if not context:
+            return False
+        return bool(
+            context.get("origin")
+            or context.get("destination")
+            or context.get("weight")
+            or context.get("pending_missing_fields")
+            or context.get("last_quote_rows")
+            or context.get("courier_choice")
+        )
+
+    @staticmethod
+    def _extract_single_location(message_text: str) -> str | None:
+        text = (message_text or "").strip()
+        if not text:
+            return None
+        compact = re.sub(r"\s+", "", text)
+        if re.fullmatch(r"[\u4e00-\u9fa5]{2,20}(?:省|市|区|县|自治区|特别行政区|自治州|地区)?", compact):
+            return compact
+        return None
+
+    def _extract_quote_fields(self, message_text: str) -> dict[str, Any]:
         origin, destination = self._extract_locations(message_text)
-        weight = self._extract_weight_kg(message_text)
-        volume = self._extract_volume_cm3(message_text)
-        volume_weight = self._extract_volume_weight_kg(message_text)
-        service_level = self._extract_service_level(message_text)
+        return {
+            "origin": origin,
+            "destination": destination,
+            "weight": self._extract_weight_kg(message_text),
+            "volume": self._extract_volume_cm3(message_text),
+            "volume_weight": self._extract_volume_weight_kg(message_text),
+            "service_level": self._extract_service_level(message_text),
+        }
+
+    def _build_quote_request_with_context(
+        self,
+        message_text: str,
+        session_id: str = "",
+    ) -> tuple[QuoteRequest | None, list[str], dict[str, Any], bool]:
+        fields = self._extract_quote_fields(message_text)
+        context = self._get_quote_context(session_id)
+        pending_missing = context.get("pending_missing_fields")
+        if not isinstance(pending_missing, list):
+            pending_missing = []
+
+        single_location = self._extract_single_location(message_text)
+        if single_location and len(pending_missing) == 1 and pending_missing[0] in {"origin", "destination"}:
+            key = str(pending_missing[0])
+            if not fields.get(key):
+                fields[key] = single_location
+
+        memory_hit_fields: list[str] = []
+        for key in ("origin", "destination", "weight"):
+            if fields.get(key) in {None, ""}:
+                remembered = context.get(key)
+                if remembered not in {None, ""}:
+                    fields[key] = remembered
+                    memory_hit_fields.append(key)
+
+        for key in ("volume", "volume_weight", "service_level"):
+            if fields.get(key) in {None, ""} and context.get(key) not in {None, ""}:
+                fields[key] = context.get(key)
+
+        missing: list[str] = []
+        if not fields.get("origin"):
+            missing.append("origin")
+        if not fields.get("destination"):
+            missing.append("destination")
+        weight_value = fields.get("weight")
+        try:
+            weight_ok = weight_value is not None and float(weight_value) > 0
+        except (TypeError, ValueError):
+            weight_ok = False
+        if not weight_ok:
+            missing.append("weight")
+
+        if session_id:
+            self._update_quote_context(
+                session_id,
+                origin=fields.get("origin"),
+                destination=fields.get("destination"),
+                weight=fields.get("weight"),
+                volume=fields.get("volume"),
+                volume_weight=fields.get("volume_weight"),
+                service_level=fields.get("service_level"),
+                pending_missing_fields=missing,
+            )
+
+        if missing:
+            return None, missing, fields, bool(memory_hit_fields)
+
+        request = QuoteRequest(
+            origin=str(fields.get("origin") or ""),
+            destination=str(fields.get("destination") or ""),
+            weight=float(fields.get("weight") or 0.0),
+            volume=float(fields.get("volume") or 0.0),
+            volume_weight=float(fields.get("volume_weight") or 0.0),
+            service_level=str(fields.get("service_level") or "standard"),
+        )
+        return request, [], fields, bool(memory_hit_fields)
+
+    def _is_quote_followup_candidate(self, message_text: str) -> bool:
+        text = (message_text or "").strip()
+        if not text:
+            return False
+        if self._extract_weight_kg(text) is not None:
+            return True
+        if self._extract_volume_cm3(text) is not None or self._extract_volume_weight_kg(text) is not None:
+            return True
+        origin, destination = self._extract_locations(text)
+        if origin or destination:
+            return True
+        if self._extract_single_location(text):
+            return True
+        if self._detect_courier_choice(text):
+            return True
+        if any(k in text for k in ["下单", "拍下", "改价", "付款"]):
+            return True
+        return False
+
+    def _detect_courier_choice(self, message_text: str) -> str | None:
+        text = (message_text or "").strip()
+        if not text:
+            return None
+
+        couriers = ["韵达", "圆通", "中通", "申通", "顺丰", "极兔", "德邦", "京东", "邮政", "菜鸟裹裹"]
+        preferred = self.quote_config.get("preferred_couriers", [])
+        if isinstance(preferred, list):
+            for item in preferred:
+                name = str(item or "").strip()
+                if name and name not in couriers:
+                    couriers.append(name)
+
+        pattern = re.compile(
+            r"(?:选|选择|确认|走|用|安排)\s*(" + "|".join([re.escape(x) for x in couriers]) + r")",
+            flags=re.IGNORECASE,
+        )
+        matched = pattern.search(text)
+        if matched:
+            return str(matched.group(1))
+
+        compact = re.sub(r"\s+", "", text)
+        for courier in couriers:
+            if compact == courier:
+                return courier
+        return None
+
+    @staticmethod
+    def _is_checkout_followup(message_text: str) -> bool:
+        text = (message_text or "").strip()
+        if not text:
+            return False
+        keywords = [
+            "下单",
+            "拍下",
+            "拍了",
+            "已拍",
+            "改价",
+            "付款",
+            "支付",
+            "链接",
+            "怎么买",
+            "怎么拍",
+            "兑换码",
+        ]
+        return any(keyword in text for keyword in keywords)
+
+    @staticmethod
+    def _normalize_courier_name(courier: str) -> str:
+        return re.sub(r"\s+", "", str(courier or "")).strip()
+
+    def _find_quote_row_by_courier(self, context: dict[str, Any], courier: str) -> dict[str, Any] | None:
+        rows = context.get("last_quote_rows")
+        if not isinstance(rows, list) or not rows:
+            return None
+        target = self._normalize_courier_name(courier)
+        if not target:
+            return None
+        for row in rows:
+            row_name = self._normalize_courier_name(str(row.get("courier") or ""))
+            if row_name == target:
+                return row
+        return None
+
+    def _build_available_couriers_hint(self, context: dict[str, Any]) -> str:
+        rows = context.get("last_quote_rows")
+        if not isinstance(rows, list) or not rows:
+            return "请先按格式发送：xx省 - xx省 - 重量（kg），我先给你出可选渠道报价。"
+        couriers: list[str] = []
+        for row in rows:
+            name = str(row.get("courier") or "").strip()
+            if name and name not in couriers:
+                couriers.append(name)
+        if not couriers:
+            return "请先按格式发送：xx省 - xx省 - 重量（kg），我先给你出可选渠道报价。"
+        return f"可选渠道：{'、'.join(couriers)}。回复“选XX快递”即可锁定。"
+
+    def _build_courier_lock_reply(self, context: dict[str, Any]) -> tuple[str, bool]:
+        courier = str(context.get("courier_choice") or "已选渠道").strip() or "已选渠道"
+        row = self._find_quote_row_by_courier(context, courier)
+        if row:
+            try:
+                price_label = f"{float(row.get('total_fee') or 0.0):.2f}元"
+            except (TypeError, ValueError):
+                price_label = "待改价确认"
+            eta_days = str(row.get("eta_days") or "1-3天")
+        else:
+            price_label = "待改价确认"
+            eta_days = "1-3天"
+        try:
+            reply = self.courier_lock_template.format(courier=courier, price=price_label, eta_days=eta_days)
+        except Exception:
+            reply = (
+                f"已为你锁定 {courier}（{price_label}，预计{eta_days}）。\n"
+                "请先拍下链接不要付款，我改价后你再付款。付款后系统会自动发兑换码。"
+            )
+        return reply, bool(row)
+
+    def _build_quote_request(self, message_text: str) -> tuple[QuoteRequest | None, list[str]]:
+        fields = self._extract_quote_fields(message_text)
+        origin = fields.get("origin")
+        destination = fields.get("destination")
+        weight = fields.get("weight")
+        volume = fields.get("volume")
+        volume_weight = fields.get("volume_weight")
+        service_level = fields.get("service_level")
 
         missing: list[str] = []
         if not origin:
@@ -666,7 +939,10 @@ class MessagesService:
         )
 
     def _sanitize_reply(self, reply_text: str) -> str:
-        text = reply_text or ""
+        text = (reply_text or "").strip()
+        if not text and self.force_non_empty_reply:
+            text = self.non_empty_reply_fallback
+
         lowered = text.lower()
         if any(keyword in lowered for keyword in self.high_risk_keywords):
             return self.safe_fallback_reply
@@ -676,10 +952,52 @@ class MessagesService:
             return self.safe_fallback_reply
         return text
 
-    async def _generate_reply_with_quote(self, message_text: str, item_title: str = "") -> tuple[str, dict[str, Any]]:
-        is_quote_intent = self._is_quote_request(message_text)
+    async def _generate_reply_with_quote(
+        self,
+        message_text: str,
+        item_title: str = "",
+        session_id: str = "",
+    ) -> tuple[str, dict[str, Any]]:
         force_standard_format = self._is_standard_format_trigger(message_text)
-        request, missing = self._build_quote_request(message_text)
+        context_before = self._get_quote_context(session_id) if session_id else {}
+        followup_quote = bool(
+            session_id and self._has_quote_context(session_id) and self._is_quote_followup_candidate(message_text)
+        )
+        is_quote_intent = self._is_quote_request(message_text) or followup_quote
+
+        courier_choice = self._detect_courier_choice(message_text)
+        if session_id and courier_choice:
+            self._update_quote_context(session_id, courier_choice=courier_choice)
+
+        context_after = self._get_quote_context(session_id) if session_id else {}
+        has_checkout_context = bool(session_id and context_after.get("courier_choice"))
+        if has_checkout_context and (courier_choice is not None or self._is_checkout_followup(message_text)):
+            selected_courier = str(context_after.get("courier_choice") or "已选渠道")
+            has_quote_rows = isinstance(context_after.get("last_quote_rows"), list) and bool(context_after.get("last_quote_rows"))
+            if not has_quote_rows:
+                prompt = self.quote_missing_template.format(fields="寄件城市、收件城市、包裹重量（kg）")
+                return self._sanitize_reply(prompt), {
+                    "is_quote": True,
+                    "quote_need_info": True,
+                    "quote_missing_fields": ["origin", "destination", "weight"],
+                    "quote_success": False,
+                    "quote_fallback": False,
+                    "quote_context_hit": bool(context_before),
+                }
+
+            lock_reply, matched = self._build_courier_lock_reply(context_after)
+            if courier_choice and not matched:
+                lock_reply = f"当前线路暂未匹配到{selected_courier}报价。\n{self._build_available_couriers_hint(context_after)}"
+            return self._sanitize_reply(lock_reply), {
+                "is_quote": False,
+                "courier_locked": bool(matched),
+                "selected_courier": selected_courier,
+            }
+
+        request, missing, extracted_fields, memory_hit = self._build_quote_request_with_context(
+            message_text,
+            session_id=session_id,
+        )
         if missing and (is_quote_intent or self.strict_format_reply_enabled or force_standard_format):
             fields = "、".join([self.quote_missing_prompts[field] for field in missing])
             prompt = self.quote_missing_template.format(fields=fields)
@@ -692,11 +1010,17 @@ class MessagesService:
                 "quote_missing_fields": missing,
                 "quote_success": False,
                 "quote_fallback": False,
+                "quote_context_hit": bool(memory_hit),
+                "quote_context_enabled": bool(self.context_memory_enabled),
             }
 
         if not is_quote_intent:
             reply = self.reply_engine.generate_reply(message_text=message_text, item_title=item_title)
-            return self._sanitize_reply(reply), {"is_quote": False}
+            return self._sanitize_reply(reply), {
+                "is_quote": False,
+                "quote_context_enabled": bool(self.context_memory_enabled),
+                "quote_context_present": bool(context_before),
+            }
 
         if request is None:
             # 保底分支：理论上 missing 已覆盖，这里兜底防止格式解析异常时漏回复
@@ -707,6 +1031,7 @@ class MessagesService:
                 "quote_missing_fields": ["origin", "destination", "weight"],
                 "quote_success": False,
                 "quote_fallback": False,
+                "quote_context_hit": bool(memory_hit),
             }
 
         start = perf_counter()
@@ -719,6 +1044,25 @@ class MessagesService:
                 best_courier, best_result = multi_quote_rows[0]
                 reply = self._compose_multi_courier_quote_reply(multi_quote_rows)
                 latency_ms = int((perf_counter() - start) * 1000)
+                if session_id:
+                    self._update_quote_context(
+                        session_id,
+                        origin=request.origin,
+                        destination=request.destination,
+                        weight=request.weight,
+                        volume=request.volume,
+                        volume_weight=request.volume_weight,
+                        service_level=request.service_level,
+                        pending_missing_fields=[],
+                        last_quote_rows=[
+                            {
+                                "courier": courier_name,
+                                "total_fee": round(float(result.total_fee), 2),
+                                "eta_days": self._format_eta_days(result.eta_minutes),
+                            }
+                            for courier_name, result in multi_quote_rows
+                        ],
+                    )
                 return self._sanitize_reply(reply), {
                     "is_quote": True,
                     "quote_need_info": False,
@@ -742,6 +1086,7 @@ class MessagesService:
                         **best_result.to_dict(),
                         "selected_courier": best_courier,
                     },
+                    "quote_context_hit": bool(memory_hit),
                 }
 
             result = await self.quote_engine.get_quote(request)
@@ -752,6 +1097,24 @@ class MessagesService:
                 validity_minutes=int(self.quote_config.get("validity_minutes", 30)),
                 template=selected_template,
             )
+            if session_id:
+                self._update_quote_context(
+                    session_id,
+                    origin=request.origin,
+                    destination=request.destination,
+                    weight=request.weight,
+                    volume=request.volume,
+                    volume_weight=request.volume_weight,
+                    service_level=request.service_level,
+                    pending_missing_fields=[],
+                    last_quote_rows=[
+                        {
+                            "courier": str(result.explain.get("courier") if isinstance(result.explain, dict) else "") or "默认渠道",
+                            "total_fee": round(float(result.total_fee), 2),
+                            "eta_days": self._format_eta_days(result.eta_minutes),
+                        }
+                    ],
+                )
             return self._sanitize_reply(reply), {
                 "is_quote": True,
                 "quote_need_info": False,
@@ -761,6 +1124,8 @@ class MessagesService:
                 "quote_stale": bool(result.stale),
                 "quote_latency_ms": latency_ms,
                 "quote_result": result.to_dict(),
+                "quote_context_hit": bool(memory_hit),
+                "quote_context_fields": extracted_fields,
             }
         except QuoteProviderError:
             return self._sanitize_reply(self.quote_failed_template), {
@@ -768,6 +1133,7 @@ class MessagesService:
                 "quote_need_info": False,
                 "quote_success": False,
                 "quote_fallback": True,
+                "quote_context_hit": bool(memory_hit),
             }
 
     def generate_reply(self, message_text: str, item_title: str = "") -> str:
@@ -933,7 +1299,11 @@ class MessagesService:
         msg = str(session.get("last_message", ""))
         item_title = str(session.get("item_title", ""))
 
-        reply_text, quote_meta = await self._generate_reply_with_quote(msg, item_title=item_title)
+        reply_text, quote_meta = await self._generate_reply_with_quote(
+            msg,
+            item_title=item_title,
+            session_id=session_id,
+        )
         decision = self.compliance_center.evaluate_before_send(
             reply_text,
             actor=actor,
