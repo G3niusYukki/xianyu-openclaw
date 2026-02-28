@@ -124,6 +124,7 @@ messages:
     token_max_attempts: 3
     cookie_watch_interval_seconds: 5.0
     auth_failure_backoff_seconds: 300
+    auth_hold_until_cookie_update: true
   max_replies_per_run: 10
   fast_reply_enabled: true
   reply_target_seconds: 3.0
