@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-02-28
+
+### Added
+- **售前运行时强化**：
+  - 新增 `module recover` 动作：一键停止→清理→重启模块
+  - 新增平台启动脚本（macOS/Linux/Windows）
+  - 强化运行时/浏览器解析检查和 doctor 覆盖
+- **Dashboard 改进**：
+  - 更强的状态/风险/恢复信号处理
+  - 更清晰的模板说明和 Cookie 诊断反馈
+  - 新增 Cookie 导入域名过滤（`goofish.com`/`passport.goofish.com`）
+- **报价模板优化**：
+  - 标准化的首次响应格式，询价收集更高效
+  - 报价模板接入实际回复渲染路径
+  - 支持 legacy template 占位符别名（`origin_province`, `dest_province`, `billing_weight` 等）
+- **认证稳定性增强**：
+  - 新增 `messages.auth_hold_until_cookie_update` 配置项（默认 `true`）
+  - 优先使用环境变量 `XIANYU_COOKIE_1` 避免 WS 认证振荡
+  - 认证失败后停止激进重试，等待 Cookie 更新后恢复
+- **测试端点对齐**：
+  - Dashboard `/api/test-reply` 与实际生产流程保持一致
+
+### Changed
+- `quote_reply_all_couriers` 默认为 `true`，报价时列出所有可用快递供买家选择
+- `quote_reply_max_couriers` 默认 `10`，控制最多显示快递数量
+
+### Fixed
+- 修复报价回复模板与实际生产流程不一致的问题
+
 ## [4.9.0] - 2026-02-28
 
 ### Added
