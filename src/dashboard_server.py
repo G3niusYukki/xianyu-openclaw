@@ -25,10 +25,8 @@ from urllib.parse import parse_qs, urlparse
 import yaml
 
 from src.core.config import get_config
-from src.modules.messages.reply_engine import ReplyStrategyEngine
+from src.modules.messages.service import MessagesService
 from src.modules.quote.cost_table import CostTableRepository, normalize_courier_name
-from src.modules.quote.engine import AutoQuoteEngine
-from src.modules.quote.models import QuoteRequest
 from src.modules.quote.setup import DEFAULT_MARKUP_RULES, QuoteSetupService
 
 MODULE_TARGETS = ("presales", "operations", "aftersales")
@@ -2337,49 +2335,50 @@ class MimicOps:
     def test_reply(self, payload: dict[str, Any]) -> dict[str, Any]:
         started = time.perf_counter()
         msg_cfg = get_config().get_section("messages", {})
-        engine = ReplyStrategyEngine(
-            default_reply=str(msg_cfg.get("default_reply", "您好，宝贝在的，感兴趣可以直接拍下。")),
-            virtual_default_reply=str(
-                msg_cfg.get("virtual_default_reply", "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。")
-            ),
-            reply_prefix=str(msg_cfg.get("reply_prefix", "")),
-            keyword_replies=msg_cfg.get("keyword_replies", {}),
-            intent_rules=msg_cfg.get("intent_rules", []),
-            virtual_product_keywords=msg_cfg.get("virtual_product_keywords", []),
-        )
-
         message = str(payload.get("message") or payload.get("user_message") or payload.get("user_msg") or "").strip()
         item_title = str(payload.get("item_title") or payload.get("item") or payload.get("item_desc") or "").strip()
-        reply = engine.generate_reply(message, item_title=item_title)
-
-        quote_part: dict[str, Any] | None = None
         origin = str(payload.get("origin") or "").strip()
         destination = str(payload.get("destination") or "").strip()
         weight_val = payload.get("weight")
 
+        # 兼容旧测试入口：若显式提供了路线参数，则拼成自然语言输入，走与生产一致的询价解析逻辑。
+        message_eval = message
         if origin and destination and weight_val not in {None, ""}:
-            try:
-                req = QuoteRequest(
-                    origin=origin,
-                    destination=destination,
-                    weight=float(weight_val),
-                    courier=str(payload.get("courier") or "auto"),
-                    service_level=str(payload.get("service_level") or "standard"),
-                    item_type=str(payload.get("item_type") or "general"),
-                )
-                q_engine = AutoQuoteEngine(config=get_config().get_section("quote", {}))
-                quote_result = _run_async(q_engine.get_quote(req))
-                quote_part = quote_result.to_dict()
-                reply = f"{reply}\n{quote_result.compose_reply(validity_minutes=int(q_engine.validity_minutes))}"
-            except Exception as exc:
-                quote_part = {"error": str(exc)}
+            extras: list[str] = []
+            length = payload.get("length")
+            width = payload.get("width")
+            height = payload.get("height")
+            volume_weight = payload.get("volume_weight")
+            courier = str(payload.get("courier") or "").strip()
+            if length not in {None, ""} and width not in {None, ""} and height not in {None, ""}:
+                extras.append(f"{length}x{width}x{height}cm")
+            if volume_weight not in {None, ""}:
+                extras.append(f"体积重{volume_weight}kg")
+            if courier and courier.lower() != "auto":
+                extras.append(courier)
+            structured = f"从{origin}寄到{destination} {weight_val}kg"
+            if extras:
+                structured = f"{structured} {' '.join(extras)}"
+            message_eval = f"{message} {structured}".strip() if message else structured
 
-        message_l = message.lower()
-        intent = "general"
-        if quote_part is not None or any(k in message_l for k in ("多少钱", "报价", "价格", "运费", "几块")):
-            intent = "quote"
+        service = MessagesService(controller=None, config=msg_cfg)
+        reply, detail = _run_async(service._generate_reply_with_quote(message_eval, item_title=item_title))
 
-        agent = "RuleBasedReplyStrategy+AutoQuoteEngine" if quote_part is not None else "RuleBasedReplyStrategy"
+        quote_part: dict[str, Any] | None = None
+        if isinstance(detail, dict) and bool(detail.get("is_quote")):
+            quote_result = detail.get("quote_result")
+            all_couriers = detail.get("quote_all_couriers")
+            if isinstance(quote_result, dict):
+                quote_part = quote_result
+            if isinstance(all_couriers, list):
+                quote_part = {"best": quote_part or {}, "all_couriers": all_couriers}
+
+        intent = "quote" if bool(detail.get("is_quote")) else "general"
+        agent = (
+            "MessagesService+AutoQuoteEngine"
+            if quote_part is not None
+            else ("MessagesService+RuleBasedReplyStrategy" if intent == "general" else "MessagesService")
+        )
         response_time_ms = (time.perf_counter() - started) * 1000
         return {
             "success": True,
@@ -2387,6 +2386,7 @@ class MimicOps:
             "quote": quote_part,
             "intent": intent,
             "agent": agent,
+            "detail": detail,
             "response_time": response_time_ms,
         }
 
