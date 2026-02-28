@@ -102,6 +102,20 @@ def test_messages_generate_reply_for_online_fulfillment() -> None:
     assert "支持代下单服务" in reply
 
 
+def test_messages_generate_reply_forces_non_empty_fallback_when_default_blank() -> None:
+    service = MessagesService(
+        controller=None,
+        config={
+            "default_reply": "",
+            "virtual_default_reply": "",
+            "force_non_empty_reply": True,
+            "non_empty_reply_fallback": "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
+        },
+    )
+    reply = service.generate_reply("随便问问")
+    assert "询价格式" in reply
+
+
 def test_messages_extract_locations_non_greedy_origin() -> None:
     origin, destination = MessagesService._extract_locations("从安徽寄到北京市朝阳区 2kg 多少钱")
     assert origin == "安徽"
@@ -343,6 +357,78 @@ async def test_messages_greeting_forces_standard_template_even_non_strict(mock_c
     assert detail["format_enforced"] is True
     assert detail["format_enforced_reason"] == "greeting"
     assert "询价格式" in detail["reply"]
+
+
+@pytest.mark.asyncio
+async def test_messages_context_memory_allows_followup_weight_only_quote(mock_controller) -> None:
+    service = MessagesService(
+        controller=mock_controller,
+        config={"max_replies_per_run": 3, "strict_format_reply_enabled": False, "context_memory_enabled": True},
+    )
+
+    first = await service.process_session(
+        {
+            "session_id": "ctx_follow_1",
+            "peer_name": "买家C",
+            "item_title": "快递服务",
+            "last_message": "从上海寄到杭州 多少钱",
+            "unread_count": 1,
+        },
+        dry_run=True,
+    )
+    assert first["is_quote"] is True
+    assert first["quote_need_info"] is True
+    assert first["quote_success"] is False
+
+    second = await service.process_session(
+        {
+            "session_id": "ctx_follow_1",
+            "peer_name": "买家C",
+            "item_title": "快递服务",
+            "last_message": "2kg",
+            "unread_count": 1,
+        },
+        dry_run=True,
+    )
+    assert second["is_quote"] is True
+    assert second["quote_success"] is True
+    assert ("可选快递报价" in second["reply"]) or ("首单价格" in second["reply"])
+
+
+@pytest.mark.asyncio
+async def test_messages_courier_choice_returns_checkout_guide(mock_controller) -> None:
+    service = MessagesService(
+        controller=mock_controller,
+        config={"max_replies_per_run": 3, "strict_format_reply_enabled": False, "context_memory_enabled": True},
+    )
+
+    quoted = await service.process_session(
+        {
+            "session_id": "ctx_order_1",
+            "peer_name": "买家O",
+            "item_title": "快递服务",
+            "last_message": "从上海寄到杭州 2kg 多少钱",
+            "unread_count": 1,
+        },
+        dry_run=True,
+    )
+    assert quoted["is_quote"] is True
+    assert quoted["quote_success"] is True
+
+    choose = await service.process_session(
+        {
+            "session_id": "ctx_order_1",
+            "peer_name": "买家O",
+            "item_title": "快递服务",
+            "last_message": "选圆通",
+            "unread_count": 1,
+        },
+        dry_run=True,
+    )
+    assert choose["is_quote"] is False
+    assert choose["courier_locked"] is True
+    assert "先拍下链接" in choose["reply"]
+    assert "无需提供" in choose["reply"]
 
 
 @pytest.mark.asyncio

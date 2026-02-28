@@ -137,7 +137,12 @@ messages:
   virtual_default_reply: "在的，这是虚拟商品，拍下后会尽快在聊天内给你处理结果。"
   quote_intent_keywords: ["报价", "多少钱", "价格", "运费", "邮费", "快递费", "寄到", "发到", "送到", "怎么寄"]
   standard_format_trigger_keywords: ["你好", "您好", "在吗", "在不", "hi", "hello", "哈喽", "有人吗"]
-  quote_missing_template: "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）"
+  quote_missing_template: "为了给你报最低且准确的价格，请按格式发送：\nxx省 - xx省 - 重量（kg）\n长宽高（单位cm，可选）\n示例：广东省 - 浙江省 - 3kg 30x20x15cm"
+  force_non_empty_reply: true
+  non_empty_reply_fallback: "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）"
+  context_memory_enabled: true
+  context_memory_ttl_seconds: 3600
+  courier_lock_template: "已为你锁定 {courier}（{price}，预计{eta_days}）。\n下单流程：\n1. 先拍下链接，先不要付款；\n2. 我改价后你再付款；\n3. 付款后系统自动发放兑换码，用兑换码到小程序下单即可。\n付款后的地址和手机号在小程序填写，这里无需提供。"
   strict_format_reply_enabled: true
   quote_reply_all_couriers: true
   quote_reply_max_couriers: 10
