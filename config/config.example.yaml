@@ -109,6 +109,17 @@ browser:
 # 消息自动回复配置
 messages:
   enabled: false
+  transport: "ws" # dom | ws | auto
+  ws:
+    base_url: "wss://wss-goofish.dingtalk.com/"
+    heartbeat_interval_seconds: 15
+    heartbeat_timeout_seconds: 5
+    reconnect_delay_seconds: 3.0
+    message_expire_ms: 300000
+    max_queue_size: 200
+    queue_wait_seconds: 0.3
+    token_refresh_interval_seconds: 3600
+    token_retry_seconds: 300
   max_replies_per_run: 10
   fast_reply_enabled: true
   reply_target_seconds: 3.0
@@ -143,7 +154,7 @@ messages:
     最低: "价格已经尽量实在了，诚心要的话可以小刀。"
   workflow:
     db_path: "data/workflow.db"
-    poll_interval_seconds: 5
+    poll_interval_seconds: 1.0
     scan_limit: 20
     claim_limit: 10
     lease_seconds: 60

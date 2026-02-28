@@ -18,7 +18,7 @@ class AutomationSetupService:
     def apply(
         self,
         *,
-        poll_interval_seconds: float = 5.0,
+        poll_interval_seconds: float = 1.0,
         scan_limit: int = 20,
         claim_limit: int = 10,
         reply_target_seconds: float = 3.0,
@@ -37,6 +37,7 @@ class AutomationSetupService:
             data["messages"] = messages_cfg
 
         messages_cfg["enabled"] = True
+        messages_cfg["transport"] = "ws"
         messages_cfg["fast_reply_enabled"] = True
         messages_cfg["reply_target_seconds"] = max(0.5, float(reply_target_seconds))
 
@@ -96,11 +97,12 @@ class AutomationSetupService:
 
         return {
             "messages_enabled": bool(messages_cfg.get("enabled", False)),
+            "transport": str(messages_cfg.get("transport", "dom")),
             "fast_reply_enabled": bool(messages_cfg.get("fast_reply_enabled", False)),
             "reply_target_seconds": float(messages_cfg.get("reply_target_seconds", 3.0)),
             "workflow": {
                 "db_path": str(workflow_cfg.get("db_path", "")),
-                "poll_interval_seconds": float(workflow_cfg.get("poll_interval_seconds", 5.0)),
+                "poll_interval_seconds": float(workflow_cfg.get("poll_interval_seconds", 1.0)),
                 "scan_limit": int(workflow_cfg.get("scan_limit", 20)),
                 "claim_limit": int(workflow_cfg.get("claim_limit", 10)),
             },

@@ -110,19 +110,49 @@ XIANYU_COOKIE_1=你的闲鱼Cookie（下一步教你获取）
 
 **什么是 Cookie？** 简单理解：当你登录闲鱼后，浏览器保存了一个"通行证"。我们需要把这个通行证告诉工具，工具才能代替你操作。
 
-### 获取步骤
+### 获取步骤（推荐）
 
 1. 用 Chrome 浏览器打开 https://www.goofish.com
 2. 登录你的闲鱼账号
 3. 按 **F12** 打开开发者工具
 4. 点击顶部的 **Network** 标签
 5. 按 **F5** 刷新页面
-6. 左边出现很多行，随便点一行
-7. 右边找到 **Cookie:** 这一项
-8. 全部复制（很长的一串文字）
-9. 粘贴到 `.env` 文件的 `XIANYU_COOKIE_1` 后面
+6. 左边出现很多请求，点击任意 `goofish.com` 请求
+7. 右边 `Request Headers` 找到 **Cookie:** 这一项
+8. 复制完整 Cookie 值（`a=...; b=...; ...` 这一整串）
+9. 粘贴到 `.env` 的 `XIANYU_COOKIE_1=` 后面，或到管理面板 `/cookie` 更新
+
+### 三种可用粘贴格式（面板都支持）
+
+1. 请求头字符串：`name=value; name2=value2; ...`
+2. 浏览器 Cookie 表格文本（Name/Value/Domain 那种复制结果）
+3. `cookies.txt`（Netscape）或 JSON 导出
+
+### 插件一键导入（Get-cookies.txt-LOCALLY）
+
+1. 打开本项目面板：`http://127.0.0.1:8091/cookie`
+2. 点击“下载内置插件包”（项目已内置源码，可离线交付）
+3. 解压后在浏览器扩展管理页加载 `Get-cookies.txt-LOCALLY/src`
+4. 打开闲鱼页面，用插件导出 `cookies.txt` / JSON / ZIP
+5. 回到 Cookie 页，选择“插件导出文件”，点击“插件一键导入并更新”
+6. 系统会自动识别并写入 `XIANYU_COOKIE_1`
+
+### 关键字段（建议至少包含）
+
+- `_tb_token_`
+- `cookie2`
+- `sgcookie`
+- `unb`
+
+### 常见问题排查
+
+1. 更新后仍无法用：通常是 Cookie 已过期，重新登录后再复制。
+2. 解析失败：先在 `/cookie` 页面点“智能解析”，再点“更新Cookie”。
+3. 字段缺失：说明复制不完整，必须复制完整 Cookie 行。
+4. 账号掉线：浏览器先确认闲鱼页面处于登录态，再重新获取。
 
 > Cookie 有有效期，通常 7-30 天后需要重新获取。
+> Cookie 等同账号登录态，不要分享给他人。
 
 ---
 
@@ -300,6 +330,28 @@ python3 -m src.cli module --action start --target operations --mode daemon --ini
 # 3) 售后客服（售后订单跟进）
 python3 -m src.cli module --action start --target aftersales --mode daemon --limit 20 --interval 15 --issue-type delay
 ```
+
+### 售前/售后推荐模式（真实可用链路）
+
+售前与售后建议改为 WebSocket 实时通道（和 `XianyuAutoAgent` 同类链路），可以减少对浏览器页面抓取的依赖。
+
+在 `config/config.yaml` 中确认：
+
+```yaml
+messages:
+  transport: "ws"
+  ws:
+    base_url: "wss://wss-goofish.dingtalk.com/"
+```
+
+然后用下面命令验证：
+
+```bash
+python3 -m src.cli messages --action list-unread --limit 5
+python3 -m src.cli module --action check --target presales
+```
+
+如果能返回会话列表，且 `module check` 无浏览器运行时阻塞，说明已切到 WS 实时通道。
 
 启动前建议先做模块检查：
 

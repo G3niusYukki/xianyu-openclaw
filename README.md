@@ -255,6 +255,11 @@ scripts\windows\start_aftersales.bat daemon 20 15 delay
 ```yaml
 messages:
   enabled: true
+  transport: "ws"   # dom | ws | auto
+  ws:
+    base_url: "wss://wss-goofish.dingtalk.com/"
+    heartbeat_interval_seconds: 15
+    reconnect_delay_seconds: 3.0
   fast_reply_enabled: true
   reply_target_seconds: 3.0
   reuse_message_page: true
@@ -279,7 +284,7 @@ messages:
       reply: "支持代下单服务，请把具体需求、数量和时效发我，我确认后马上安排。"
   workflow:
     db_path: "data/workflow.db"
-    poll_interval_seconds: 5
+    poll_interval_seconds: 1.0
     scan_limit: 20
     claim_limit: 10
     lease_seconds: 60
@@ -331,6 +336,7 @@ quote:
 8. 粘贴到 `.env` 文件的 `XIANYU_COOKIE_1=...`
 
 > Cookie 有效期通常 7–30 天，过期后工具会提醒你更新。
+> 也可直接用项目内置插件包：打开 `http://127.0.0.1:8091/cookie`，点击“下载内置插件包”，加载 `Get-cookies.txt-LOCALLY/src` 后导出并一键导入。
 
 </details>
 

@@ -30,6 +30,7 @@ def test_automation_setup_apply_and_status(temp_dir) -> None:
 
     status = service.status()
     assert status["messages_enabled"] is True
+    assert status["transport"] == "ws"
     assert status["fast_reply_enabled"] is True
     assert status["reply_target_seconds"] == 2.5
     assert status["workflow"]["poll_interval_seconds"] == 3.0
@@ -54,4 +55,3 @@ def test_automation_setup_can_keep_feishu_disabled(temp_dir) -> None:
     assert status["messages_enabled"] is True
     assert status["feishu"]["enabled"] is False
     assert status["feishu"]["webhook_configured"] is False
-

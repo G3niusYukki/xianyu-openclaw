@@ -122,6 +122,8 @@ class MessagesConfig(BaseModel):
     """消息自动回复配置模型"""
 
     enabled: bool = Field(default=False, description="是否启用消息自动回复")
+    transport: str = Field(default="ws", description="消息通道：dom|ws|auto")
+    ws: dict[str, Any] = Field(default_factory=dict, description="WebSocket 通道配置")
     max_replies_per_run: int = Field(default=10, ge=1, le=200, description="单次最多自动回复数量")
     reply_prefix: str = Field(default="", description="回复前缀")
     default_reply: str = Field(default="您好，宝贝在的，感兴趣可以直接拍下。", description="默认回复文案")
@@ -158,6 +160,14 @@ class MessagesConfig(BaseModel):
     )
     quote: dict[str, Any] = Field(default_factory=dict, description="消息模块中的报价覆盖配置")
     workflow: dict[str, Any] = Field(default_factory=dict, description="常驻 workflow worker 配置")
+
+    @field_validator("transport")
+    @classmethod
+    def validate_transport(cls, v: str) -> str:
+        mode = str(v or "dom").strip().lower()
+        if mode not in {"dom", "ws", "auto"}:
+            raise ValueError("messages.transport must be one of dom|ws|auto")
+        return mode
 
 
 class QuoteConfig(BaseModel):
