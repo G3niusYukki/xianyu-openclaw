@@ -69,8 +69,8 @@ def _pct(values: list[int], ratio: float) -> int:
     if not values:
         return 0
     ordered = sorted(int(v) for v in values)
-    idx = int(round((len(ordered) - 1) * max(0.0, min(1.0, float(ratio)))))
-    return int(ordered[idx])
+    idx = round((len(ordered) - 1) * max(0.0, min(1.0, float(ratio))))
+    return ordered[idx]
 
 
 def _pick_bench_message(rng: random.Random, quote_ratio: float, quote_only: bool) -> str:

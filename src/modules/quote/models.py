@@ -5,8 +5,7 @@ import re
 from typing import Any
 
 DEFAULT_QUOTE_REPLY_TEMPLATE = (
-    "您好，{origin} 到 {destination}，预估报价 ¥{price}（{price_breakdown}）。"
-    "预计时效约 {eta_days}。"
+    "您好，{origin} 到 {destination}，预估报价 ¥{price}（{price_breakdown}）。预计时效约 {eta_days}。"
 )
 
 
@@ -97,7 +96,7 @@ class QuoteResult:
         days = max(1.0, raw / 1440.0)
         rounded = round(days, 1)
         if abs(rounded - round(rounded)) < 1e-9:
-            return f"{int(round(rounded))}天"
+            return f"{round(rounded)}天"
         return f"{rounded:.1f}天"
 
     @staticmethod

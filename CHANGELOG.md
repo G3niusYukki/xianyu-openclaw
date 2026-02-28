@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.9.0] - 2026-02-28
+
+### Added
+- **严格标准格式回复**：对非标准买家消息（你好/在吗/hello等问候语）强制标准格式回复
+- **标准格式触发关键词**：新增 `messages.standard_format_trigger_keywords` 配置项
+- **Lite 运行时强化**：
+  - WS 就绪内省 (`is_ready`)
+  - `transport=ws` 保持 WS-only（无 DOM 回退）
+  - DOM 回退仅保留给 `transport=auto`
+- **Cookie 健壮性增强**：
+  - 更安全的 cookie 解析（支持请求头/表格格式）
+  - 过滤无效 cookie 字段，允许部分接受避免启动崩溃
+- **AI Provider Key 安全解析**：
+  - 避免跨 provider key 误用
+  - 将环境变量占位符 `${...}` 视为缺失 key
+
+### Changed
+- `messages.strict_format_reply_enabled` 默认为 `true`
+- 运行时配置改为 `messages.transport: ws`
+- 报价回复规范化：统一报价模板输出，ETA 以天显示（而非分钟），移除报价有效期文本
+
+### Fixed
+- 修复被合规拦截的报价不计入成功统计
+- 修复 Windows helpers 和 quality gate 问题
+
+## [4.8.1] - 2026-02-28
+
 ### Changed
 - CI workflow 调整为只拦截真实问题：
   - `ruff check` 覆盖 `src/` 与 `tests/`
