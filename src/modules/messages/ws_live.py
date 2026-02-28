@@ -533,13 +533,25 @@ class GoofishWsTransport:
         while not self._stop_event.is_set():
             try:
                 headers = self._base_headers()
-                self._ws = await websockets.connect(
-                    self.base_url,
-                    extra_headers=headers,
-                    ping_interval=None,
-                    close_timeout=5,
-                    max_size=8 * 1024 * 1024,
-                )
+                try:
+                    self._ws = await websockets.connect(
+                        self.base_url,
+                        extra_headers=headers,
+                        ping_interval=None,
+                        close_timeout=5,
+                        max_size=8 * 1024 * 1024,
+                    )
+                except TypeError as connect_error:
+                    # websockets>=14 renamed `extra_headers` to `additional_headers`.
+                    if "extra_headers" not in str(connect_error):
+                        raise
+                    self._ws = await websockets.connect(
+                        self.base_url,
+                        additional_headers=headers,
+                        ping_interval=None,
+                        close_timeout=5,
+                        max_size=8 * 1024 * 1024,
+                    )
                 self._last_heartbeat_ack = time.time()
                 self._last_heartbeat_sent = 0.0
                 await self._send_reg()
@@ -586,6 +598,9 @@ class GoofishWsTransport:
         self._stop_event.clear()
         self._run_task = asyncio.create_task(self._run())
 
+    def is_ready(self) -> bool:
+        return bool(self._ready.is_set() and self._ws is not None)
+
     async def stop(self) -> None:
         self._stop_event.set()
         self._ready.clear()
@@ -599,6 +614,8 @@ class GoofishWsTransport:
             self._run_task.cancel()
             try:
                 await self._run_task
+            except asyncio.CancelledError:
+                pass
             except Exception:
                 pass
             self._run_task = None

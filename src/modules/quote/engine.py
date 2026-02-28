@@ -39,6 +39,7 @@ class AutoQuoteEngine:
         self.circuit_open_seconds = int(cfg.get("circuit_open_seconds", 30))
         self.api_fallback_to_table_parallel = bool(cfg.get("api_fallback_to_table_parallel", True))
         self.api_prefer_max_wait_seconds = max(0.05, float(cfg.get("api_prefer_max_wait_seconds", 1.2)))
+        self.volume_divisor_default = float(cfg.get("volume_divisor_default", 0.0) or 0.0)
         self._remote_failures = 0
         self._circuit_open_until = 0.0
 
@@ -48,12 +49,14 @@ class AutoQuoteEngine:
             include_patterns=cfg.get("cost_table_patterns", ["*.xlsx", "*.csv"]),
             markup_rules=cfg.get("markup_rules", {}),
             pricing_profile=str(cfg.get("pricing_profile", "normal")),
+            volume_divisor_default=self.volume_divisor_default,
         )
         self.api_cost_provider: IQuoteProvider = ApiCostMarkupQuoteProvider(
             api_url=str(cfg.get("cost_api_url", "")),
             api_key_env=self._resolve_api_key_env_name(cfg),
             markup_rules=cfg.get("markup_rules", {}),
             pricing_profile=str(cfg.get("pricing_profile", "normal")),
+            volume_divisor_default=self.volume_divisor_default,
         )
         self.remote_provider: IQuoteProvider = RemoteQuoteProvider(
             enabled=bool(providers_cfg.get("remote", {}).get("enabled", False)),

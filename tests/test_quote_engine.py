@@ -98,6 +98,15 @@ def _prepare_cost_table(tmp_path: Path) -> Path:
     return csv_path
 
 
+def _prepare_cost_table_with_throw_ratio(tmp_path: Path) -> Path:
+    csv_path = tmp_path / "cost_throw.csv"
+    csv_path.write_text(
+        "快递公司,始发地,目的地,首重,续重,抛比\n圆通,浙江,广东,3.00,2.00,6000\n",
+        encoding="utf-8",
+    )
+    return csv_path
+
+
 @pytest.mark.asyncio
 async def test_quote_engine_cost_table_plus_markup_mode_works(tmp_path) -> None:
     _prepare_cost_table(tmp_path)
@@ -126,6 +135,67 @@ async def test_quote_engine_cost_table_plus_markup_mode_works(tmp_path) -> None:
     assert result.base_fee == 4.0
     assert result.total_fee == 6.5
     assert result.fallback_used is False
+
+
+@pytest.mark.asyncio
+async def test_quote_engine_cost_table_uses_volume_weight_when_higher(tmp_path) -> None:
+    _prepare_cost_table_with_throw_ratio(tmp_path)
+    engine = AutoQuoteEngine(
+        {
+            "mode": "cost_table_plus_markup",
+            "analytics_log_enabled": False,
+            "cost_table_dir": str(tmp_path),
+            "cost_table_patterns": ["*.csv"],
+            "pricing_profile": "normal",
+            "markup_rules": {"default": {"normal_first_add": 0.0, "normal_extra_add": 0.0}},
+            "volume_divisor_default": 6000,
+        }
+    )
+    req = QuoteRequest(
+        origin="浙江",
+        destination="广东",
+        weight=1.0,
+        volume=12000.0,
+        service_level="standard",
+        courier="圆通",
+    )
+
+    result = await engine.get_quote(req)
+
+    assert result.provider == "cost_table_markup"
+    assert result.total_fee == 5.0
+    assert result.explain.get("billing_weight_kg") == 2.0
+    assert result.fallback_used is False
+
+
+@pytest.mark.asyncio
+async def test_quote_engine_cost_table_city_to_province_route_fallback(tmp_path) -> None:
+    _prepare_cost_table(tmp_path)
+    engine = AutoQuoteEngine(
+        {
+            "mode": "cost_table_plus_markup",
+            "analytics_log_enabled": False,
+            "cost_table_dir": str(tmp_path),
+            "cost_table_patterns": ["*.csv"],
+            "pricing_profile": "normal",
+            "markup_rules": {
+                "default": {
+                    "normal_first_add": 0.5,
+                    "member_first_add": 0.2,
+                    "normal_extra_add": 0.3,
+                    "member_extra_add": 0.1,
+                }
+            },
+        }
+    )
+    req = QuoteRequest(origin="杭州", destination="广州", weight=2.0, service_level="standard", courier="圆通")
+
+    result = await engine.get_quote(req)
+
+    assert result.provider == "cost_table_markup"
+    assert result.fallback_used is False
+    assert result.explain.get("matched_origin") == "浙江"
+    assert result.explain.get("matched_destination") == "广东"
 
 
 @pytest.mark.asyncio

@@ -488,9 +488,11 @@ class WorkflowStore:
                 (cutoff,),
             ).fetchall()
 
-        first_reply_samples = [int(r["latency_ms"]) for r in rows if str(r["stage"]) in {"reply", "quote"}]
+        first_reply_samples = [int(r["latency_ms"]) for r in rows if str(r["stage"]) in {"reply", "quote", "quote_need_info"}]
         quote_rows = [r for r in rows if str(r["stage"]) == "quote"]
+        quote_need_info_rows = [r for r in rows if str(r["stage"]) == "quote_need_info"]
         quote_success = sum(1 for r in quote_rows if str(r["outcome"]) == "success")
+        quote_failed = sum(1 for r in quote_rows if str(r["outcome"]) != "success")
         quote_fallback = sum(1 for r in quote_rows if int(r["quote_fallback"]) == 1)
 
         return {
@@ -499,6 +501,8 @@ class WorkflowStore:
             "first_reply_p50_ms": self._percentile(first_reply_samples, 0.5),
             "first_reply_p95_ms": self._percentile(first_reply_samples, 0.95),
             "quote_total": len(quote_rows),
+            "quote_need_info_total": len(quote_need_info_rows),
+            "quote_failed_total": quote_failed,
             "quote_success_rate": round((quote_success / len(quote_rows)) if quote_rows else 0.0, 4),
             "quote_fallback_rate": round((quote_fallback / len(quote_rows)) if quote_rows else 0.0, 4),
         }
@@ -684,6 +688,7 @@ class WorkflowWorker:
                     raise RuntimeError("reply_not_sent")
 
                 is_quote = bool(detail.get("is_quote", False))
+                quote_need_info = bool(detail.get("quote_need_info", False))
                 quote_success = bool(detail.get("quote_success", False))
                 next_state = WorkflowState.QUOTED if (is_quote and quote_success) else WorkflowState.REPLIED
                 self.store.transition_state(
@@ -693,10 +698,19 @@ class WorkflowWorker:
                     metadata={"quote": is_quote, "quote_success": quote_success},
                 )
 
+                stage = "reply"
+                outcome = "success"
+                if is_quote and quote_need_info:
+                    stage = "quote_need_info"
+                    outcome = "need_info"
+                elif is_quote:
+                    stage = "quote"
+                    outcome = "success" if quote_success else "failed"
+
                 self.store.record_sla_event(
                     session_id=job.session_id,
-                    stage="quote" if is_quote else "reply",
-                    outcome="success" if (not is_quote or quote_success) else "failed",
+                    stage=stage,
+                    outcome=outcome,
                     latency_ms=latency_ms,
                     quote_fallback=bool(detail.get("quote_fallback", False)),
                 )

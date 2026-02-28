@@ -99,13 +99,30 @@ class MessagesService:
         )
 
         self.quote_engine = AutoQuoteEngine(self.quote_config)
-        default_quote_keywords = ["报价", "多少钱", "运费", "邮费", "快递费", "寄到", "到", "怎么寄"]
+        default_quote_keywords = ["报价", "多少钱", "价格", "运费", "邮费", "快递费", "寄到", "发到", "送到", "怎么寄"]
+        default_standard_format_triggers = ["你好", "您好", "在吗", "在不", "hi", "hello", "哈喽", "有人吗"]
         raw_quote_keywords = self.config.get("quote_intent_keywords")
         if isinstance(raw_quote_keywords, list):
-            cleaned_quote_keywords = [str(s).strip().lower() for s in raw_quote_keywords if str(s).strip()]
+            cleaned_quote_keywords = [
+                str(s).strip().lower()
+                for s in raw_quote_keywords
+                if str(s).strip() and len(str(s).strip()) >= 2
+            ]
         else:
             cleaned_quote_keywords = []
         self.quote_intent_keywords = cleaned_quote_keywords or [str(s).lower() for s in default_quote_keywords]
+        raw_standard_triggers = self.config.get("standard_format_trigger_keywords")
+        if isinstance(raw_standard_triggers, list):
+            cleaned_standard_triggers = [
+                str(s).strip().lower()
+                for s in raw_standard_triggers
+                if str(s).strip() and len(str(s).strip()) >= 2
+            ]
+        else:
+            cleaned_standard_triggers = []
+        self.standard_format_trigger_keywords = cleaned_standard_triggers or [
+            str(s).lower() for s in default_standard_format_triggers
+        ]
         self.quote_missing_prompts = {
             "origin": "寄件城市",
             "destination": "收件城市",
@@ -113,8 +130,9 @@ class MessagesService:
         }
         self.quote_missing_template = self.config.get(
             "quote_missing_template",
-            "为了给您准确报价，请补充：{fields}。",
+            "咨询格式：寄件城市～收件城市～重量（多少kg）",
         )
+        self.strict_format_reply_enabled = bool(self.config.get("strict_format_reply_enabled", False))
         self.quote_failed_template = self.config.get(
             "quote_failed_template",
             "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
@@ -281,19 +299,92 @@ class MessagesService:
         ws_transport = await self._ensure_ws_transport()
         if ws_transport is not None:
             ws_result = await ws_transport.get_unread_sessions(limit=limit)
-            if ws_result or not self.controller or self.transport_mode == "ws":
+            if ws_result or not self.controller:
                 return ws_result
+            ws_ready = True
+            try:
+                ready_fn = getattr(ws_transport, "is_ready", None)
+                if callable(ready_fn):
+                    ws_ready = bool(ready_fn())
+            except Exception:
+                ws_ready = True
+            if not ws_ready:
+                if self.transport_mode == "auto":
+                    self.logger.warning("WebSocket unread pull unavailable, fallback to DOM session scan")
+                    return await self._get_unread_sessions_dom(limit=limit)
+                return ws_result
+            if self.transport_mode == "auto":
+                return await self._get_unread_sessions_dom(limit=limit)
+            return ws_result
 
         return await self._get_unread_sessions_dom(limit=limit)
 
     def _is_quote_request(self, message_text: str) -> bool:
         text = (message_text or "").strip().lower()
-        return any(keyword in text for keyword in self.quote_intent_keywords)
+        if not text:
+            return False
+
+        if any(keyword in text for keyword in self.quote_intent_keywords):
+            return True
+
+        has_weight = bool(re.search(r"\d+(?:\.\d+)?\s*(kg|公斤|斤|g|克)\b", text, flags=re.IGNORECASE))
+        if not has_weight:
+            return False
+
+        if any(p in text for p in ["到货", "多久到", "什么时候到", "到没", "到了吗", "到哪了"]):
+            if not any(marker in text for marker in ["寄", "发", "收", "从", "由", "~", "～", "-", "—"]):
+                return False
+
+        route_patterns = (
+            r"[\u4e00-\u9fa5]{2,20}\s*(?:到|寄到|发到|送到)\s*[\u4e00-\u9fa5]{2,20}",
+            r"(?:寄件|发件|收件|寄自|发自|从|由)",
+            r"[\u4e00-\u9fa5]{2,20}\s*[~～\-—]\s*[\u4e00-\u9fa5]{2,20}",
+        )
+        return any(re.search(pattern, text) for pattern in route_patterns)
+
+    def _is_standard_format_trigger(self, message_text: str) -> bool:
+        text = (message_text or "").strip().lower()
+        if not text:
+            return False
+        compact_text = re.sub(r"\s+", "", text)
+        return any(keyword in compact_text for keyword in self.standard_format_trigger_keywords)
 
     @staticmethod
     def _extract_weight_kg(message_text: str) -> float | None:
         text = message_text or ""
         m = re.search(r"(\d+(?:\.\d+)?)\s*(kg|公斤|斤|g|克)", text, flags=re.IGNORECASE)
+        if not m:
+            return None
+        value = float(m.group(1))
+        unit = m.group(2).lower()
+        if unit in {"斤"}:
+            return round(value * 0.5, 3)
+        if unit in {"g", "克"}:
+            return round(value / 1000, 3)
+        return round(value, 3)
+
+    @staticmethod
+    def _extract_volume_cm3(message_text: str) -> float | None:
+        text = message_text or ""
+        m = re.search(
+            r"(\d+(?:\.\d+)?)\s*(?:cm|厘米)?\s*[x×*＊]\s*"
+            r"(\d+(?:\.\d+)?)\s*(?:cm|厘米)?\s*[x×*＊]\s*"
+            r"(\d+(?:\.\d+)?)\s*(?:cm|厘米)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not m:
+            return None
+        a, b, c = float(m.group(1)), float(m.group(2)), float(m.group(3))
+        volume = a * b * c
+        if volume <= 0:
+            return None
+        return round(volume, 3)
+
+    @staticmethod
+    def _extract_volume_weight_kg(message_text: str) -> float | None:
+        text = message_text or ""
+        m = re.search(r"(?:体积重|材积重)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(kg|公斤|斤|g|克)", text, flags=re.IGNORECASE)
         if not m:
             return None
         value = float(m.group(1))
@@ -316,6 +407,15 @@ class MessagesService:
     @staticmethod
     def _extract_locations(message_text: str) -> tuple[str | None, str | None]:
         text = message_text or ""
+
+        labeled_origin = re.search(r"(?:寄件(?:城市)?|发件(?:城市)?|始发地)\s*[:：]?\s*([\u4e00-\u9fa5]{2,20})", text)
+        labeled_dest = re.search(r"(?:收件(?:城市)?|目的地|寄到|送到)\s*[:：]?\s*([\u4e00-\u9fa5]{2,20})", text)
+        if labeled_origin and labeled_dest:
+            return labeled_origin.group(1), labeled_dest.group(1)
+
+        compact = re.search(r"([\u4e00-\u9fa5]{2,20})\s*[~～\-—]\s*([\u4e00-\u9fa5]{2,20})", text)
+        if compact:
+            return compact.group(1), compact.group(2)
 
         patterns = [
             (
@@ -351,6 +451,8 @@ class MessagesService:
     def _build_quote_request(self, message_text: str) -> tuple[QuoteRequest | None, list[str]]:
         origin, destination = self._extract_locations(message_text)
         weight = self._extract_weight_kg(message_text)
+        volume = self._extract_volume_cm3(message_text)
+        volume_weight = self._extract_volume_weight_kg(message_text)
         service_level = self._extract_service_level(message_text)
 
         missing: list[str] = []
@@ -369,6 +471,8 @@ class MessagesService:
                 origin=origin or "",
                 destination=destination or "",
                 weight=float(weight or 0),
+                volume=float(volume or 0.0),
+                volume_weight=float(volume_weight or 0.0),
                 service_level=service_level,
             ),
             [],
@@ -386,17 +490,34 @@ class MessagesService:
         return text
 
     async def _generate_reply_with_quote(self, message_text: str, item_title: str = "") -> tuple[str, dict[str, Any]]:
-        if not self._is_quote_request(message_text):
+        is_quote_intent = self._is_quote_request(message_text)
+        force_standard_format = self._is_standard_format_trigger(message_text)
+        request, missing = self._build_quote_request(message_text)
+        if missing and (is_quote_intent or self.strict_format_reply_enabled or force_standard_format):
+            fields = "、".join([self.quote_missing_prompts[field] for field in missing])
+            prompt = self.quote_missing_template.format(fields=fields)
+            strict_enforced = bool(self.strict_format_reply_enabled and not is_quote_intent)
+            return self._sanitize_reply(prompt), {
+                "is_quote": True,
+                "quote_need_info": True,
+                "format_enforced": bool(strict_enforced or force_standard_format),
+                "format_enforced_reason": "greeting" if force_standard_format else ("strict_mode" if strict_enforced else ""),
+                "quote_missing_fields": missing,
+                "quote_success": False,
+                "quote_fallback": False,
+            }
+
+        if not is_quote_intent:
             reply = self.reply_engine.generate_reply(message_text=message_text, item_title=item_title)
             return self._sanitize_reply(reply), {"is_quote": False}
 
-        request, missing = self._build_quote_request(message_text)
-        if missing:
-            fields = "、".join([self.quote_missing_prompts[field] for field in missing])
-            prompt = self.quote_missing_template.format(fields=fields)
+        if request is None:
+            # 保底分支：理论上 missing 已覆盖，这里兜底防止格式解析异常时漏回复
+            prompt = self.quote_missing_template.format(fields="寄件城市、收件城市、包裹重量（kg）")
             return self._sanitize_reply(prompt), {
                 "is_quote": True,
-                "quote_missing_fields": missing,
+                "quote_need_info": True,
+                "quote_missing_fields": ["origin", "destination", "weight"],
                 "quote_success": False,
                 "quote_fallback": False,
             }
@@ -408,6 +529,7 @@ class MessagesService:
             reply = result.compose_reply(validity_minutes=int(self.quote_config.get("validity_minutes", 30)))
             return self._sanitize_reply(reply), {
                 "is_quote": True,
+                "quote_need_info": False,
                 "quote_success": True,
                 "quote_fallback": bool(result.fallback_used),
                 "quote_cache_hit": bool(result.cache_hit),
@@ -418,6 +540,7 @@ class MessagesService:
         except QuoteProviderError:
             return self._sanitize_reply(self.quote_failed_template), {
                 "is_quote": True,
+                "quote_need_info": False,
                 "quote_success": False,
                 "quote_fallback": True,
             }
@@ -471,8 +594,11 @@ class MessagesService:
         ws_transport = await self._ensure_ws_transport()
         if ws_transport is not None:
             ws_sent = await ws_transport.send_text(session_id=session_id, text=reply_text)
-            if ws_sent or not self.controller or self.transport_mode == "ws":
+            if ws_sent or not self.controller:
                 return ws_sent
+            if self.transport_mode != "auto":
+                return False
+            self.logger.warning(f"WebSocket send failed for session `{session_id}`, fallback to DOM send")
 
         if not self.controller:
             raise BrowserError("Browser controller is not initialized. Cannot send reply.")
@@ -502,6 +628,7 @@ class MessagesService:
         within_target_count = 0
 
         quote_requests = 0
+        quote_need_info_count = 0
         quote_success_count = 0
         quote_fallback_count = 0
         quote_latency_samples: list[int] = []
@@ -521,13 +648,16 @@ class MessagesService:
                     within_target_count += 1
 
                 if detail.get("is_quote"):
-                    quote_requests += 1
-                    if detail.get("quote_success"):
-                        quote_success_count += 1
-                    if detail.get("quote_fallback"):
-                        quote_fallback_count += 1
-                    if isinstance(detail.get("quote_latency_ms"), int):
-                        quote_latency_samples.append(int(detail["quote_latency_ms"]))
+                    if detail.get("quote_need_info"):
+                        quote_need_info_count += 1
+                    else:
+                        quote_requests += 1
+                        if detail.get("quote_success"):
+                            quote_success_count += 1
+                        if detail.get("quote_fallback"):
+                            quote_fallback_count += 1
+                        if isinstance(detail.get("quote_latency_ms"), int):
+                            quote_latency_samples.append(int(detail["quote_latency_ms"]))
 
                 if detail.get("sent"):
                     success += 1
@@ -558,6 +688,7 @@ class MessagesService:
             "within_target_count": within_target_count,
             "within_target_rate": round(within_target_rate, 4),
             "quote_latency_ms": quote_latency_ms,
+            "quote_need_info_count": quote_need_info_count,
             "quote_success_rate": round(quote_success_rate, 4),
             "quote_fallback_rate": round(quote_fallback_rate, 4),
             "details": details,

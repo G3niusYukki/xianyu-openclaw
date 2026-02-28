@@ -11,6 +11,7 @@ Gateway Browser Control API 端口 = gateway_port + 2（默认 18791）
 import asyncio
 import os
 import random
+import re
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -490,26 +491,49 @@ class BrowserClient:
             return False
 
     async def set_cookies_for_domain(self, cookies_str: str, domain: str = ".goofish.com") -> None:
-        cookies = []
-        for item in cookies_str.split(";"):
+        name_re = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+        parsed_pairs: dict[str, str] = {}
+
+        for item in re.split(r"[;\n\r]+", str(cookies_str or "")):
             item = item.strip()
-            if "=" in item:
-                name, value = item.split("=", 1)
-                cookies.append(
-                    {
-                        "name": name.strip(),
-                        "value": value.strip(),
-                        "domain": domain,
-                        "path": "/",
-                    }
-                )
-        if cookies:
-            await self._client.post(
-                "/cookies/set",
-                params=self._profile_params(),
-                json={"cookies": cookies},
-            )
-            self.logger.info(f"Set {len(cookies)} cookies for {domain}")
+            if "=" not in item:
+                continue
+            name, value = item.split("=", 1)
+            name = name.strip()
+            value = value.strip()
+            if not name or not name_re.fullmatch(name):
+                continue
+            parsed_pairs[name] = value
+
+        for line in str(cookies_str or "").splitlines():
+            cols = [c.strip() for c in re.split(r"\t+", line) if c.strip()]
+            if len(cols) < 2:
+                continue
+            name = cols[0]
+            value = cols[1]
+            if not name_re.fullmatch(name):
+                continue
+            parsed_pairs[name] = value
+
+        cookies = [
+            {
+                "name": name,
+                "value": value,
+                "domain": domain,
+                "path": "/",
+            }
+            for name, value in parsed_pairs.items()
+        ]
+        if not cookies:
+            self.logger.warning("No valid cookies parsed from XIANYU_COOKIE_1; skip gateway cookie seeding")
+            return
+
+        await self._client.post(
+            "/cookies/set",
+            params=self._profile_params(),
+            json={"cookies": cookies},
+        )
+        self.logger.info(f"Set {len(cookies)} cookies for {domain}")
 
     # ── navigation helpers ──
 

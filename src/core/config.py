@@ -228,8 +228,10 @@ class Config:
                 "first_reply_delay_seconds": [0.25, 0.9],
                 "inter_reply_delay_seconds": [0.4, 1.2],
                 "send_confirm_delay_seconds": [0.15, 0.35],
-                "quote_intent_keywords": [],
-                "quote_missing_template": "为了给您准确报价，请补充：{fields}。",
+                "quote_intent_keywords": ["报价", "多少钱", "价格", "运费", "邮费", "快递费", "寄到", "发到", "送到", "怎么寄"],
+                "standard_format_trigger_keywords": ["你好", "您好", "在吗", "在不", "hi", "hello", "哈喽", "有人吗"],
+                "quote_missing_template": "咨询格式：寄件城市～收件城市～重量（多少kg）",
+                "strict_format_reply_enabled": True,
                 "quote_failed_template": "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
                 "quote": {},
                 "workflow": {},
@@ -254,6 +256,7 @@ class Config:
                 "cost_api_key_env": "QUOTE_COST_API_KEY",
                 "api_fallback_to_table_parallel": True,
                 "api_prefer_max_wait_seconds": 1.2,
+                "volume_divisor_default": 6000,
                 "providers": {
                     "remote": {
                         "enabled": False,

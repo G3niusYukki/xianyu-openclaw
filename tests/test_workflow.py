@@ -115,6 +115,36 @@ async def test_workflow_worker_run_once_updates_state_and_sla(temp_dir) -> None:
 
 
 @pytest.mark.asyncio
+async def test_workflow_worker_quote_need_info_not_counted_as_quote_failure(temp_dir) -> None:
+    store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
+    service = DummyMessageService(
+        sessions=[
+            {
+                "session_id": "s_need_info",
+                "last_message": "寄到北京运费多少",
+                "peer_name": "B",
+                "item_title": "快递",
+            }
+        ],
+        detail={
+            "sent": True,
+            "is_quote": True,
+            "quote_need_info": True,
+            "quote_success": False,
+            "quote_fallback": False,
+        },
+    )
+    worker = WorkflowWorker(message_service=service, store=store, config={"scan_limit": 5, "claim_limit": 5})
+
+    result = await worker.run_once(dry_run=True)
+
+    assert result["success"] == 1
+    assert result["sla"]["quote_total"] == 0
+    assert result["sla"]["quote_need_info_total"] == 1
+    assert result["sla"]["quote_failed_total"] == 0
+
+
+@pytest.mark.asyncio
 async def test_workflow_worker_skips_manual_takeover(temp_dir) -> None:
     store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
     session = {"session_id": "s4", "last_message": "还在吗", "peer_name": "C", "item_title": "商品"}

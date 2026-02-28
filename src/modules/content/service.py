@@ -65,23 +65,24 @@ class ContentService:
         self.provider = str(self.config.get("provider") or os.getenv("AI_PROVIDER") or "deepseek").lower()
         provider_key_env = PROVIDER_KEY_MAP.get(self.provider, "")
 
-        resolved_api_key = (
-            os.getenv("AI_API_KEY")
-            or (os.getenv(provider_key_env) if provider_key_env else None)
-            or os.getenv("OPENAI_API_KEY")
-            or os.getenv("DEEPSEEK_API_KEY")
-        )
-        resolved_base_url = (
+        provider_scoped_api_key = os.getenv(provider_key_env) if provider_key_env else None
+        # 优先读取显式 AI_API_KEY；否则按 provider 读取对应环境变量，避免跨供应商误用密钥。
+        resolved_api_key = self._normalize_config_value(os.getenv("AI_API_KEY") or provider_scoped_api_key)
+        resolved_base_url = self._normalize_config_value(
             os.getenv("AI_BASE_URL")
             or PROVIDER_BASE_URL_MAP.get(self.provider)
             or os.getenv("OPENAI_BASE_URL")
             or os.getenv("DEEPSEEK_BASE_URL")
         )
-        resolved_model = os.getenv("AI_MODEL") or PROVIDER_MODEL_MAP.get(self.provider, "deepseek-chat")
+        resolved_model = self._normalize_config_value(os.getenv("AI_MODEL") or PROVIDER_MODEL_MAP.get(self.provider, "deepseek-chat"))
 
-        self.api_key = self.config.get("api_key") or resolved_api_key
-        self.base_url = self.config.get("base_url") or resolved_base_url
-        self.model = self.config.get("model") or resolved_model
+        configured_api_key = self._normalize_config_value(self.config.get("api_key"))
+        configured_base_url = self._normalize_config_value(self.config.get("base_url"))
+        configured_model = self._normalize_config_value(self.config.get("model"))
+
+        self.api_key = configured_api_key or resolved_api_key
+        self.base_url = configured_base_url or resolved_base_url
+        self.model = configured_model or resolved_model or "deepseek-chat"
         self.temperature = self.config.get("temperature", 0.7)
         self.max_tokens = self.config.get("max_tokens", 1000)
         self.timeout = self.config.get("timeout", 30)
@@ -102,6 +103,15 @@ class ContentService:
         self._estimated_response_tokens = 0
 
         self._init_client()
+
+    @staticmethod
+    def _normalize_config_value(value: Any) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.startswith("${") and raw.endswith("}"):
+            return None
+        return raw
 
     def _init_client(self) -> None:
         """初始化AI客户端"""
