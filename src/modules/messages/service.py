@@ -346,12 +346,21 @@ class MessagesService:
         first_explain = quote_rows[0][1].explain if isinstance(quote_rows[0][1].explain, dict) else {}
         origin = str(first_explain.get("matched_origin") or first_explain.get("normalized_origin") or "寄件地")
         destination = str(first_explain.get("matched_destination") or first_explain.get("normalized_destination") or "收件地")
+        profile_raw = str(self.quote_config.get("pricing_profile", "normal") or "normal").strip().lower()
+        profile_label = "会员" if profile_raw == "member" else "普通"
 
-        lines = [f"{origin} -> {destination} 可选快递报价（可自行挑选）："]
+        lines = [
+            f"{origin}-> {destination} 可选快递报价（可自行拍下链接先不要付款！！！改价后再付款，自动发放兑换码，用兑换码到到小称许下单）：",
+            f"首单首重下单用户（{profile_label}）",
+        ]
         for index, (courier_name, result) in enumerate(quote_rows, start=1):
             eta = self._format_eta_days(result.eta_minutes)
-            lines.append(f"{index}. {courier_name}：{float(result.total_fee):.2f}元（预计{eta}）")
-        lines.append("回复“选XX快递”即可按对应渠道安排。")
+            extra_fee = float(result.surcharges.get("续重", 0.0) if isinstance(result.surcharges, dict) else 0.0)
+            if extra_fee > 0:
+                formula = f"首重{float(result.base_fee):.2f}+续重{extra_fee:.2f}"
+            else:
+                formula = f"首重{float(result.base_fee):.2f}"
+            lines.append(f"{index}. {courier_name}：{float(result.total_fee):.2f}元（{formula}）（预计{eta}）")
         return "\n".join(lines)
 
     def _should_use_ws_transport(self) -> bool:
