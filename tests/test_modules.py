@@ -197,9 +197,37 @@ async def test_messages_quote_request_generates_quote(mock_controller) -> None:
 
     assert detail["is_quote"] is True
     assert detail["quote_success"] is True
-    assert "首单价格" in detail["reply"]
-    assert "预计时效" in detail["reply"]
+    assert "可选快递报价" in detail["reply"]
+    assert "预计" in detail["reply"]
+    assert len(detail.get("quote_all_couriers", [])) >= 1
     assert result["quote_success_rate"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_messages_quote_request_single_courier_mode(mock_controller) -> None:
+    service = MessagesService(
+        controller=mock_controller,
+        config={"max_replies_per_run": 3, "fast_reply_enabled": True, "quote_reply_all_couriers": False},
+    )
+    service.get_unread_sessions = AsyncMock(
+        return_value=[
+            {
+                "session_id": "q_single",
+                "peer_name": "买家Q",
+                "item_title": "快递服务",
+                "last_message": "从上海寄到杭州 2kg 多少钱",
+                "unread_count": 1,
+            }
+        ]
+    )
+
+    result = await service.auto_reply_unread(limit=5, dry_run=True)
+    detail = result["details"][0]
+
+    assert detail["is_quote"] is True
+    assert detail["quote_success"] is True
+    assert "首单价格" in detail["reply"]
+    assert "quote_all_couriers" not in detail
 
 
 @pytest.mark.asyncio

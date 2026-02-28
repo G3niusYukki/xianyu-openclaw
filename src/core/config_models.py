@@ -162,6 +162,8 @@ class MessagesConfig(BaseModel):
         description="询价缺参补问模板",
     )
     strict_format_reply_enabled: bool = Field(default=True, description="是否对非标准输入强制回复标准询价格式模板")
+    quote_reply_all_couriers: bool = Field(default=True, description="报价回复是否展示全部可选快递公司")
+    quote_reply_max_couriers: int = Field(default=10, description="报价回复中最多展示的快递公司数量")
     quote_failed_template: str = Field(
         default="报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
         description="报价失败降级模板",

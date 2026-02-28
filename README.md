@@ -278,6 +278,8 @@ messages:
   send_confirm_delay_seconds: [0.15, 0.35]
   quote_intent_keywords: ["报价", "多少钱", "运费", "寄到"]
   quote_missing_template: "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）"
+  quote_reply_all_couriers: true
+  quote_reply_max_couriers: 10
   quote_failed_template: "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。"
   reply_prefix: "【自动回复】"
   default_reply: "您好，宝贝在的，感兴趣可以直接拍下。"

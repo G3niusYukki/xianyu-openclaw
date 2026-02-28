@@ -22,7 +22,7 @@ from src.core.logger import get_logger
 from src.modules.compliance.center import ComplianceCenter
 from src.modules.messages.reply_engine import ReplyStrategyEngine
 from src.modules.quote.engine import AutoQuoteEngine
-from src.modules.quote.models import QuoteRequest
+from src.modules.quote.models import QuoteRequest, QuoteResult
 from src.modules.quote.providers import QuoteProviderError
 
 
@@ -159,6 +159,8 @@ class MessagesService:
             "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
         )
         self.strict_format_reply_enabled = bool(self.config.get("strict_format_reply_enabled", False))
+        self.quote_reply_all_couriers = bool(self.config.get("quote_reply_all_couriers", True))
+        self.quote_reply_max_couriers = max(1, int(self.config.get("quote_reply_max_couriers", 10)))
         self.quote_failed_template = self.config.get(
             "quote_failed_template",
             "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
@@ -256,6 +258,101 @@ class MessagesService:
         billing_weight = self._safe_float(explain.get("billing_weight_kg"))
         use_volume_template = billing_weight > (actual_weight + 1e-6)
         return templates["volume_template"] if use_volume_template else templates["weight_template"]
+
+    @staticmethod
+    def _format_eta_days(minutes: int | float | None) -> str:
+        try:
+            raw = float(minutes or 0)
+        except (TypeError, ValueError):
+            raw = 0.0
+        if raw <= 0:
+            return "1天"
+        days = max(1.0, raw / 1440.0)
+        rounded = round(days, 1)
+        if abs(rounded - round(rounded)) < 1e-9:
+            return f"{int(round(rounded))}天"
+        return f"{rounded:.1f}天"
+
+    def _resolve_quote_candidate_couriers(self, request: QuoteRequest) -> list[str]:
+        couriers: list[str] = []
+        seen: set[str] = set()
+
+        preferred = self.quote_config.get("preferred_couriers", [])
+        if isinstance(preferred, list):
+            for item in preferred:
+                name = str(item or "").strip()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                couriers.append(name)
+
+        provider = getattr(self.quote_engine, "cost_table_provider", None)
+        repo = getattr(provider, "repo", None)
+        if repo is not None:
+            try:
+                rows = repo.find_candidates(
+                    origin=request.origin,
+                    destination=request.destination,
+                    courier=None,
+                    limit=max(24, self.quote_reply_max_couriers * 8),
+                )
+                for row in rows:
+                    name = str(getattr(row, "courier", "") or "").strip()
+                    if not name or name in seen:
+                        continue
+                    seen.add(name)
+                    couriers.append(name)
+            except Exception as exc:
+                self.logger.warning("Resolve candidate couriers failed: %s", exc)
+
+        return couriers[: self.quote_reply_max_couriers]
+
+    async def _quote_all_couriers(self, request: QuoteRequest) -> list[tuple[str, QuoteResult]]:
+        couriers = self._resolve_quote_candidate_couriers(request)
+        if not couriers:
+            return []
+
+        async def _one(courier_name: str) -> tuple[str, QuoteResult | None]:
+            sub_request = QuoteRequest(
+                origin=request.origin,
+                destination=request.destination,
+                weight=request.weight,
+                volume=request.volume,
+                volume_weight=request.volume_weight,
+                service_level=request.service_level,
+                courier=courier_name,
+                item_type=request.item_type,
+                time_window=request.time_window,
+            )
+            try:
+                result = await self.quote_engine.get_quote(sub_request)
+                return courier_name, result
+            except Exception:
+                return courier_name, None
+
+        pairs = await asyncio.gather(*[_one(name) for name in couriers])
+        ok_pairs: list[tuple[str, QuoteResult]] = []
+        for courier_name, result in pairs:
+            if result is None:
+                continue
+            ok_pairs.append((courier_name, result))
+        ok_pairs.sort(key=lambda item: (float(item[1].total_fee), str(item[0])))
+        return ok_pairs
+
+    def _compose_multi_courier_quote_reply(self, quote_rows: list[tuple[str, QuoteResult]]) -> str:
+        if not quote_rows:
+            return ""
+
+        first_explain = quote_rows[0][1].explain if isinstance(quote_rows[0][1].explain, dict) else {}
+        origin = str(first_explain.get("matched_origin") or first_explain.get("normalized_origin") or "寄件地")
+        destination = str(first_explain.get("matched_destination") or first_explain.get("normalized_destination") or "收件地")
+
+        lines = [f"{origin} -> {destination} 可选快递报价（可自行挑选）："]
+        for index, (courier_name, result) in enumerate(quote_rows, start=1):
+            eta = self._format_eta_days(result.eta_minutes)
+            lines.append(f"{index}. {courier_name}：{float(result.total_fee):.2f}元（预计{eta}）")
+        lines.append("回复“选XX快递”即可按对应渠道安排。")
+        return "\n".join(lines)
 
     def _should_use_ws_transport(self) -> bool:
         if self.transport_mode == "ws":
@@ -607,6 +704,39 @@ class MessagesService:
 
         start = perf_counter()
         try:
+            multi_quote_rows: list[tuple[str, QuoteResult]] = []
+            if self.quote_reply_all_couriers:
+                multi_quote_rows = await self._quote_all_couriers(request)
+
+            if multi_quote_rows:
+                best_courier, best_result = multi_quote_rows[0]
+                reply = self._compose_multi_courier_quote_reply(multi_quote_rows)
+                latency_ms = int((perf_counter() - start) * 1000)
+                return self._sanitize_reply(reply), {
+                    "is_quote": True,
+                    "quote_need_info": False,
+                    "quote_success": True,
+                    "quote_fallback": any(bool(r.fallback_used) for _, r in multi_quote_rows),
+                    "quote_cache_hit": all(bool(r.cache_hit) for _, r in multi_quote_rows),
+                    "quote_stale": any(bool(r.stale) for _, r in multi_quote_rows),
+                    "quote_latency_ms": latency_ms,
+                    "quote_all_couriers": [
+                        {
+                            "courier": courier_name,
+                            "total_fee": round(float(result.total_fee), 2),
+                            "eta_minutes": int(result.eta_minutes),
+                            "eta_days": self._format_eta_days(result.eta_minutes),
+                            "fallback_used": bool(result.fallback_used),
+                            "cache_hit": bool(result.cache_hit),
+                        }
+                        for courier_name, result in multi_quote_rows
+                    ],
+                    "quote_result": {
+                        **best_result.to_dict(),
+                        "selected_courier": best_courier,
+                    },
+                }
+
             result = await self.quote_engine.get_quote(request)
             latency_ms = int((perf_counter() - start) * 1000)
             explain = result.explain if isinstance(result.explain, dict) else {}

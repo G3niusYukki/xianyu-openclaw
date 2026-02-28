@@ -232,6 +232,8 @@ class Config:
                 "standard_format_trigger_keywords": ["你好", "您好", "在吗", "在不", "hi", "hello", "哈喽", "有人吗"],
                 "quote_missing_template": "询价格式：xx省 - xx省 - 重量（kg）\n长宽高（单位cm）",
                 "strict_format_reply_enabled": True,
+                "quote_reply_all_couriers": True,
+                "quote_reply_max_couriers": 10,
                 "quote_failed_template": "报价服务暂时繁忙，我先帮您转人工确认，确保价格准确。",
                 "quote": {},
                 "workflow": {},
