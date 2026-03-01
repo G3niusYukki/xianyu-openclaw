@@ -13,6 +13,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from src.core.cookie_health import CookieHealthChecker
+
 from src.core.config import get_config
 from src.core.logger import get_logger
 from src.modules.messages.notifications import (
@@ -103,6 +105,8 @@ class WorkflowStore:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _init_schema(self) -> None:
@@ -615,6 +619,7 @@ class WorkflowWorker:
         self._notifier = notifier
         self._had_active_alert = False
         self._last_heartbeat_ts = 0.0
+        self._cookie_checker: CookieHealthChecker | None = None
 
         notifications_cfg = self.config.get("notifications", {})
         if not isinstance(notifications_cfg, dict):
@@ -636,6 +641,18 @@ class WorkflowWorker:
                     bot_name=str(feishu_cfg.get("bot_name", "闲鱼自动化助手")),
                     timeout_seconds=float(feishu_cfg.get("timeout_seconds", 5.0)),
                 )
+
+        # Cookie 健康监控：复用 notifier 发送告警
+        import os
+
+        cookie_text = os.getenv("XIANYU_COOKIE_1", "")
+        if cookie_text and cookie_text != "your_cookie_here":
+            self._cookie_checker = CookieHealthChecker(
+                cookie_text=cookie_text,
+                check_interval_seconds=300.0,
+                alert_cooldown_seconds=1800.0,
+                notifier=self._notifier,
+            )
 
     async def _send_notification(self, text: str) -> bool:
         if self._notifier is None:
@@ -743,6 +760,14 @@ class WorkflowWorker:
             await self._send_notification(text)
             self._had_active_alert = False
 
+        # Cookie 健康探测（非阻塞，有 TTL 缓存）
+        cookie_health: dict[str, Any] = {"healthy": True, "message": "skipped"}
+        if self._cookie_checker is not None:
+            try:
+                cookie_health = await self._cookie_checker.check_async()
+            except Exception as exc:
+                cookie_health = {"healthy": False, "message": f"check_error: {exc}"}
+
         return {
             "action": "auto_workflow",
             "dry_run": dry_run,
@@ -756,6 +781,7 @@ class WorkflowWorker:
             "alerts": alerts,
             "workflow": summary,
             "sla": sla_summary,
+            "cookie_health": cookie_health,
         }
 
     async def run_forever(self, dry_run: bool = False, max_loops: int | None = None) -> dict[str, Any]:

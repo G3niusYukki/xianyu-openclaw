@@ -1396,6 +1396,17 @@ async def cmd_module(args: argparse.Namespace) -> None:
         _json_out(_recover_one(target))
         return
 
+    if action == "cookie-health":
+        from src.core.cookie_health import CookieHealthChecker
+
+        cookie_text = os.getenv("XIANYU_COOKIE_1", "")
+        checker = CookieHealthChecker(cookie_text=cookie_text, timeout_seconds=10.0)
+        result = checker.check_sync(force=True)
+        _json_out(result)
+        if not result.get("healthy", False):
+            raise SystemExit(2)
+        return
+
     if action == "logs":
         if target == "all":
             _json_out(
@@ -1720,7 +1731,9 @@ def build_parser() -> argparse.ArgumentParser:
     # module
     p = sub.add_parser("module", help="模块化可用性检查与启动（售前/运营/售后）")
     p.add_argument(
-        "--action", required=True, choices=["check", "status", "start", "stop", "restart", "recover", "logs"]
+        "--action",
+        required=True,
+        choices=["check", "status", "start", "stop", "restart", "recover", "logs", "cookie-health"],
     )
     p.add_argument("--target", required=True, choices=["presales", "operations", "aftersales", "all"])
     p.add_argument("--strict", action="store_true", help="check 未通过时返回非0")

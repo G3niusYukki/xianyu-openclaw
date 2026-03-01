@@ -75,6 +75,8 @@ class DashboardRepository:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def get_summary(self) -> dict[str, Any]:
@@ -5325,6 +5327,48 @@ class DashboardHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
 
         try:
+            if path == "/healthz":
+                db_ok = False
+                try:
+                    with self.repo._connect() as conn:
+                        conn.execute("SELECT 1")
+                    db_ok = True
+                except Exception:
+                    pass
+
+                # Module liveness via quick status check
+                modules_summary: dict[str, str] = {}
+                try:
+                    status_payload = self.mimic_ops.service_status()
+                    if isinstance(status_payload, dict):
+                        modules_summary = {
+                            "system_running": "alive" if status_payload.get("system_running") else "dead",
+                            "alive_count": str(status_payload.get("alive_count", 0)),
+                            "total_modules": str(status_payload.get("total_modules", 0)),
+                        }
+                except Exception:
+                    modules_summary = {"error": "status_check_failed"}
+
+                import time as _t
+
+                started = getattr(self.mimic_ops, "_service_started_at", "")
+                uptime_seconds = 0
+                if started:
+                    try:
+                        start_dt = datetime.strptime(started, "%Y-%m-%dT%H:%M:%S")
+                        uptime_seconds = int((datetime.now() - start_dt).total_seconds())
+                    except Exception:
+                        pass
+
+                self._send_json({
+                    "status": "ok" if db_ok else "degraded",
+                    "timestamp": _now_iso(),
+                    "database": "writable" if db_ok else "error",
+                    "modules": modules_summary,
+                    "uptime_seconds": uptime_seconds,
+                })
+                return
+
             if path == "/":
                 self._send_html(DASHBOARD_HTML)
                 return

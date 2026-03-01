@@ -5,7 +5,7 @@ Xianyu Automation Tool
 基于 OpenClaw 框架的闲鱼自动化运营工具
 """
 
-__version__ = "4.8.0"
+__version__ = "5.2.0"
 __author__ = "Project Team"
 
 from .core.browser_client import BrowserClient

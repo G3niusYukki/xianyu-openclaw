@@ -22,6 +22,7 @@ _SUGGESTIONS = {
     "数据库": "请确认数据库目录可写，并检查 `config/config.yaml` 中 database.path 配置。",
     "闲鱼Cookie": "请在 `.env` 中设置有效的 `XIANYU_COOKIE_1`。",
     "Cookie有效性": "请重新抓取并更新闲鱼 Cookie，避免使用过期会话。",
+    "Cookie在线有效性": "Cookie 已过期，请重新从浏览器获取并更新 `.env` 中的 `XIANYU_COOKIE_1`。",
     "AI服务": "可配置 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY`，未配置将退化到模板模式。",
     ".env 文件": "请复制 `.env.example` 为 `.env`，并补齐关键配置。",
     "配置文件": "请确保 `config/config.yaml` 存在，或从 `config/config.example.yaml` 复制生成。",
@@ -189,6 +190,31 @@ def _extra_checks(skip_quote: bool = False) -> list[dict[str, Any]]:
 
     if skip_quote:
         return checks
+
+    # Cookie 在线有效性探测（仅当 Cookie 已配置时执行）
+    cookie_val = os.getenv("XIANYU_COOKIE_1", "")
+    if cookie_val and cookie_val != "your_cookie_here" and len(cookie_val) > 20:
+        try:
+            from src.core.cookie_health import CookieHealthChecker
+
+            checker = CookieHealthChecker(cookie_text=cookie_val, timeout_seconds=8.0)
+            result = checker.check_sync(force=True)
+            _append_check(
+                checks,
+                name="Cookie在线有效性",
+                passed=bool(result.get("healthy", False)),
+                message=str(result.get("message", "未知")),
+                critical=False,
+                meta=result,
+            )
+        except Exception as exc:
+            _append_check(
+                checks,
+                name="Cookie在线有效性",
+                passed=False,
+                message=f"探测失败: {exc}",
+                critical=False,
+            )
 
     try:
         config = get_config()

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-03-01
+
+### Added
+- **Cookie 健康监控**：
+  - 新增 `src/core/cookie_health.py`：定时探测 Cookie 有效性（HTTP probe），失效立即飞书告警，恢复后通知
+  - `WorkflowWorker.run_once()` 集成 Cookie 健康检查（TTL 缓存，非阻塞）
+  - `doctor --strict` 新增 `Cookie在线有效性` 诊断项
+  - CLI `module --action cookie-health` 手动检查 Cookie 状态
+- **macOS launchd 进程守护**：
+  - `scripts/macos/com.xianyu-openclaw.plist`：开机自启 + 崩溃自动恢复（`KeepAlive: true`）
+  - `scripts/macos/install_service.sh`：一键安装/卸载/查看服务状态
+  - `scripts/macos/start_all.sh`：统一启动脚本（Docker Compose + 所有模块守护 + Dashboard）
+- **数据备份**：
+  - `scripts/backup_data.sh`：SQLite 安全备份（`sqlite3 .backup`），7 天自动轮转清理
+- **Dashboard /healthz 端点**：
+  - 返回 JSON 格式的系统健康状态（数据库可写性、模块存活、运行时长）
+- 新增测试 `tests/test_cookie_health.py`（8 tests）
+
+### Changed
+- **SQLite WAL 模式**：`WorkflowStore` 与 `DashboardRepository` 的 `_connect()` 启用 `journal_mode=WAL` + `busy_timeout=5000`，提升并发写入可靠性
+
+
 ## [5.1.0] - 2026-02-28
 
 ### Added

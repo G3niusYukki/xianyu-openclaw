@@ -27,6 +27,17 @@
 
 ---
 
+## 5.2.0 更新摘要（2026-03-01）
+
+- **Cookie 健康监控**：定时探测 Cookie 有效性，失效立即飞书告警，恢复后通知
+  - `doctor --strict` 新增在线 Cookie 有效性诊断
+  - `module --action cookie-health` 手动检查
+- **macOS 开机自启**：launchd 守护进程，系统重启/崩溃自动恢复
+  - `scripts/macos/install_service.sh install` 一键安装
+- **SQLite WAL 模式**：WorkflowStore 和 DashboardRepository 启用 WAL + busy_timeout，提升并发写入稳定性
+- **数据自动备份**：`scripts/backup_data.sh`，支持 7 天自动轮转
+- **Dashboard /healthz 端点**：返回系统健康状态 JSON，供外部监控探测
+
 ## 5.1.0 更新摘要（2026-02-28）
 
 - **售前会话流程优化**：
