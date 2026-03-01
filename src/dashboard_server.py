@@ -5358,13 +5358,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
 
-                self._send_json({
-                    "status": "ok" if db_ok else "degraded",
-                    "timestamp": _now_iso(),
-                    "database": "writable" if db_ok else "error",
-                    "modules": modules_summary,
-                    "uptime_seconds": uptime_seconds,
-                })
+                self._send_json(
+                    {
+                        "status": "ok" if db_ok else "degraded",
+                        "timestamp": _now_iso(),
+                        "database": "writable" if db_ok else "error",
+                        "modules": modules_summary,
+                        "uptime_seconds": uptime_seconds,
+                    }
+                )
                 return
 
             if path == "/":

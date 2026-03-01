@@ -197,10 +197,7 @@ class CookieHealthChecker:
 
         # 从不健康恢复为健康 → 恢复通知
         elif prev is False and healthy:
-            msg = (
-                "【闲鱼自动化】✅ Cookie 已恢复\n"
-                "Cookie 有效性检测通过，系统恢复正常运行"
-            )
+            msg = "【闲鱼自动化】✅ Cookie 已恢复\nCookie 有效性检测通过，系统恢复正常运行"
             try:
                 await self._notifier.send_text(msg)
                 logger.info("Cookie 恢复通知已发送")
