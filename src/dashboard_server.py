@@ -5349,8 +5349,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 except Exception:
                     modules_summary = {"error": "status_check_failed"}
 
-                import time as _t
-
                 started = getattr(self.mimic_ops, "_service_started_at", "")
                 uptime_seconds = 0
                 if started:
