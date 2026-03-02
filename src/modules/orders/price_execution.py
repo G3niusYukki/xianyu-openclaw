@@ -273,7 +273,10 @@ class PriceExecutionService:
 
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT event_type, status, detail_json, created_at FROM price_update_events WHERE job_id=? ORDER BY id ASC",
+                (
+                    "SELECT event_type, status, detail_json, created_at "
+                    "FROM price_update_events WHERE job_id=? ORDER BY id ASC"
+                ),
                 (int(job_id),),
             ).fetchall()
 

@@ -446,7 +446,10 @@ class WorkflowStore:
                 return cur.rowcount > 0
 
             cur = conn.execute(
-                "UPDATE workflow_jobs SET status='done', lease_until=NULL, updated_at=? WHERE id=? AND status='running'",
+                (
+                    "UPDATE workflow_jobs SET status='done', lease_until=NULL, updated_at=? "
+                    "WHERE id=? AND status='running'"
+                ),
                 (now, job_id),
             )
             return cur.rowcount > 0
@@ -467,7 +470,10 @@ class WorkflowStore:
                     (job_id, expected_lease_until),
                 ).fetchone()
             else:
-                row = conn.execute("SELECT attempts FROM workflow_jobs WHERE id=? AND status='running'", (job_id,)).fetchone()
+                row = conn.execute(
+                    "SELECT attempts FROM workflow_jobs WHERE id=? AND status='running'",
+                    (job_id,),
+                ).fetchone()
             if row is None:
                 return False
 
