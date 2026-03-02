@@ -131,6 +131,17 @@ class TestHandleOperationErrors:
         result = await test_func(mock_obj)
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_handle_operation_errors_timeout_raise_on_error(self):
+        """测试超时异常在 raise_on_error=True 时会透传"""
+
+        @handle_operation_errors(default_return=False, raise_on_error=True)
+        async def test_func(self):
+            raise httpx.TimeoutException("timeout")
+
+        with pytest.raises(httpx.TimeoutException):
+            await test_func(Mock(logger=Mock()))
+
 
 class TestSafeExecute:
     """安全执行装饰器测试"""
@@ -425,3 +436,70 @@ class TestHandleErrors:
 
         with pytest.raises(ValueError):
             await test_func()
+
+
+@pytest.mark.asyncio
+async def test_targeted_controller_httpstatus_and_unexpected_and_operation_sync_raise():
+    request = httpx.Request("GET", "https://example.com")
+    response = httpx.Response(503, request=request)
+
+    @handle_controller_errors(default_return="status_fallback")
+    async def raise_status(self):
+        raise httpx.HTTPStatusError("Service unavailable", request=request, response=response)
+
+    logger1 = Mock()
+    obj1 = Mock(logger=logger1)
+    result1 = await raise_status(obj1)
+    assert result1 == "status_fallback"
+    assert logger1.error.call_count == 1
+    assert "503" in str(logger1.error.call_args)
+
+    @handle_controller_errors(default_return="unexpected_fallback")
+    async def raise_unexpected(self):
+        raise RuntimeError("boom")
+
+    logger2 = Mock()
+    obj2 = Mock(logger=logger2)
+    result2 = await raise_unexpected(obj2)
+    assert result2 == "unexpected_fallback"
+    logger2.error.assert_called_once()
+
+    @handle_operation_errors(default_return=False, raise_on_error=True)
+    def sync_raise(self):
+        raise ValueError("sync bad")
+
+    with pytest.raises(ValueError, match="sync bad"):
+        sync_raise(Mock(logger=Mock()))
+
+
+def test_targeted_safe_execute_sync_raise_and_retry_sync_final_attempt_and_handle_errors_sync_raise():
+    custom_logger = Mock()
+
+    @safe_execute(logger=custom_logger, raise_on_error=True)
+    def sync_fail():
+        raise KeyError("bad")
+
+    with pytest.raises(KeyError):
+        sync_fail()
+    custom_logger.debug.assert_called_once()
+
+    logger_for_retry = Mock()
+
+    @retry(max_attempts=2, delay=0.01)
+    def always_fail():
+        raise RuntimeError("retry-final")
+
+    with pytest.raises(RuntimeError, match="retry-final"):
+        always_fail(logger=logger_for_retry)
+    assert logger_for_retry.error.call_count == 1
+    assert "Final attempt failed" in str(logger_for_retry.error.call_args)
+
+    handle_logger = Mock()
+
+    @handle_errors(exceptions=(ValueError,), logger=handle_logger, raise_on_error=True)
+    def sync_value_error():
+        raise ValueError("sync-value")
+
+    with pytest.raises(ValueError, match="sync-value"):
+        sync_value_error()
+    handle_logger.error.assert_called_once()

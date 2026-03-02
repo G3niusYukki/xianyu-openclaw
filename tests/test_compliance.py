@@ -68,3 +68,15 @@ def test_publish_rate_warn_mode(temp_dir) -> None:
     assert first["allowed"] is True
     assert second["allowed"] is True
     assert second["warn"] is True
+
+
+def test_reload_handles_invalid_yaml_payload(temp_dir) -> None:
+    rules_path = temp_dir / "rules.yaml"
+    rules_path.write_text("::bad yaml::", encoding="utf-8")
+    guard = ComplianceGuard(str(rules_path))
+    assert guard.mode == "block"
+
+
+def test_reload_missing_rules_file_uses_defaults(temp_dir) -> None:
+    guard = ComplianceGuard(str(temp_dir / "no_rules.yaml"))
+    assert guard.mode == "block"

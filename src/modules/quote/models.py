@@ -61,6 +61,8 @@ class QuoteResult:
     cache_hit: bool = False
     stale: bool = False
     snapshot: QuoteSnapshot | None = None
+    source_excel: str = ""
+    matched_route: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         snapshot_data = None
@@ -86,6 +88,8 @@ class QuoteResult:
             "cache_hit": self.cache_hit,
             "stale": self.stale,
             "snapshot": snapshot_data,
+            "source_excel": self.source_excel,
+            "matched_route": self.matched_route,
         }
 
     @staticmethod

@@ -221,3 +221,8 @@ async def test_quote_engine_api_cost_plus_markup_fallbacks_to_table(tmp_path) ->
     assert result.provider == "cost_table_markup"
     assert result.fallback_used is True
     assert result.explain.get("fallback_source") == "cost_table"
+
+
+def test_quote_engine_classify_failure_unknown_and_timeout() -> None:
+    assert AutoQuoteEngine._classify_failure(None) == "unknown"
+    assert AutoQuoteEngine._classify_failure(RuntimeError("timeout now")) == "timeout"

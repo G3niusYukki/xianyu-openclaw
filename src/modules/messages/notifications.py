@@ -83,17 +83,18 @@ def format_start_message(interval_seconds: float, dry_run: bool = False) -> str:
 
 
 def format_heartbeat_message(last: dict[str, Any], loops: int) -> str:
-    sla = last.get("sla", {}) if isinstance(last, dict) else {}
-    workflow = last.get("workflow", {}) if isinstance(last, dict) else {}
+    snapshot = last if isinstance(last, dict) else {}
+    sla = snapshot.get("sla", {})
+    workflow = snapshot.get("workflow", {})
     return "\n".join(
         [
             f"【闲鱼自动化】心跳 loops={loops}",
             "unread={unread}, enqueued={enqueued}, claimed={claimed}, success={success}, failed={failed}".format(
-                unread=last.get("unread_sessions", 0),
-                enqueued=last.get("enqueued", 0),
-                claimed=last.get("claimed", 0),
-                success=last.get("success", 0),
-                failed=last.get("failed", 0),
+                unread=snapshot.get("unread_sessions", 0),
+                enqueued=snapshot.get("enqueued", 0),
+                claimed=snapshot.get("claimed", 0),
+                success=snapshot.get("success", 0),
+                failed=snapshot.get("failed", 0),
             ),
             "首响P95={p95}ms, 报价成功率={rate}".format(
                 p95=sla.get("first_reply_p95_ms", 0),

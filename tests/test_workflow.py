@@ -196,3 +196,13 @@ async def test_workflow_worker_sends_feishu_alert_notification(temp_dir) -> None
     assert result["alerts"]
     assert notifier.messages
     assert "SLA 告警" in notifier.messages[0]
+
+
+def test_workflow_worker_init_accepts_non_dict_feishu_config(temp_dir) -> None:
+    service = DummyMessageService(sessions=[], detail={"sent": True})
+    worker = WorkflowWorker(
+        message_service=service,
+        store=WorkflowStore(db_path=str(temp_dir / "workflow.db")),
+        config={"notifications": {"feishu": "bad-type"}},
+    )
+    assert worker.notify_on_alert is True

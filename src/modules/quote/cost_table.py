@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from src.modules.quote.geo_resolver import GeoResolver
+from src.modules.quote.route import contains_match, route_candidates
+
 XML_NS_MAIN = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 XML_NS_OFFICE_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 XML_NS_PKG_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
@@ -113,41 +116,6 @@ REGION_ALIASES = {
     "澳门特别行政区": "澳门",
 }
 
-CITY_TO_REGION = {
-    "北京": "北京",
-    "上海": "上海",
-    "天津": "天津",
-    "重庆": "重庆",
-    "石家庄": "河北",
-    "太原": "山西",
-    "沈阳": "辽宁",
-    "长春": "吉林",
-    "哈尔滨": "黑龙江",
-    "南京": "江苏",
-    "杭州": "浙江",
-    "合肥": "安徽",
-    "福州": "福建",
-    "南昌": "江西",
-    "济南": "山东",
-    "郑州": "河南",
-    "武汉": "湖北",
-    "长沙": "湖南",
-    "广州": "广东",
-    "深圳": "广东",
-    "海口": "海南",
-    "成都": "四川",
-    "贵阳": "贵州",
-    "昆明": "云南",
-    "西安": "陕西",
-    "兰州": "甘肃",
-    "西宁": "青海",
-    "呼和浩特": "内蒙古",
-    "南宁": "广西",
-    "拉萨": "西藏",
-    "银川": "宁夏",
-    "乌鲁木齐": "新疆",
-}
-
 PROVINCE_SET = set(REGION_ALIASES.values())
 
 
@@ -175,28 +143,21 @@ def normalize_location_name(value: str | None) -> str:
     if text in REGION_ALIASES:
         return REGION_ALIASES[text]
 
-    city = text
-    for suffix in ("省", "市", "盟", "地区", "自治州", "自治区", "特别行政区", "区", "县"):
-        if city.endswith(suffix):
-            city = city[: -len(suffix)]
-            break
+    normalized = GeoResolver.normalize(text)
+    if normalized in REGION_ALIASES:
+        return REGION_ALIASES[normalized]
 
-    if city in REGION_ALIASES:
-        return REGION_ALIASES[city]
-
-    if city in CITY_TO_REGION:
-        return city
-
-    return city
+    return normalized
 
 
-def region_of_location(value: str | None) -> str:
+def region_of_location(value: str | None, resolver: GeoResolver | None = None) -> str:
     name = normalize_location_name(value)
     if not name:
         return ""
     if name in PROVINCE_SET:
         return name
-    return CITY_TO_REGION.get(name, "")
+    geo = resolver or GeoResolver()
+    return geo.province_of(name)
 
 
 @dataclass(slots=True)
@@ -226,6 +187,7 @@ class CostTableRepository:
     def __init__(self, table_dir: str | Path, include_patterns: list[str] | None = None):
         self.table_dir = Path(table_dir)
         self.include_patterns = tuple(include_patterns or ["*.xlsx", "*.csv"])
+        self.geo_resolver = GeoResolver()
 
         self._records: list[CostRecord] = []
         self._signature: tuple[tuple[str, int, int], ...] = ()
@@ -251,46 +213,42 @@ class CostTableRepository:
         if not origin_norm or not destination_norm:
             return []
 
-        origin_keys = [origin_norm]
-        destination_keys = [destination_norm]
-        origin_region = region_of_location(origin_norm)
-        destination_region = region_of_location(destination_norm)
-        if origin_region and origin_region not in origin_keys:
-            origin_keys.append(origin_region)
-        if destination_region and destination_region not in destination_keys:
-            destination_keys.append(destination_region)
-
         courier_norm = normalize_courier_name(courier) if courier else ""
 
-        if courier_norm:
-            for origin_key in origin_keys:
-                for destination_key in destination_keys:
-                    exact = self._index_courier_route.get((courier_norm, origin_key, destination_key), [])
-                    if exact:
-                        return self._sort_candidates(exact)[:limit]
-
-            for destination_key in destination_keys:
-                dest_pool = self._index_courier_destination.get((courier_norm, destination_key), [])
-                if not dest_pool:
-                    continue
-                scored = self._rank_by_origin_similarity(dest_pool, origin_norm)
-                if not scored and origin_region and origin_region != origin_norm:
-                    scored = self._rank_by_origin_similarity(dest_pool, origin_region)
-                if scored:
-                    return scored[:limit]
-            return []
-
-        for origin_key in origin_keys:
-            for destination_key in destination_keys:
+        # Level 1 + 2: 精确匹配与省市混配候选
+        for origin_key, destination_key in route_candidates(origin_norm, destination_norm, self.geo_resolver):
+            if courier_norm:
+                exact = self._index_courier_route.get((courier_norm, origin_key, destination_key), [])
+            else:
                 exact = self._index_route.get((origin_key, destination_key), [])
-                if exact:
-                    return self._sort_candidates(exact)[:limit]
+            if exact:
+                return self._sort_candidates(exact)[:limit]
 
+        # Level 3: 包含匹配
+        if courier_norm:
+            pool = [r for r in self._records if normalize_courier_name(r.courier) == courier_norm]
+        else:
+            pool = self._records
+
+        fuzzy = [
+            record
+            for record in pool
+            if contains_match(origin_norm, destination_norm, record.origin, record.destination)
+        ]
+        if fuzzy:
+            return self._sort_candidates(fuzzy)[:limit]
+
+        # 兜底：保留旧的 destination 索引相似度
+        destination_keys = [key[1] for key in route_candidates(origin_norm, destination_norm, self.geo_resolver)]
         for destination_key in destination_keys:
-            dest_pool = self._index_destination.get(destination_key, [])
+            if courier_norm:
+                dest_pool = self._index_courier_destination.get((courier_norm, destination_key), [])
+            else:
+                dest_pool = self._index_destination.get(destination_key, [])
             if not dest_pool:
                 continue
             scored = self._rank_by_origin_similarity(dest_pool, origin_norm)
+            origin_region = region_of_location(origin_norm, self.geo_resolver)
             if not scored and origin_region and origin_region != origin_norm:
                 scored = self._rank_by_origin_similarity(dest_pool, origin_region)
             if scored:

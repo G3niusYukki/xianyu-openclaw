@@ -5293,32 +5293,54 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return []
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
+            if content_length <= 0:
+                return []
             raw_data = self.rfile.read(content_length)
         except Exception:
+            return []
+        if not raw_data:
             return []
 
         from email import policy
         from email.parser import BytesParser
 
-        msg = BytesParser(policy=policy.default).parsebytes(raw_data)
-        items = []
-        for part in msg.walk():
-            if part.get_content_disposition() == "attachment":
-                filename = part.get_filename()
-                if filename:
-                    payload = part.get_payload(decode=True)
-                    items.append((filename, payload) if payload else (filename, b""))
+        # 构造 MIME 外壳，让 parsebytes 可以解析仅 body 的 multipart 数据。
+        if raw_data.lstrip().lower().startswith(b"content-type:"):
+            mime_raw = raw_data
+        else:
+            mime_raw = b"".join(
+                [
+                    f"Content-Type: {content_type}\r\n".encode("utf-8", errors="ignore"),
+                    b"MIME-Version: 1.0\r\n\r\n",
+                    raw_data,
+                ]
+            )
+
+        try:
+            msg = BytesParser(policy=policy.default).parsebytes(mime_raw)
+        except Exception:
+            return []
 
         files: list[tuple[str, bytes]] = []
-        for item in items:
-            if not getattr(item, "filename", None):
+        for part in msg.walk():
+            if part.is_multipart():
                 continue
-            content = item.file.read() if item.file else b""
-            if isinstance(content, str):
-                content = content.encode("utf-8", errors="ignore")
-            if not isinstance(content, (bytes, bytearray)):
+            disposition = str(part.get_content_disposition() or "").strip().lower()
+            if disposition not in {"attachment", "form-data"}:
                 continue
-            files.append((str(item.filename), bytes(content)))
+            filename = part.get_filename()
+            if not filename:
+                continue
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                payload = b""
+            if isinstance(payload, str):
+                payload = payload.encode("utf-8", errors="ignore")
+            if isinstance(payload, bytearray):
+                payload = bytes(payload)
+            if not isinstance(payload, bytes):
+                continue
+            files.append((str(filename), payload))
         return files
 
     def do_GET(self) -> None:

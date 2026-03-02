@@ -850,19 +850,29 @@ class GoofishWsTransport:
                 pass
             self._run_task = None
 
+    async def _wait_event_with_timeout(self, event: asyncio.Event, timeout: float) -> bool:
+        waiter = asyncio.create_task(event.wait())
+        try:
+            await asyncio.wait_for(waiter, timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            if not waiter.done():
+                waiter.cancel()
+                try:
+                    await waiter
+                except asyncio.CancelledError:
+                    pass
+
     async def get_unread_sessions(self, limit: int = 20) -> list[dict[str, Any]]:
         await self.start()
-        if not self._ready.is_set():
-            try:
-                await asyncio.wait_for(self._ready.wait(), timeout=10.0)
-            except asyncio.TimeoutError:
-                return []
+        if not self._ready.is_set() and not await self._wait_event_with_timeout(self._ready, 10.0):
+            return []
 
         if self._queue.empty():
-            try:
-                self._queue_event.clear()
-                await asyncio.wait_for(self._queue_event.wait(), timeout=max(0.05, self.queue_wait_seconds))
-            except asyncio.TimeoutError:
+            self._queue_event.clear()
+            if not await self._wait_event_with_timeout(self._queue_event, max(0.05, self.queue_wait_seconds)):
                 return []
 
         out: list[dict[str, Any]] = []
@@ -882,11 +892,8 @@ class GoofishWsTransport:
 
     async def send_text(self, session_id: str, text: str) -> bool:
         await self.start()
-        if not self._ready.is_set():
-            try:
-                await asyncio.wait_for(self._ready.wait(), timeout=10.0)
-            except asyncio.TimeoutError:
-                return False
+        if not self._ready.is_set() and not await self._wait_event_with_timeout(self._ready, 10.0):
+            return False
 
         if self._ws is None:
             return False

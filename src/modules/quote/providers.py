@@ -157,6 +157,8 @@ class CostTableMarkupQuoteProvider(IQuoteProvider):
             total_fee=round(sale_first + extra_fee, 2),
             eta_minutes=_eta_by_service_level(request.service_level),
             confidence=0.92,
+            source_excel=row.source_file,
+            matched_route=f"{row.origin}-{row.destination}",
             explain={
                 "pricing_profile": self.pricing_profile,
                 "matched_courier": row.courier,

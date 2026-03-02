@@ -235,7 +235,7 @@ class FollowUpEngine:
                     now,
                 ),
             )
-            return int(cur.lastrowcount)
+            return int(cur.rowcount)
 
     def process_session(
         self,
