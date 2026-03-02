@@ -171,13 +171,23 @@ class PriceExecutionService:
         if not job:
             raise ValueError(f"Job not found: {job_id}")
 
+        # CAS 门控：仅允许 pending -> running；其余状态直接幂等回放，避免重入。
         now = self._now()
         with self._connect() as conn:
-            conn.execute(
-                "UPDATE price_update_jobs SET status='running', attempts=attempts+1, updated_at=? WHERE id=?",
+            cur = conn.execute(
+                """
+                UPDATE price_update_jobs
+                SET status='running', attempts=attempts+1, updated_at=?
+                WHERE id=? AND status='pending'
+                """,
                 (now, int(job_id)),
             )
-            self._append_event(conn, job_id=int(job_id), event_type="execution_started", status="running")
+            claimed = int(cur.rowcount or 0) > 0
+            if claimed:
+                self._append_event(conn, job_id=int(job_id), event_type="execution_started", status="running")
+
+        if not claimed:
+            return self.replay_job(job_id)
 
         try:
             result = await operations_service.update_price(
