@@ -7,15 +7,11 @@ import hashlib
 import json
 import sqlite3
 import time
-from collections.abc import Iterator
-from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
-from src.core.cookie_health import CookieHealthChecker
 
 from src.core.config import get_config
 from src.core.logger import get_logger
@@ -82,6 +78,7 @@ class WorkflowJob:
     stage: str
     payload: dict[str, Any]
     attempts: int
+    lease_until: str | None = None
 
 
 class WorkflowStore:
@@ -104,13 +101,11 @@ class WorkflowStore:
     def _ts_after(seconds: int) -> str:
         return (datetime.now(UTC) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        with closing(sqlite3.connect(self.db_path)) as conn, conn:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=5000")
-            yield conn
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 3000")
+        return conn
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
@@ -401,6 +396,7 @@ class WorkflowStore:
         lease_until = self._ts_after(lease_seconds)
 
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 """
                 SELECT * FROM workflow_jobs
@@ -413,10 +409,16 @@ class WorkflowStore:
 
             jobs: list[WorkflowJob] = []
             for row in rows:
-                conn.execute(
-                    "UPDATE workflow_jobs SET status='running', lease_until=?, updated_at=? WHERE id=?",
-                    (lease_until, now, int(row["id"])),
+                cur = conn.execute(
+                    """
+                    UPDATE workflow_jobs
+                    SET status='running', lease_until=?, updated_at=?
+                    WHERE id=? AND status='pending' AND next_run_at <= ?
+                    """,
+                    (lease_until, now, int(row["id"]), now),
                 )
+                if cur.rowcount <= 0:
+                    continue
                 jobs.append(
                     WorkflowJob(
                         id=int(row["id"]),
@@ -424,43 +426,93 @@ class WorkflowStore:
                         stage=str(row["stage"]),
                         payload=json.loads(str(row["payload_json"])),
                         attempts=int(row["attempts"]),
+                        lease_until=lease_until,
                     )
                 )
             return jobs
 
-    def complete_job(self, job_id: int) -> None:
+    def complete_job(self, job_id: int, expected_lease_until: str | None = None) -> bool:
         now = self._now()
         with self._connect() as conn:
-            conn.execute(
-                "UPDATE workflow_jobs SET status='done', lease_until=NULL, updated_at=? WHERE id=?",
-                (now, job_id),
-            )
-
-    def fail_job(self, job_id: int, error: str, max_attempts: int, base_backoff_seconds: int) -> None:
-        now = self._now()
-        with self._connect() as conn:
-            row = conn.execute("SELECT attempts FROM workflow_jobs WHERE id=?", (job_id,)).fetchone()
-            attempts = int(row["attempts"]) + 1 if row else 1
-            if attempts >= max_attempts:
-                conn.execute(
+            if expected_lease_until:
+                cur = conn.execute(
                     """
                     UPDATE workflow_jobs
-                    SET status='dead', attempts=?, lease_until=NULL, last_error=?, updated_at=?
-                    WHERE id=?
+                    SET status='done', lease_until=NULL, updated_at=?
+                    WHERE id=? AND status='running' AND lease_until=?
                     """,
-                    (attempts, error[:500], now, job_id),
+                    (now, job_id, expected_lease_until),
                 )
-                return
+                return cur.rowcount > 0
+
+            cur = conn.execute(
+                "UPDATE workflow_jobs SET status='done', lease_until=NULL, updated_at=? WHERE id=? AND status='running'",
+                (now, job_id),
+            )
+            return cur.rowcount > 0
+
+    def fail_job(
+        self,
+        job_id: int,
+        error: str,
+        max_attempts: int,
+        base_backoff_seconds: int,
+        expected_lease_until: str | None = None,
+    ) -> bool:
+        now = self._now()
+        with self._connect() as conn:
+            if expected_lease_until:
+                row = conn.execute(
+                    "SELECT attempts FROM workflow_jobs WHERE id=? AND status='running' AND lease_until=?",
+                    (job_id, expected_lease_until),
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT attempts FROM workflow_jobs WHERE id=? AND status='running'", (job_id,)).fetchone()
+            if row is None:
+                return False
+
+            attempts = int(row["attempts"]) + 1
+            if attempts >= max_attempts:
+                if expected_lease_until:
+                    cur = conn.execute(
+                        """
+                        UPDATE workflow_jobs
+                        SET status='dead', attempts=?, lease_until=NULL, last_error=?, updated_at=?
+                        WHERE id=? AND status='running' AND lease_until=?
+                        """,
+                        (attempts, error[:500], now, job_id, expected_lease_until),
+                    )
+                else:
+                    cur = conn.execute(
+                        """
+                        UPDATE workflow_jobs
+                        SET status='dead', attempts=?, lease_until=NULL, last_error=?, updated_at=?
+                        WHERE id=? AND status='running'
+                        """,
+                        (attempts, error[:500], now, job_id),
+                    )
+                return cur.rowcount > 0
 
             wait_seconds = int(base_backoff_seconds * (2 ** (attempts - 1)))
-            conn.execute(
-                """
-                UPDATE workflow_jobs
-                SET status='pending', attempts=?, next_run_at=?, lease_until=NULL, last_error=?, updated_at=?
-                WHERE id=?
-                """,
-                (attempts, self._ts_after(wait_seconds), error[:500], now, job_id),
-            )
+            if expected_lease_until:
+                cur = conn.execute(
+                    """
+                    UPDATE workflow_jobs
+                    SET status='pending', attempts=?, next_run_at=?, lease_until=NULL, last_error=?, updated_at=?
+                    WHERE id=? AND status='running' AND lease_until=?
+                    """,
+                    (attempts, self._ts_after(wait_seconds), error[:500], now, job_id, expected_lease_until),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    UPDATE workflow_jobs
+                    SET status='pending', attempts=?, next_run_at=?, lease_until=NULL, last_error=?, updated_at=?
+                    WHERE id=? AND status='running'
+                    """,
+                    (attempts, self._ts_after(wait_seconds), error[:500], now, job_id),
+                )
+            return cur.rowcount > 0
 
     def record_sla_event(
         self,
@@ -622,7 +674,6 @@ class WorkflowWorker:
         self._notifier = notifier
         self._had_active_alert = False
         self._last_heartbeat_ts = 0.0
-        self._cookie_checker: CookieHealthChecker | None = None
 
         notifications_cfg = self.config.get("notifications", {})
         if not isinstance(notifications_cfg, dict):
@@ -644,18 +695,6 @@ class WorkflowWorker:
                     bot_name=str(feishu_cfg.get("bot_name", "闲鱼自动化助手")),
                     timeout_seconds=float(feishu_cfg.get("timeout_seconds", 5.0)),
                 )
-
-        # Cookie 健康监控：复用 notifier 发送告警
-        import os
-
-        cookie_text = os.getenv("XIANYU_COOKIE_1", "")
-        if cookie_text and cookie_text != "your_cookie_here":
-            self._cookie_checker = CookieHealthChecker(
-                cookie_text=cookie_text,
-                check_interval_seconds=300.0,
-                alert_cooldown_seconds=1800.0,
-                notifier=self._notifier,
-            )
 
     async def _send_notification(self, text: str) -> bool:
         if self._notifier is None:
@@ -695,7 +734,7 @@ class WorkflowWorker:
                 session = self.store.get_session(job.session_id)
                 if session and int(session.get("manual_takeover", 0)) == 1:
                     skipped_manual += 1
-                    self.store.complete_job(job.id)
+                    self.store.complete_job(job.id, expected_lease_until=job.lease_until)
                     continue
 
                 start = time.perf_counter()
@@ -737,16 +776,22 @@ class WorkflowWorker:
                     quote_fallback=bool(detail.get("quote_fallback", False)),
                 )
 
-                self.store.complete_job(job.id)
-                success += 1
+                completed = self.store.complete_job(job.id, expected_lease_until=job.lease_until)
+                if completed:
+                    success += 1
+                else:
+                    self.logger.warning(f"workflow complete skipped due to lease mismatch: job_id={job.id}")
             except Exception as exc:
                 failed += 1
-                self.store.fail_job(
+                failed_ok = self.store.fail_job(
                     job_id=job.id,
                     error=str(exc),
                     max_attempts=self.max_attempts,
                     base_backoff_seconds=self.backoff_seconds,
+                    expected_lease_until=job.lease_until,
                 )
+                if not failed_ok:
+                    self.logger.warning(f"workflow fail skipped due to lease mismatch: job_id={job.id}")
 
         alerts = self.store.evaluate_sla_alerts(config=self.sla_config)
         summary = self.store.get_workflow_summary()
@@ -763,14 +808,6 @@ class WorkflowWorker:
             await self._send_notification(text)
             self._had_active_alert = False
 
-        # Cookie 健康探测（非阻塞，有 TTL 缓存）
-        cookie_health: dict[str, Any] = {"healthy": True, "message": "skipped"}
-        if self._cookie_checker is not None:
-            try:
-                cookie_health = await self._cookie_checker.check_async()
-            except Exception as exc:
-                cookie_health = {"healthy": False, "message": f"check_error: {exc}"}
-
         return {
             "action": "auto_workflow",
             "dry_run": dry_run,
@@ -784,7 +821,6 @@ class WorkflowWorker:
             "alerts": alerts,
             "workflow": summary,
             "sla": sla_summary,
-            "cookie_health": cookie_health,
         }
 
     async def run_forever(self, dry_run: bool = False, max_loops: int | None = None) -> dict[str, Any]:

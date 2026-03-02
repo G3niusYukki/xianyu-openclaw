@@ -206,3 +206,56 @@ def test_workflow_worker_init_accepts_non_dict_feishu_config(temp_dir) -> None:
         config={"notifications": {"feishu": "bad-type"}},
     )
     assert worker.notify_on_alert is True
+
+def test_workflow_claim_is_not_reentrant_under_double_claim(temp_dir) -> None:
+    store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
+    session = {"session_id": "s_claim", "last_message": "hello"}
+    assert store.enqueue_job(session) is True
+
+    jobs1 = store.claim_jobs(limit=10, lease_seconds=30)
+    jobs2 = store.claim_jobs(limit=10, lease_seconds=30)
+
+    assert len(jobs1) == 1
+    assert len(jobs2) == 0
+
+
+def test_workflow_complete_and_fail_require_matching_lease(temp_dir) -> None:
+    store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
+    session = {"session_id": "s_lease", "last_message": "hello"}
+    assert store.enqueue_job(session) is True
+
+    jobs = store.claim_jobs(limit=1, lease_seconds=30)
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job.lease_until is not None
+
+    assert store.complete_job(job.id, expected_lease_until="2099-01-01T00:00:00Z") is False
+    assert store.fail_job(
+        job.id,
+        error="should-not-update",
+        max_attempts=3,
+        base_backoff_seconds=0,
+        expected_lease_until="2099-01-01T00:00:00Z",
+    ) is False
+
+    assert store.complete_job(job.id, expected_lease_until=job.lease_until) is True
+    summary = store.get_workflow_summary()
+    assert summary["jobs"].get("done", 0) == 1
+
+
+def test_workflow_fail_is_not_reentrant_after_complete(temp_dir) -> None:
+    store = WorkflowStore(db_path=str(temp_dir / "workflow.db"))
+    session = {"session_id": "s_fail_guard", "last_message": "hello"}
+    assert store.enqueue_job(session) is True
+
+    jobs = store.claim_jobs(limit=1, lease_seconds=30)
+    job = jobs[0]
+    assert store.complete_job(job.id, expected_lease_until=job.lease_until) is True
+
+    assert store.fail_job(
+        job.id,
+        error="late-fail",
+        max_attempts=3,
+        base_backoff_seconds=0,
+        expected_lease_until=job.lease_until,
+    ) is False
