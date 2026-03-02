@@ -78,6 +78,7 @@ class WorkflowJob:
     stage: str
     payload: dict[str, Any]
     attempts: int
+    lease_until: str | None = None
 
 
 class WorkflowStore:
@@ -103,6 +104,7 @@ class WorkflowStore:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 3000")
         return conn
 
     def _init_schema(self) -> None:
@@ -394,6 +396,7 @@ class WorkflowStore:
         lease_until = self._ts_after(lease_seconds)
 
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
                 """
                 SELECT * FROM workflow_jobs
@@ -406,10 +409,16 @@ class WorkflowStore:
 
             jobs: list[WorkflowJob] = []
             for row in rows:
-                conn.execute(
-                    "UPDATE workflow_jobs SET status='running', lease_until=?, updated_at=? WHERE id=?",
-                    (lease_until, now, int(row["id"])),
+                cur = conn.execute(
+                    """
+                    UPDATE workflow_jobs
+                    SET status='running', lease_until=?, updated_at=?
+                    WHERE id=? AND status='pending' AND next_run_at <= ?
+                    """,
+                    (lease_until, now, int(row["id"]), now),
                 )
+                if cur.rowcount <= 0:
+                    continue
                 jobs.append(
                     WorkflowJob(
                         id=int(row["id"]),
@@ -417,43 +426,93 @@ class WorkflowStore:
                         stage=str(row["stage"]),
                         payload=json.loads(str(row["payload_json"])),
                         attempts=int(row["attempts"]),
+                        lease_until=lease_until,
                     )
                 )
             return jobs
 
-    def complete_job(self, job_id: int) -> None:
+    def complete_job(self, job_id: int, expected_lease_until: str | None = None) -> bool:
         now = self._now()
         with self._connect() as conn:
-            conn.execute(
-                "UPDATE workflow_jobs SET status='done', lease_until=NULL, updated_at=? WHERE id=?",
-                (now, job_id),
-            )
-
-    def fail_job(self, job_id: int, error: str, max_attempts: int, base_backoff_seconds: int) -> None:
-        now = self._now()
-        with self._connect() as conn:
-            row = conn.execute("SELECT attempts FROM workflow_jobs WHERE id=?", (job_id,)).fetchone()
-            attempts = int(row["attempts"]) + 1 if row else 1
-            if attempts >= max_attempts:
-                conn.execute(
+            if expected_lease_until:
+                cur = conn.execute(
                     """
                     UPDATE workflow_jobs
-                    SET status='dead', attempts=?, lease_until=NULL, last_error=?, updated_at=?
-                    WHERE id=?
+                    SET status='done', lease_until=NULL, updated_at=?
+                    WHERE id=? AND status='running' AND lease_until=?
                     """,
-                    (attempts, error[:500], now, job_id),
+                    (now, job_id, expected_lease_until),
                 )
-                return
+                return cur.rowcount > 0
+
+            cur = conn.execute(
+                "UPDATE workflow_jobs SET status='done', lease_until=NULL, updated_at=? WHERE id=? AND status='running'",
+                (now, job_id),
+            )
+            return cur.rowcount > 0
+
+    def fail_job(
+        self,
+        job_id: int,
+        error: str,
+        max_attempts: int,
+        base_backoff_seconds: int,
+        expected_lease_until: str | None = None,
+    ) -> bool:
+        now = self._now()
+        with self._connect() as conn:
+            if expected_lease_until:
+                row = conn.execute(
+                    "SELECT attempts FROM workflow_jobs WHERE id=? AND status='running' AND lease_until=?",
+                    (job_id, expected_lease_until),
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT attempts FROM workflow_jobs WHERE id=? AND status='running'", (job_id,)).fetchone()
+            if row is None:
+                return False
+
+            attempts = int(row["attempts"]) + 1
+            if attempts >= max_attempts:
+                if expected_lease_until:
+                    cur = conn.execute(
+                        """
+                        UPDATE workflow_jobs
+                        SET status='dead', attempts=?, lease_until=NULL, last_error=?, updated_at=?
+                        WHERE id=? AND status='running' AND lease_until=?
+                        """,
+                        (attempts, error[:500], now, job_id, expected_lease_until),
+                    )
+                else:
+                    cur = conn.execute(
+                        """
+                        UPDATE workflow_jobs
+                        SET status='dead', attempts=?, lease_until=NULL, last_error=?, updated_at=?
+                        WHERE id=? AND status='running'
+                        """,
+                        (attempts, error[:500], now, job_id),
+                    )
+                return cur.rowcount > 0
 
             wait_seconds = int(base_backoff_seconds * (2 ** (attempts - 1)))
-            conn.execute(
-                """
-                UPDATE workflow_jobs
-                SET status='pending', attempts=?, next_run_at=?, lease_until=NULL, last_error=?, updated_at=?
-                WHERE id=?
-                """,
-                (attempts, self._ts_after(wait_seconds), error[:500], now, job_id),
-            )
+            if expected_lease_until:
+                cur = conn.execute(
+                    """
+                    UPDATE workflow_jobs
+                    SET status='pending', attempts=?, next_run_at=?, lease_until=NULL, last_error=?, updated_at=?
+                    WHERE id=? AND status='running' AND lease_until=?
+                    """,
+                    (attempts, self._ts_after(wait_seconds), error[:500], now, job_id, expected_lease_until),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    UPDATE workflow_jobs
+                    SET status='pending', attempts=?, next_run_at=?, lease_until=NULL, last_error=?, updated_at=?
+                    WHERE id=? AND status='running'
+                    """,
+                    (attempts, self._ts_after(wait_seconds), error[:500], now, job_id),
+                )
+            return cur.rowcount > 0
 
     def record_sla_event(
         self,
@@ -675,7 +734,7 @@ class WorkflowWorker:
                 session = self.store.get_session(job.session_id)
                 if session and int(session.get("manual_takeover", 0)) == 1:
                     skipped_manual += 1
-                    self.store.complete_job(job.id)
+                    self.store.complete_job(job.id, expected_lease_until=job.lease_until)
                     continue
 
                 start = time.perf_counter()
@@ -717,16 +776,22 @@ class WorkflowWorker:
                     quote_fallback=bool(detail.get("quote_fallback", False)),
                 )
 
-                self.store.complete_job(job.id)
-                success += 1
+                completed = self.store.complete_job(job.id, expected_lease_until=job.lease_until)
+                if completed:
+                    success += 1
+                else:
+                    self.logger.warning(f"workflow complete skipped due to lease mismatch: job_id={job.id}")
             except Exception as exc:
                 failed += 1
-                self.store.fail_job(
+                failed_ok = self.store.fail_job(
                     job_id=job.id,
                     error=str(exc),
                     max_attempts=self.max_attempts,
                     base_backoff_seconds=self.backoff_seconds,
+                    expected_lease_until=job.lease_until,
                 )
+                if not failed_ok:
+                    self.logger.warning(f"workflow fail skipped due to lease mismatch: job_id={job.id}")
 
         alerts = self.store.evaluate_sla_alerts(config=self.sla_config)
         summary = self.store.get_workflow_summary()
