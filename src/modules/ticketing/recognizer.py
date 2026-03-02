@@ -80,6 +80,7 @@ class RegexTicketRecognizer(ITicketRecognizer):
             showtime=showtime,
             seat=seat,
             count=count,
+            intent="ticket_booking",
             confidence=confidence,
             raw_text=raw_text,
         )

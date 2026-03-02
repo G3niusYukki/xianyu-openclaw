@@ -14,6 +14,7 @@ class TicketSelection:
     showtime: str
     seat: str
     count: int
+    intent: str = "ticket_booking"
     confidence: float = 0.0
     raw_text: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)

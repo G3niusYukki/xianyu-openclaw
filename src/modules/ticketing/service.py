@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from .models import TicketListingDraft, TicketPurchaseRequest, TicketPurchaseResult, TicketQuote, TicketSelection
 from .pricing import TicketPricingPolicy
 from .providers import ITicketProvider
 from .recognizer import ITicketRecognizer
+from .responder import ITicketTextResponder, RuleBasedTicketResponder
+
+
+@dataclass(slots=True)
+class TicketingDecision:
+    """End-to-end structured output for the two-stage pipeline."""
+
+    selection: TicketSelection
+    quote: TicketQuote
+    reply_text: str
+    needs_manual_review: bool
 
 
 class TicketingService:
@@ -19,10 +31,14 @@ class TicketingService:
         recognizer: ITicketRecognizer,
         provider: ITicketProvider,
         pricing: TicketPricingPolicy | None = None,
+        responder: ITicketTextResponder | None = None,
+        review_confidence_threshold: float = 0.75,
     ) -> None:
         self.recognizer = recognizer
         self.provider = provider
         self.pricing = pricing or TicketPricingPolicy()
+        self.responder = responder or RuleBasedTicketResponder()
+        self.review_confidence_threshold = max(0.0, min(1.0, float(review_confidence_threshold)))
 
     async def recognize(self, image_bytes: bytes, mime_type: str = "image/png") -> TicketSelection:
         return await self.recognizer.recognize(image_bytes, mime_type=mime_type)
@@ -70,6 +86,20 @@ class TicketingService:
         draft = self.build_listing_draft(selection, quote)
         return selection, quote, draft
 
+    def needs_manual_review(self, selection: TicketSelection) -> bool:
+        return float(selection.confidence) < self.review_confidence_threshold
+
+    async def analyze_and_reply(self, image_bytes: bytes, mime_type: str = "image/png") -> TicketingDecision:
+        selection, quote = await self.quote_from_screenshot(image_bytes, mime_type=mime_type)
+        manual_review = self.needs_manual_review(selection)
+        reply_text = await self.responder.compose_pre_sale_reply(selection, quote, manual_review)
+        return TicketingDecision(
+            selection=selection,
+            quote=quote,
+            reply_text=reply_text,
+            needs_manual_review=manual_review,
+        )
+
     async def fulfill_order(
         self,
         *,
@@ -85,3 +115,6 @@ class TicketingService:
             buyer_requirements=dict(buyer_requirements or {}),
         )
         return await self.provider.create_purchase(request)
+
+    async def compose_post_purchase_reply(self, result: TicketPurchaseResult) -> str:
+        return await self.responder.compose_post_purchase_reply(result)
