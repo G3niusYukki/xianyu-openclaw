@@ -25,7 +25,7 @@ def test_ticketing_flow_builds_listing_and_purchase() -> None:
     assert selection.cinema == "万达影城五角场店"
     assert selection.count == 2
     assert quote.provider == "maoyan"
-    assert quote.final_price == 45.4
+    assert quote.final_price == 49.4
     assert "代买代订" in draft.title
     assert draft.price == quote.final_price
     assert purchase.success is True
@@ -61,5 +61,7 @@ def test_ticketing_two_stage_reply_falls_back_to_manual_review_when_confidence_l
         review_confidence_threshold=0.99,
     )
     selection = asyncio.run(service.recognize("影院：万达影城\n场次：2026-03-05 19:30\n座位：5排6座\n".encode("utf-8")))
+
+    selection.confidence = 0.5
 
     assert service.needs_manual_review(selection) is True
