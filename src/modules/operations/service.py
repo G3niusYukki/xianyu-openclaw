@@ -15,6 +15,7 @@ from src.core.config import get_config
 from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
 from src.modules.analytics.service import AnalyticsService
+from src.modules.orders.xianguanjia import XianGuanJiaClient
 
 
 class OperationsSelectors:
@@ -63,7 +64,13 @@ class OperationsService:
     封装店铺日常运营操作，包括擦亮、降价、下架等
     """
 
-    def __init__(self, controller=None, config: dict | None = None, analytics: AnalyticsService | None = None):
+    def __init__(
+        self,
+        controller=None,
+        config: dict | None = None,
+        analytics: AnalyticsService | None = None,
+        price_api_client: XianGuanJiaClient | None = None,
+    ):
         """
         初始化运营服务
 
@@ -77,6 +84,7 @@ class OperationsService:
         self.logger = get_logger()
         self.analytics = analytics
         self.compliance = get_compliance_guard()
+        self.price_api_client = price_api_client or self._build_price_api_client()
 
         browser_config = get_config().browser
         self.delay_range = (
@@ -85,6 +93,64 @@ class OperationsService:
         )
 
         self.selectors = OperationsSelectors()
+
+    def _build_price_api_client(self) -> XianGuanJiaClient | None:
+        cfg = self.config.get("xianguanjia")
+        if not isinstance(cfg, dict):
+            return None
+        if not cfg.get("enabled", False):
+            return None
+
+        app_key = str(cfg.get("app_key", "")).strip()
+        app_secret = str(cfg.get("app_secret", "")).strip()
+        if not app_key or not app_secret:
+            return None
+
+        try:
+            return XianGuanJiaClient(
+                app_key=app_key,
+                app_secret=app_secret,
+                base_url=str(cfg.get("base_url", "https://open.goofish.pro")).strip(),
+                timeout=float(cfg.get("timeout", 30.0)),
+                merchant_id=str(cfg.get("merchant_id", "")).strip() or None,
+                merchant_query_key=str(cfg.get("merchant_query_key", "merchantId")).strip() or "merchantId",
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize XianGuanJia price client: {e}")
+            return None
+
+    @staticmethod
+    def _price_to_minor_units(value: float | int) -> int:
+        return round(float(value) * 100)
+
+    async def _try_update_price_via_api(
+        self, product_id: str, new_price: float, original_price: float | None = None
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        if not self.price_api_client:
+            return None, None
+
+        try:
+            response = await asyncio.to_thread(
+                self.price_api_client.edit_product,
+                product_id=product_id,
+                price=self._price_to_minor_units(new_price),
+                original_price=self._price_to_minor_units(original_price) if original_price is not None else None,
+            )
+        except Exception as e:
+            self.logger.warning(f"XianGuanJia price update failed for {product_id}: {e}")
+            return None, str(e)
+
+        result = {
+            "success": True,
+            "product_id": product_id,
+            "action": "price_update",
+            "old_price": original_price,
+            "new_price": new_price,
+            "channel": "xianguanjia_api",
+            "api_response": response,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        return result, None
 
     def _random_delay(self, min_factor: float = 1.0, max_factor: float = 1.0) -> float:
         """生成随机延迟"""
@@ -272,7 +338,21 @@ class OperationsService:
         """
         self.logger.info(f"Updating price for {product_id}: {original_price} -> {new_price}")
 
+        api_result, api_error = await self._try_update_price_via_api(product_id, new_price, original_price)
+        if api_result is not None:
+            if self.analytics:
+                await self.analytics.log_operation("PRICE_UPDATE", product_id, details=api_result)
+            return api_result
+
         if not self.controller:
+            if api_error:
+                result = self._error_result("price_update", product_id, api_error)
+                result["old_price"] = original_price
+                result["new_price"] = new_price
+                result["channel"] = "xianguanjia_api"
+                if self.analytics:
+                    await self.analytics.log_operation("PRICE_UPDATE", product_id, details=result)
+                return result
             raise BrowserError("Browser controller is not initialized. Cannot update price.")
 
         try:
@@ -299,8 +379,11 @@ class OperationsService:
                 "action": "price_update",
                 "old_price": original_price,
                 "new_price": new_price,
+                "channel": "dom",
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
+            if api_error:
+                result["api_error"] = api_error
 
             if self.analytics:
                 await self.analytics.log_operation("PRICE_UPDATE", product_id, details=result)
