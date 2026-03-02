@@ -41,6 +41,11 @@ except Exception:  # pragma: no cover - optional dependency/runtime environment
     OrderFulfillmentService = None
 
 try:
+    from .orders.xianguanjia import XianGuanJiaClient
+except Exception:  # pragma: no cover - optional dependency/runtime environment
+    XianGuanJiaClient = None
+
+try:
     from .growth.service import GrowthService
 except Exception:  # pragma: no cover - optional dependency/runtime environment
     GrowthService = None
@@ -65,4 +70,5 @@ __all__ = [
     "OperationsService",
     "OrderFulfillmentService",
     "PublishResult",
+    "XianGuanJiaClient",
 ]
