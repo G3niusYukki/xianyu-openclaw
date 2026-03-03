@@ -27,6 +27,9 @@ def _load_setup_wizard():
             wizard_path = Path(meipass) / "src" / "setup_wizard.py"
     spec = importlib.util.spec_from_file_location("setup_wizard", wizard_path)
     mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    # Register in sys.modules BEFORE exec so that `from __future__ import annotations`
+    # + @dataclass can resolve type hints via typing.get_type_hints().
+    sys.modules["setup_wizard"] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 
