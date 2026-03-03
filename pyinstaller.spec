@@ -9,17 +9,16 @@ Build command:
 Output: dist/xianyu-openclaw-launcher/ (onedir mode)
 """
 
-import sys
-import os
+import importlib
 from pathlib import Path
 
 block_cipher = None
 
-ROOT_DIR = Path(__file__).parent
+# SPECPATH is provided by PyInstaller at runtime
+ROOT_DIR = Path(SPECPATH)  # noqa: F821
 SRC_DIR = ROOT_DIR / 'src'
 
 # Locate customtkinter package data
-import importlib
 ctk_spec = importlib.util.find_spec('customtkinter')
 if ctk_spec and ctk_spec.origin:
     CTK_DIR = str(Path(ctk_spec.origin).parent)
