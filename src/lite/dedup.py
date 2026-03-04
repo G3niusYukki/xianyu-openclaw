@@ -56,14 +56,21 @@ class DualLayerDedup:
         return await self._seen_and_mark("content_dedup", digest)
 
     async def _seen_and_mark(self, table: str, digest: str) -> bool:
+        """Atomically mark digest and report whether it was seen before.
+
+        Uses SQLite ``INSERT OR IGNORE`` to avoid read-then-write races under
+        concurrent inserts for the same digest.
+        """
+
         async with aiosqlite.connect(self.db_path) as db:
-            cur = await db.execute(f"SELECT 1 FROM {table} WHERE digest = ? LIMIT 1", (digest,))
-            found = await cur.fetchone()
-            if found:
-                return True
-            await db.execute(f"INSERT INTO {table}(digest, created_at) VALUES (?, ?)", (digest, int(time.time())))
+            cur = await db.execute(
+                f"INSERT OR IGNORE INTO {table}(digest, created_at) VALUES (?, ?)",
+                (digest, int(time.time())),
+            )
             await db.commit()
-            return False
+            # rowcount == 1: inserted now (not seen before)
+            # rowcount == 0: ignored by PK conflict (already seen)
+            return cur.rowcount == 0
 
     async def cleanup(self) -> None:
         """Cleanup expired rows for both dedup layers."""

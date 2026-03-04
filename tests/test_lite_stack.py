@@ -53,6 +53,24 @@ async def test_dedup_init_seen_and_cleanup(tmp_path):
     await dedup.cleanup()
 
 
+@pytest.mark.asyncio
+async def test_dedup_exact_is_atomic_under_100_concurrency(tmp_path):
+    db = tmp_path / "dedup_race.db"
+    dedup = DualLayerDedup(str(db), exact_days=1, content_hours=1)
+    await dedup.init()
+
+    tasks = [dedup.seen_exact("chat", 123, "same-msg") for _ in range(100)]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    exceptions = [r for r in results if isinstance(r, Exception)]
+    assert exceptions == []
+
+    bool_results = [r for r in results if isinstance(r, bool)]
+    # Exactly one first-writer (False), all others are duplicates (True)
+    assert bool_results.count(False) == 1
+    assert bool_results.count(True) == 99
+
+
 def test_msgpack_decoder_variants_and_errors():
     assert MessagePackDecoder(b"\x01").decode() == 1
     assert MessagePackDecoder(b"\xa2hi").decode() == "hi"
