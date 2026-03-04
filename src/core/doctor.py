@@ -29,6 +29,7 @@ _SUGGESTIONS = {
     "Dashboard守护状态": "请使用 `python3 -m src.dashboard_server --port 8091` 或对应 bat 脚本启动面板服务。",
     "消息首响SLA": "建议开启 `messages.fast_reply_enabled=true` 且 `reply_target_seconds<=3`。",
     "自动报价成本源": "请提供成本表（data/quote_costs）或配置 `quote.cost_api_url`。",
+    "报价Mock门禁": "请在配置中设置 `quote.providers.remote.allow_mock=false`，并确认生产环境未通过环境变量覆盖为 true。",
 }
 
 

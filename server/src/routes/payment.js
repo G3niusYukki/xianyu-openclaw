@@ -3,6 +3,7 @@ const router = express.Router();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { auth } = require('../middleware/auth');
 const User = require('../models/User');
+const StripeEvent = require('../models/StripeEvent');
 const { PLAN_CONFIGS } = require('../services/codeReviewService');
 
 const PRICE_IDS = {
@@ -16,7 +17,7 @@ router.post('/create-checkout-session', auth, async (req, res) => {
     const { plan } = req.body;
 
     if (!plan || !PRICE_IDS[plan]) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Invalid plan',
         availablePlans: Object.keys(PRICE_IDS)
       });
@@ -25,7 +26,7 @@ router.post('/create-checkout-session', auth, async (req, res) => {
     const user = req.user;
 
     let customerId = user.stripeCustomerId;
-    
+
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email,
@@ -33,7 +34,7 @@ router.post('/create-checkout-session', auth, async (req, res) => {
           userId: user.id
         }
       });
-      
+
       customerId = customer.id;
       await user.update({ stripeCustomerId: customerId });
     }
@@ -56,7 +57,7 @@ router.post('/create-checkout-session', auth, async (req, res) => {
       }
     });
 
-    res.json({ 
+    res.json({
       sessionId: session.id,
       url: session.url
     });
@@ -66,13 +67,14 @@ router.post('/create-checkout-session', auth, async (req, res) => {
   }
 });
 
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
+    const payload = req.rawBody || req.body;
     event = stripe.webhooks.constructEvent(
-      req.body,
+      payload,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
@@ -82,13 +84,27 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   }
 
   try {
+    await StripeEvent.create({
+      eventId: event.id,
+      eventType: event.type
+    });
+  } catch (error) {
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(200).json({ received: true, duplicate: true });
+    }
+
+    console.error('Webhook idempotency error:', error);
+    return res.status(500).json({ error: 'Webhook idempotency check failed' });
+  }
+
+  try {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
         const { userId, plan } = session.metadata;
-        
+
         const user = await User.findByPk(userId);
-        if (user) {
+        if (user && PLAN_CONFIGS[plan]) {
           await user.update({
             plan: plan,
             reviewsLimit: PLAN_CONFIGS[plan].limit,
@@ -104,11 +120,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       case 'customer.subscription.updated': {
         const subscription = event.data.object;
         const customerId = subscription.customer;
-        
+
         const user = await User.findOne({
           where: { stripeCustomerId: customerId }
         });
-        
+
         if (user) {
           await user.update({
             subscriptionStatus: subscription.status,
@@ -121,11 +137,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       case 'customer.subscription.deleted': {
         const subscription = event.data.object;
         const customerId = subscription.customer;
-        
+
         const user = await User.findOne({
           where: { stripeCustomerId: customerId }
         });
-        
+
         if (user) {
           await user.update({
             plan: 'free',
@@ -140,11 +156,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
         const customerId = invoice.customer;
-        
+
         const user = await User.findOne({
           where: { stripeCustomerId: customerId }
         });
-        
+
         if (user) {
           await user.update({
             subscriptionStatus: 'past_due'
@@ -164,7 +180,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 router.post('/create-portal-session', auth, async (req, res) => {
   try {
     const user = req.user;
-    
+
     if (!user.stripeCustomerId) {
       return res.status(400).json({ error: 'No subscription found' });
     }
@@ -221,7 +237,7 @@ function getPlanFeatures(plan) {
       'Custom integrations'
     ]
   };
-  
+
   return features[plan] || [];
 }
 

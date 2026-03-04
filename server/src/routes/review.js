@@ -1,42 +1,72 @@
 const express = require('express');
 const router = express.Router();
-const { auth, checkReviewLimit } = require('../middleware/auth');
+const { auth } = require('../middleware/auth');
+const { Op, literal } = require('sequelize');
+const sequelize = require('../config/database');
 const Review = require('../models/Review');
 const User = require('../models/User');
 const { reviewCode } = require('../services/codeReviewService');
 const multer = require('multer');
 
-const upload = multer({ 
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-router.post('/analyze', auth, checkReviewLimit, async (req, res) => {
+router.post('/analyze', auth, async (req, res) => {
   try {
     const { code, language, fileName, repository, branch } = req.body;
 
     if (!code || !language) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Missing required fields',
         required: ['code', 'language']
       });
     }
 
     if (code.length > 100000) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Code too large',
         maxSize: '100KB'
       });
     }
 
-    const review = await Review.create({
-      userId: req.user.id,
-      codeContent: code,
-      language,
-      fileName,
-      repository,
-      branch,
-      status: 'processing'
+    let review;
+
+    await sequelize.transaction(async (transaction) => {
+      const [affectedRows] = await User.update(
+        { reviewsUsed: literal('"reviewsUsed" + 1') },
+        {
+          where: {
+            id: req.user.id,
+            reviewsUsed: { [Op.lt]: literal('"reviewsLimit"') }
+          },
+          transaction
+        }
+      );
+
+      if (affectedRows !== 1) {
+        const freshUser = await User.findByPk(req.user.id, { transaction });
+        const error = new Error('REVIEW_LIMIT_EXCEEDED');
+        error.statusCode = 403;
+        error.payload = {
+          error: 'Review limit exceeded',
+          message: 'You have reached your monthly review limit. Please upgrade your plan.',
+          limit: freshUser?.reviewsLimit,
+          used: freshUser?.reviewsUsed
+        };
+        throw error;
+      }
+
+      review = await Review.create({
+        userId: req.user.id,
+        codeContent: code,
+        language,
+        fileName,
+        repository,
+        branch,
+        status: 'processing'
+      }, { transaction });
     });
 
     reviewCode(code, language, { language: req.user.language })
@@ -51,14 +81,20 @@ router.post('/analyze', auth, checkReviewLimit, async (req, res) => {
           bestPracticeIssues: result.bestPracticeIssues,
           processingTime: result.processingTime
         });
-
-        await req.user.increment('reviewsUsed');
       })
       .catch(async (error) => {
         console.error('Review processing error:', error);
         await review.update({
           status: 'failed',
           errorMessage: error.message
+        });
+
+        await User.decrement('reviewsUsed', {
+          by: 1,
+          where: {
+            id: req.user.id,
+            reviewsUsed: { [Op.gt]: 0 }
+          }
         });
       });
 
@@ -68,6 +104,10 @@ router.post('/analyze', auth, checkReviewLimit, async (req, res) => {
       status: 'processing'
     });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json(error.payload);
+    }
+
     console.error('Create review error:', error);
     res.status(500).json({ error: 'Failed to create review' });
   }

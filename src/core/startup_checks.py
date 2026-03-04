@@ -170,6 +170,63 @@ def check_lite_browser_dependency() -> StartupCheckResult:
         )
 
 
+def _is_production_env() -> bool:
+    env_keys = ("OPENCLAW_ENV", "APP_ENV", "ENV", "PYTHON_ENV")
+    for key in env_keys:
+        value = str(os.getenv(key, "")).strip().lower()
+        if value in {"prod", "production"}:
+            return True
+
+    try:
+        from src.core.config import get_config
+
+        runtime = str(get_config().get("app.runtime", "")).strip().lower()
+        if runtime == "pro":
+            return True
+    except Exception:
+        pass
+
+    return resolve_runtime_mode() == "pro"
+
+
+def check_quote_remote_mock_guard() -> StartupCheckResult:
+    """门禁：生产环境下必须禁用 remote mock。"""
+    try:
+        from src.core.config import get_config
+
+        quote_cfg = get_config().get_section("quote", {})
+        providers = quote_cfg.get("providers", {}) if isinstance(quote_cfg, dict) else {}
+        remote = providers.get("remote", {}) if isinstance(providers, dict) else {}
+        allow_mock = bool(remote.get("allow_mock", False))
+
+        is_prod = _is_production_env()
+        if is_prod and allow_mock:
+            return StartupCheckResult(
+                "报价Mock门禁",
+                False,
+                "生产环境检测到 quote.providers.remote.allow_mock=true，已触发阻断",
+                critical=True,
+            )
+
+        if allow_mock:
+            return StartupCheckResult(
+                "报价Mock门禁",
+                False,
+                "非生产环境检测到 quote.providers.remote.allow_mock=true，请仅用于联调并在上线前关闭",
+                critical=False,
+            )
+
+        env_label = "production" if is_prod else "non-production"
+        return StartupCheckResult(
+            "报价Mock门禁",
+            True,
+            f"allow_mock=false（{env_label}）",
+            critical=True if is_prod else False,
+        )
+    except Exception as e:
+        return StartupCheckResult("报价Mock门禁", False, f"检查失败: {e}", critical=True)
+
+
 def run_all_checks(skip_browser: bool = False) -> list[StartupCheckResult]:
     """运行所有启动检查"""
     runtime = resolve_runtime_mode()
@@ -181,6 +238,7 @@ def run_all_checks(skip_browser: bool = False) -> list[StartupCheckResult]:
         check_ai_config(),
         check_cookies_configured(),
         check_cookie_expiration(),
+        check_quote_remote_mock_guard(),
     ]
 
     if skip_browser:

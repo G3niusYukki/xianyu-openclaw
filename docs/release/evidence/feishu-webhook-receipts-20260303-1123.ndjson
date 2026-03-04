@@ -1,0 +1,4 @@
+{"ts": "2026-03-03T11:34:06.131807", "path": "/open-apis/bot/v2/hook/mock-1123", "payload": {"msg_type": "text", "content": {"text": "【闲鱼自动化】Workflow Worker 已启动\npoll_interval=1.0s\ndry_run=True"}}}
+{"ts": "2026-03-03T11:34:16.170417", "path": "/open-apis/bot/v2/hook/mock-1123", "payload": {"msg_type": "text", "content": {"text": "【闲鱼自动化】SLA 告警 x1\n- 报价成功率低于阈值: 当前=0.0, 阈值=0.98\n首响P95=0ms, 报价成功率=0.0, 回退率=0.0\njobs={'done': 41}, states={'QUOTED': 3, 'REPLIED': 8}"}}}
+{"ts": "2026-03-03T11:34:27.200153", "path": "/open-apis/bot/v2/hook/mock-1123", "payload": {"msg_type": "text", "content": {"text": "【闲鱼自动化】告警恢复\n当前首响P95=0ms, 报价成功率=0.0, 回退率=0.0\njobs={'done': 41}, states={'QUOTED': 3, 'REPLIED': 8}"}}}
+{"ts": "2026-03-03T11:35:11.241941", "path": "/open-apis/bot/v2/hook/mock-1123", "payload": {"msg_type": "text", "content": {"text": "【闲鱼自动化】心跳 loops=6\nunread=0, enqueued=0, claimed=0, success=0, failed=0\n首响P95=0ms, 报价成功率=0.0\nstates={'QUOTED': 3, 'REPLIED': 8}"}}}

@@ -38,6 +38,7 @@ class OrderFulfillmentService:
     _RAW_STATUS_KEYS = ("raw_status", "status", "order_status", "orderStatus", "trade_status", "tradeStatus")
     _SESSION_ID_KEYS = ("session_id", "sessionId", "chat_id", "chatId", "biz_id", "bizId")
     _ITEM_TYPE_KEYS = ("item_type", "itemType", "goods_type", "goodsType")
+    _EXTERNAL_EVENT_ID_KEYS = ("external_event_id", "externalEventId", "event_id", "eventId")
 
     def __init__(
         self,
@@ -88,6 +89,13 @@ class OrderFulfillmentService:
 
                 CREATE INDEX IF NOT EXISTS idx_order_events_order_time
                 ON order_events(order_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS order_callback_dedup (
+                    external_event_id TEXT PRIMARY KEY,
+                    order_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -363,6 +371,28 @@ class OrderFulfillmentService:
             "delivery": detail,
         }
 
+    def _register_callback_event(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        order_id: str,
+        external_event_id: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        event_id = str(external_event_id or "").strip()
+        if not event_id:
+            return True
+
+        cur = conn.execute(
+            """
+            INSERT INTO order_callback_dedup(external_event_id, order_id, payload_json, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(external_event_id) DO NOTHING
+            """,
+            (event_id, order_id, json.dumps(payload or {}, ensure_ascii=False), self._now()),
+        )
+        return cur.rowcount > 0
+
     def process_callback(
         self,
         payload: dict[str, Any],
@@ -376,6 +406,7 @@ class OrderFulfillmentService:
             raise ValueError("Missing order_id in callback payload")
 
         raw_status = self._pick_first(data, self._RAW_STATUS_KEYS, default="待处理")
+        external_event_id = self._pick_first(data, self._EXTERNAL_EVENT_ID_KEYS)
         session_id = self._pick_first(data, self._SESSION_ID_KEYS)
         quote_snapshot = data.get("quote_snapshot")
         if not isinstance(quote_snapshot, dict):
@@ -388,6 +419,25 @@ class OrderFulfillmentService:
             quote_snapshot["shipping_info"] = dict(shipping_info)
 
         item_type = self._normalize_item_type(self._pick_first(data, self._ITEM_TYPE_KEYS), shipping_info)
+        with self._connect() as conn:
+            registered = self._register_callback_event(
+                conn,
+                order_id=order_id,
+                external_event_id=external_event_id,
+                payload=data,
+            )
+
+        if external_event_id and not registered:
+            existing = self.get_order(order_id)
+            return {
+                "success": True,
+                "duplicate": True,
+                "external_event_id": external_event_id,
+                "order": existing,
+                "auto_delivery_triggered": False,
+                "delivery": None,
+            }
+
         order = self.upsert_order(
             order_id=order_id,
             raw_status=raw_status,
@@ -404,6 +454,8 @@ class OrderFulfillmentService:
 
         return {
             "success": True,
+            "duplicate": False,
+            "external_event_id": external_event_id,
             "order": order,
             "auto_delivery_triggered": bool(delivery),
             "delivery": delivery,

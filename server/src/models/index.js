@@ -1,6 +1,7 @@
 const User = require('./User');
 const Review = require('./Review');
 const { Team, TeamMember } = require('./Team');
+const StripeEvent = require('./StripeEvent');
 
 User.hasMany(Review, {
   foreignKey: 'userId',
@@ -39,5 +40,6 @@ module.exports = {
   User,
   Review,
   Team,
-  TeamMember
+  TeamMember,
+  StripeEvent
 };
