@@ -1,149 +1,123 @@
 @echo off
-:: 先保存当前代码页，然后设置UTF-8
-for /f "tokens=2 delims=:" %%a in ('chcp') do set "OLD_CP=%%a"
-chcp 65001 >nul 2>&1
-setlocal EnableDelayedExpansion
+setlocal enabledelayedexpansion
 
-:: ========================================
-:: 闲鱼自动化 - 独立运行版入口
-:: 完全脱离Docker和OpenClaw Gateway
-:: ========================================
+:: ===========================================
+:: Xianyu Automation - Windows Standalone
+:: ===========================================
 
-set "PROJECT_DIR=%~dp0"
-cd /d "%PROJECT_DIR%"
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%"
 
-:: 如果没有参数，显示交互式菜单
-if "%~1"=="" goto :WELCOME
+:: If no arguments, show interactive menu
+if "%~1"=="" goto :MAIN_MENU
 
-:: 解析命令
-set "COMMAND=%~1"
+:: Parse command
+set "CMD=%~1"
 shift
 
-if /I "!COMMAND!"=="setup" goto :SETUP
-if /I "!COMMAND!"=="install" goto :SETUP
-if /I "!COMMAND!"=="config" goto :CONFIG
-if /I "!COMMAND!"=="start" goto :START
-if /I "!COMMAND!"=="stop" goto :STOP
-if /I "!COMMAND!"=="restart" goto :RESTART
-if /I "!COMMAND!"=="status" goto :STATUS
-if /I "!COMMAND!"=="logs" goto :LOGS
-if /I "!COMMAND!"=="doctor" goto :DOCTOR
-if /I "!COMMAND!"=="menu" goto :MENU
-if /I "!COMMAND!"=="dashboard" goto :DASHBOARD
-if /I "!COMMAND!"=="presales" goto :START_PRESALES
-if /I "!COMMAND!"=="operations" goto :START_OPERATIONS
-if /I "!COMMAND!"=="aftersales" goto :START_AFTERSALES
+if /i "!CMD!"=="setup" goto :DO_SETUP
+if /i "!CMD!"=="install" goto :DO_SETUP
+if /i "!CMD!"=="config" goto :DO_CONFIG
+if /i "!CMD!"=="start" goto :DO_START
+if /i "!CMD!"=="stop" goto :DO_STOP
+if /i "!CMD!"=="status" goto :DO_STATUS
+if /i "!CMD!"=="logs" goto :DO_LOGS
+if /i "!CMD!"=="menu" goto :DO_MENU
+if /i "!CMD!"=="help" goto :DO_HELP
+if /i "!CMD!"=="-h" goto :DO_HELP
+if /i "!CMD!"=="--help" goto :DO_HELP
+goto :DO_HELP
 
-goto :HELP
+:: ===========================================
+:: Interactive Menu
+:: ===========================================
 
-:: ========================================
-:: 命令实现
-:: ========================================
-
-:WELCOME
+:MAIN_MENU
 cls
 echo.
 echo ===========================================
-echo    闲鱼自动化 - Windows独立版
+echo    Xianyu Automation - Main Menu
 echo ===========================================
 echo.
-echo 欢迎使用！请选择操作：
-echo.
-echo  [1] 首次部署 - 初始化环境
-echo  [2] 配置向导 - 设置AI Key和Cookie
-echo  [3] 启动服务 - 运行自动化模块
-echo  [4] 管理菜单 - 查看状态/日志/停止
-echo  [5] 帮助信息 - 查看所有命令
-echo  [0] 退出
+echo  [1] First Time Setup
+echo  [2] Configuration Wizard
+echo  [3] Start Services
+echo  [4] Management Menu
+echo  [5] Help
+echo  [0] Exit
 echo.
 echo ===========================================
-set /p choice="请输入选项 (0-5): "
+set /p choice="Select option (0-5): "
 
-if "!choice!"=="1" goto :SETUP
-if "!choice!"=="2" goto :CONFIG
-if "!choice!"=="3" goto :START_MENU
-if "!choice!"=="4" goto :MENU
-if "!choice!"=="5" goto :HELP
+if "!choice!"=="1" goto :DO_SETUP
+if "!choice!"=="2" goto :DO_CONFIG
+if "!choice!"=="3" goto :START_SUBMENU
+if "!choice!"=="4" goto :DO_MENU
+if "!choice!"=="5" goto :DO_HELP
 if "!choice!"=="0" exit /b 0
-goto :WELCOME
+goto :MAIN_MENU
 
-:START_MENU
+:START_SUBMENU
 cls
 echo.
 echo ===========================================
-echo    启动服务
+echo    Start Services
 echo ===========================================
 echo.
-echo  [1] 启动所有模块（售前+运营+售后）
-echo  [2] 仅启动售前模块（自动回复）
-echo  [3] 仅启动运营模块（擦亮/改价）
-echo  [4] 仅启动售后模块（发货处理）
-echo  [0] 返回主菜单
+echo  [1] Start All Modules
+ echo  [2] Start Presales Only
+echo  [3] Start Operations Only
+echo  [4] Start Aftersales Only
+echo  [0] Back to Main Menu
 echo.
-set /p start_choice="请输入选项 (0-4): "
+set /p start_choice="Select option (0-4): "
 
 if "!start_choice!"=="1" (
     call scripts\windows\start_module.bat presales daemon
     call scripts\windows\start_module.bat operations daemon
     call scripts\windows\start_module.bat aftersales daemon
-    pause
+    echo.
+    echo Press any key to continue...
+    pause >nul
 )
-if "!start_choice!"=="2" call scripts\windows\start_module.bat presales daemon ^& pause
-if "!start_choice!"=="3" call scripts\windows\start_module.bat operations daemon ^& pause
-if "!start_choice!"=="4" call scripts\windows\start_module.bat aftersales daemon ^& pause
-if "!start_choice!"=="0" goto :WELCOME
-goto :WELCOME
+if "!start_choice!"=="2" (
+    call scripts\windows\start_module.bat presales daemon
+    echo.
+    echo Press any key to continue...
+    pause >nul
+)
+if "!start_choice!"=="3" (
+    call scripts\windows\start_module.bat operations daemon
+    echo.
+    echo Press any key to continue...
+    pause >nul
+)
+if "!start_choice!"=="4" (
+    call scripts\windows\start_module.bat aftersales daemon
+    echo.
+    echo Press any key to continue...
+    pause >nul
+)
+if "!start_choice!"=="0" goto :MAIN_MENU
+goto :MAIN_MENU
 
-:HELP
-echo.
-echo ===========================================
-echo    闲鱼自动化 - 命令行工具
-echo ===========================================
-echo.
-echo 用法: xianyu [命令] [选项]
-echo.
-echo 部署命令:
-echo   setup, install    初始化环境（首次运行）
-echo   config            运行配置向导
-echo.
-echo 模块命令:
-echo   start [模块]      启动模块（presales/operations/aftersales/all）
-echo   stop [模块]       停止模块
-echo   restart [模块]    重启模块
-echo   presales          快捷启动售前模块
-echo   operations        快捷启动运营模块
-echo   aftersales        快捷启动售后模块
-echo.
-echo 管理命令:
-echo   status            查看运行状态
-echo   logs [模块]       查看日志
-echo   doctor            系统诊断
-echo   menu              打开交互菜单
-echo   dashboard         启动网页管理面板
-echo.
-echo 示例:
-echo   xianyu setup                    # 首次部署
-echo   xianyu start all                # 启动所有模块
-echo   xianyu start presales           # 仅启动售前
-echo   xianyu status                   # 查看状态
-echo   xianyu logs presales            # 查看售前日志
-echo.
-pause
-goto :WELCOME
+:: ===========================================
+:: Commands
+:: ===========================================
 
-:SETUP
+:DO_SETUP
 call scripts\windows\install.bat
 exit /b %ERRORLEVEL%
 
-:CONFIG
+:DO_CONFIG
 call scripts\windows\simple_config.bat
 exit /b %ERRORLEVEL%
 
-:START
+:DO_START
 set "MODULE=%~1"
 if "!MODULE!"=="" set "MODULE=all"
-if /I "!MODULE!"=="all" (
-    echo [*] 启动所有模块...
+if /i "!MODULE!"=="all" (
+    echo Starting all modules...
     call scripts\windows\start_module.bat presales daemon
     call scripts\windows\start_module.bat operations daemon
     call scripts\windows\start_module.bat aftersales daemon
@@ -152,55 +126,49 @@ if /I "!MODULE!"=="all" (
 )
 exit /b %ERRORLEVEL%
 
-:START_PRESALES
-call scripts\windows\start_module.bat presales daemon
-exit /b %ERRORLEVEL%
-
-:START_OPERATIONS
-call scripts\windows\start_module.bat operations daemon
-exit /b %ERRORLEVEL%
-
-:START_AFTERSALES
-call scripts\windows\start_module.bat aftersales daemon
-exit /b %ERRORLEVEL%
-
-:STOP
+:DO_STOP
 set "MODULE=%~1"
 if "!MODULE!"=="" set "MODULE=all"
 call scripts\windows\stop_module.bat !MODULE!
 exit /b %ERRORLEVEL%
 
-:RESTART
-set "MODULE=%~1"
-if "!MODULE!"=="" set "MODULE=all"
-call scripts\windows\stop_module.bat !MODULE!
-timeout /t 2 /nobreak >nul
-call :START !MODULE!
-exit /b %ERRORLEVEL%
-
-:STATUS
+:DO_STATUS
 call scripts\windows\status.bat
 exit /b %ERRORLEVEL%
 
-:LOGS
+:DO_LOGS
 set "MODULE=%~1"
 call scripts\windows\view_logs.bat !MODULE!
 exit /b %ERRORLEVEL%
 
-:DOCTOR
-.venv\Scripts\python -m src.cli doctor --strict
-pause
-exit /b %ERRORLEVEL%
-
-:MENU
+:DO_MENU
 call scripts\windows\menu.bat
 exit /b %ERRORLEVEL%
 
-:DASHBOARD
-echo [*] 启动Dashboard...
-echo    访问地址: http://localhost:8091
-echo    按Ctrl+C停止
+:DO_HELP
 echo.
-start "" http://localhost:8091
-.venv\Scripts\python -m src.dashboard_server --port 8091
-exit /b %ERRORLEVEL%
+echo ===========================================
+echo    Xianyu Automation - Help
+echo ===========================================
+echo.
+echo Usage: xianyu [command] [options]
+echo.
+echo Commands:
+echo   setup             First time setup
+echo   config            Configuration wizard
+echo   start [module]    Start modules (presales/operations/aftersales/all)
+echo   stop [module]     Stop modules
+echo   status            Check status
+echo   logs [module]     View logs
+echo   menu              Interactive menu
+echo.
+echo Examples:
+echo   xianyu setup                    # First setup
+echo   xianyu start all                # Start all
+echo   xianyu start presales           # Start presales only
+echo   xianyu status                   # Check status
+echo.
+echo Press any key to continue...
+pause >nul
+if "%~1"=="" goto :MAIN_MENU
+exit /b 0

@@ -1,104 +1,100 @@
 @echo off
-:: 保存当前代码页并设置UTF-8
-for /f "tokens=2 delims=:" %%a in ('chcp') do set "OLD_CP=%%a"
-chcp 65001 >nul 2>&1
-title 闲鱼自动化 - 一键部署
-color 0B
+setlocal enabledelayedexpansion
 
-:: ========================================
-:: 闲鱼自动化 - Windows一键部署脚本
-:: 完全脱离Docker和OpenClaw Gateway
-:: ========================================
+:: ===========================================
+:: Xianyu Automation - One-Click Deploy
+:: ===========================================
 
 set "PROJECT_DIR=%~dp0"
 cd /d "%PROJECT_DIR%"
 
 echo.
 echo ===========================================
-echo    闲鱼自动化 - Windows一键部署
+echo    Xianyu Automation - Setup
 echo ===========================================
 echo.
 
-:: 检查是否已部署
+:: Check if already deployed
 if exist "%PROJECT_DIR%\.venv\Scripts\python.exe" (
-    echo [✓] 检测到已部署环境
+    echo [OK] Environment already deployed
     goto :CHECK_CONFIG
 )
 
-echo [*] 开始首次部署...
+echo [*] Starting first-time setup...
 echo.
 
-:: 检查Python
+:: Check Python
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [!] 未检测到Python，请先安装Python 3.10+
-    echo     下载地址: https://www.python.org/downloads/
-    echo     安装时请勾选 "Add Python to PATH"
+    echo [ERROR] Python not found.
+    echo Please install Python 3.10+ from https://python.org
+    echo Make sure to check "Add Python to PATH"
     pause
     exit /b 1
 )
 
-for /f "tokens=*" %%a in ('python --version 2^>^&1') do set PYTHON_VERSION=%%a
-echo [✓] 检测到 %PYTHON_VERSION%
+for /f "tokens=*" %%a in ('python --version 2^>^&1') do set "PYTHON_VER=%%a"
+echo [OK] Found %PYTHON_VER%
 
-:: 创建虚拟环境
+:: Create virtual environment
 echo.
-echo [*] 创建Python虚拟环境...
+echo [*] Creating virtual environment...
 python -m venv .venv
 if errorlevel 1 (
-    echo [!] 创建虚拟环境失败
+    echo [ERROR] Failed to create virtual environment
     pause
     exit /b 1
 )
-echo [✓] 虚拟环境创建成功
+echo [OK] Virtual environment created
 
-:: 安装依赖
+:: Install dependencies
 echo.
-echo [*] 安装依赖包（可能需要几分钟）...
+echo [*] Installing dependencies (this may take a few minutes)...
 .venv\Scripts\pip install -r requirements.txt -q
 if errorlevel 1 (
-    echo [!] 依赖安装失败，尝试升级pip后重试...
+    echo [ERROR] Failed to install dependencies
+    echo Retrying with updated pip...
     .venv\Scripts\python -m pip install --upgrade pip -q
     .venv\Scripts\pip install -r requirements.txt
     if errorlevel 1 (
-        echo [!] 依赖安装失败，请检查网络连接
+        echo [ERROR] Installation failed
         pause
         exit /b 1
     )
 )
-echo [✓] 依赖安装完成
+echo [OK] Dependencies installed
 
-:: 创建必要目录
+:: Create directories
 echo.
-echo [*] 创建数据目录...
+echo [*] Creating directories...
 mkdir data 2>nul
 mkdir logs 2>nul
 mkdir config 2>nul
-echo [✓] 目录创建完成
+echo [OK] Directories created
 
 :CHECK_CONFIG
-:: 检查配置文件
+:: Check config file
 if not exist "%PROJECT_DIR%\.env" (
     echo.
-    echo [!] 未检测到配置文件，需要创建
+    echo [INFO] No configuration found
     echo.
     goto :CREATE_CONFIG
 )
 
-echo [✓] 检测到配置文件
+echo [OK] Configuration found
 
 echo.
 echo ===========================================
-echo    部署完成！
+echo    Setup Complete!
 echo ===========================================
 echo.
-echo 请选择操作:
+echo Select action:
 echo.
-echo  [1] 启动主菜单
-echo  [2] 重新配置
-echo  [3] 退出
+echo  [1] Start Main Menu
+echo  [2] Reconfigure
+echo  [3] Exit
 echo.
-set /p choice="请输入选项 (1-3): "
+set /p choice="Select (1-3): "
 
 if "%choice%"=="1" goto :START_MENU
 if "%choice%"=="2" goto :CREATE_CONFIG
@@ -107,7 +103,7 @@ exit /b 0
 :CREATE_CONFIG
 call scripts\windows\simple_config.bat
 if errorlevel 1 (
-    echo [!] 配置创建失败
+    echo [ERROR] Configuration failed
     pause
     exit /b 1
 )
