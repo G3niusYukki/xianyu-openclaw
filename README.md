@@ -57,6 +57,24 @@
 
 ---
 
+## 6.2.0 更新摘要（2026-03-04）
+
+- **报价 Mock 门禁（生产保护）**：
+  - `doctor --strict` / 启动检查新增 gate，生产环境若检测到 `quote.providers.remote.allow_mock=true` 将直接阻断启动
+  - 确保生产环境不会误用 mock 报价数据
+- **订单回调幂等（external_event_id）**：
+  - 回调支持按 `external_event_id` 去重，重复推送可安全回放
+  - 新增迁移 `database/migrations/20260304_add_order_callback_dedup.sql`
+  - 新增回放脚本 `scripts/replay_external_event_id.py`
+- **并发加固**：
+  - 改价执行 `PriceExecutionService` 使用 CAS 门控避免重复执行
+  - Workflow claim/complete/fail 增加 CAS gate，减少并发重入/竞态
+  - Lite 去重写入改为原子插入，避免并发 unique 竞态
+- **发布证据包**：
+  - 新增 `docs/release/evidence/` 发布门禁证据包
+  - 新增 `docs/reviews/xianyu-deep-audit-2026-03-03/` 架构审计文档
+  - 新增 `docs/qa/minimal-e2e-gate-template.md` 最小E2E闭环模板
+
 ## 6.1.0 更新摘要（2026-03-03）
 
 - **Windows 一键部署工具**：
