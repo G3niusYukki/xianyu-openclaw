@@ -5,8 +5,10 @@ setlocal enabledelayedexpansion
 :: Xianyu Automation - Configuration Wizard
 :: ===========================================
 
-set "PROJECT_DIR=%~dp0..\.."
-cd /d "%PROJECT_DIR%"
+:: Get project root directory
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%..\.."
+set "PROJECT_DIR=%CD%"
 
 echo.
 echo ===========================================
@@ -151,9 +153,9 @@ echo # ---- Features ----
 echo QUOTE_ENABLED=true
 echo MESSAGES_ENABLED=true
 echo WORKFLOW_ENABLED=true
-) > .env
+) > "%PROJECT_DIR%\.env"
 
-echo [OK] Configuration saved: .env
+echo [OK] Configuration saved: %PROJECT_DIR%\.env
 echo.
 echo Summary:
 echo   AI Provider: !AI_PROVIDER!

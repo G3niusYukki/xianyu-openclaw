@@ -5,8 +5,12 @@ setlocal enabledelayedexpansion
 :: Xianyu Automation - One-Click Deploy
 :: ===========================================
 
-set "PROJECT_DIR=%~dp0"
-cd /d "%PROJECT_DIR%"
+:: Get project root directory (parent of scripts/windows/)
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%..\.."
+set "PROJECT_DIR=%CD%"
+
+echo [INFO] Project directory: %PROJECT_DIR%
 
 echo.
 echo ===========================================
@@ -50,12 +54,12 @@ echo [OK] Virtual environment created
 :: Install dependencies
 echo.
 echo [*] Installing dependencies (this may take a few minutes)...
-.venv\Scripts\pip install -r requirements.txt -q
+.venv\Scripts\pip install -r "%PROJECT_DIR%\requirements.txt" -q
 if errorlevel 1 (
     echo [ERROR] Failed to install dependencies
     echo Retrying with updated pip...
     .venv\Scripts\python -m pip install --upgrade pip -q
-    .venv\Scripts\pip install -r requirements.txt
+    .venv\Scripts\pip install -r "%PROJECT_DIR%\requirements.txt"
     if errorlevel 1 (
         echo [ERROR] Installation failed
         pause
