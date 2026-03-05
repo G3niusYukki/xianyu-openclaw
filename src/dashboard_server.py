@@ -2708,7 +2708,9 @@ class MimicOps:
         )
         risk_level = str(risk_control.get("level", "unknown") or "unknown").lower()
         risk_signals_raw = risk_control.get("signals", [])
-        risk_signals = [str(x).strip() for x in risk_signals_raw if str(x).strip()] if isinstance(risk_signals_raw, list) else []
+        risk_signals = (
+            [str(x).strip() for x in risk_signals_raw if str(x).strip()] if isinstance(risk_signals_raw, list) else []
+        )
         risk_signal_text = " ".join(risk_signals)
         risk_event_text = str(risk_control.get("last_event", "") or "")
         risk_text = f"{risk_signal_text} {risk_event_text}".lower()
