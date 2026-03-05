@@ -1,0 +1,9 @@
+task_id=XY-WAVE34-2348-BE-G2-NONMOCK-CLOSE
+agent_id=xiaohuihui
+dispatcher=蛋蛋
+evidence_id=EVD-BE-W34-G2-001
+scope=xianyu-only
+gate_rule=BLOCK_AND_ESCALATE
+commit_sha=1e40829f847410612c7e2967311d83995aea667c
+timestamp=2026-03-05 23:50:58 CST
+repo=/Users/brianzhibo/openclaw/xianyu-openclaw

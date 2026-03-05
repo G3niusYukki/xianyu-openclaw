@@ -1,7 +1,7 @@
 import React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { Code, Menu, X } from 'lucide-react'
+import { Fish, Menu, X } from 'lucide-react'
 
 const Navbar = () => {
   const { user, logout } = useAuth()
@@ -13,82 +13,46 @@ const Navbar = () => {
     navigate('/')
   }
 
+  const guestLinks = [
+    { to: '/detail', label: '详情' },
+    { to: '/publish', label: '发布' },
+    { to: '/chat', label: '聊天' },
+    { to: '/orders', label: '订单' }
+  ]
+
   return (
-    <nav className="bg-white shadow-sm border-b border-gray-200">
+    <nav className="bg-white/90 backdrop-blur border-b border-slate-200 sticky top-0 z-30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center">
             <Link to="/" className="flex items-center">
-              <Code className="h-8 w-8 text-blue-600" />
-              <span className="ml-2 text-xl font-bold text-gray-900">
-                CodeReview
-              </span>
+              <Fish className="h-7 w-7 text-orange-500" />
+              <span className="ml-2 text-xl font-bold text-slate-900">闲鱼前端</span>
             </Link>
           </div>
 
-          <div className="hidden md:flex items-center space-x-8">
-            <Link
-              to="/pricing"
-              className="text-gray-600 hover:text-gray-900 transition"
-            >
-              Pricing
-            </Link>
-            
+          <div className="hidden md:flex items-center space-x-6">
+            {guestLinks.map((item) => (
+              <Link key={item.to} to={item.to} className="text-slate-600 hover:text-slate-900 transition">
+                {item.label}
+              </Link>
+            ))}
+
             {user ? (
               <>
-                <Link
-                  to="/dashboard"
-                  className="text-gray-600 hover:text-gray-900 transition"
-                >
-                  Dashboard
-                </Link>
-                <Link
-                  to="/review"
-                  className="text-gray-600 hover:text-gray-900 transition"
-                >
-                  New Review
-                </Link>
-                <Link
-                  to="/history"
-                  className="text-gray-600 hover:text-gray-900 transition"
-                >
-                  History
-                </Link>
-                <div className="flex items-center space-x-4">
-                  <span className="text-sm text-gray-600">
-                    {user.reviewsRemaining} reviews left
-                  </span>
-                  <button
-                    onClick={handleLogout}
-                    className="text-gray-600 hover:text-gray-900 transition"
-                  >
-                    Logout
-                  </button>
-                </div>
+                <Link to="/dashboard" className="text-slate-600 hover:text-slate-900 transition">Dashboard</Link>
+                <button onClick={handleLogout} className="text-slate-600 hover:text-slate-900 transition">Logout</button>
               </>
             ) : (
               <>
-                <Link
-                  to="/login"
-                  className="text-gray-600 hover:text-gray-900 transition"
-                >
-                  Login
-                </Link>
-                <Link
-                  to="/register"
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
-                >
-                  Get Started
-                </Link>
+                <Link to="/login" className="text-slate-600 hover:text-slate-900 transition">Login</Link>
+                <Link to="/register" className="xy-btn-primary px-4 py-2 font-medium">Get Started</Link>
               </>
             )}
           </div>
 
           <div className="md:hidden flex items-center">
-            <button
-              onClick={() => setIsOpen(!isOpen)}
-              className="text-gray-600"
-            >
+            <button onClick={() => setIsOpen(!isOpen)} className="text-slate-600">
               {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
           </div>
@@ -96,54 +60,21 @@ const Navbar = () => {
       </div>
 
       {isOpen && (
-        <div className="md:hidden">
-          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 bg-white border-t">
+        <div className="md:hidden border-t border-slate-200 bg-white">
+          <div className="px-3 py-2 space-y-1">
+            {guestLinks.map((item) => (
+              <Link key={item.to} to={item.to} className="block px-3 py-2 text-slate-600 hover:bg-slate-50 rounded-lg" onClick={() => setIsOpen(false)}>
+                {item.label}
+              </Link>
+            ))}
             {user ? (
-              <>
-                <Link
-                  to="/dashboard"
-                  className="block px-3 py-2 text-gray-600 hover:bg-gray-50"
-                  onClick={() => setIsOpen(false)}
-                >
-                  Dashboard
-                </Link>
-                <Link
-                  to="/review"
-                  className="block px-3 py-2 text-gray-600 hover:bg-gray-50"
-                  onClick={() => setIsOpen(false)}
-                >
-                  New Review
-                </Link>
-                <Link
-                  to="/history"
-                  className="block px-3 py-2 text-gray-600 hover:bg-gray-50"
-                  onClick={() => setIsOpen(false)}
-                >
-                  History
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  className="block w-full text-left px-3 py-2 text-gray-600 hover:bg-gray-50"
-                >
-                  Logout
-                </button>
-              </>
+              <button onClick={handleLogout} className="block w-full text-left px-3 py-2 text-slate-600 hover:bg-slate-50 rounded-lg">
+                Logout
+              </button>
             ) : (
               <>
-                <Link
-                  to="/login"
-                  className="block px-3 py-2 text-gray-600 hover:bg-gray-50"
-                  onClick={() => setIsOpen(false)}
-                >
-                  Login
-                </Link>
-                <Link
-                  to="/register"
-                  className="block px-3 py-2 text-gray-600 hover:bg-gray-50"
-                  onClick={() => setIsOpen(false)}
-                >
-                  Register
-                </Link>
+                <Link to="/login" className="block px-3 py-2 text-slate-600 hover:bg-slate-50 rounded-lg" onClick={() => setIsOpen(false)}>Login</Link>
+                <Link to="/register" className="block px-3 py-2 text-slate-600 hover:bg-slate-50 rounded-lg" onClick={() => setIsOpen(false)}>Register</Link>
               </>
             )}
           </div>

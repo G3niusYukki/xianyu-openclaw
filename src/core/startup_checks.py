@@ -189,7 +189,7 @@ def _is_production_env() -> bool:
     return resolve_runtime_mode() == "pro"
 
 
-def check_quote_remote_mock_guard() -> StartupCheckResult:
+def check_quote_mock_guard() -> StartupCheckResult:
     """门禁：生产环境下必须禁用 remote mock。"""
     try:
         from src.core.config import get_config
@@ -238,7 +238,7 @@ def run_all_checks(skip_browser: bool = False) -> list[StartupCheckResult]:
         check_ai_config(),
         check_cookies_configured(),
         check_cookie_expiration(),
-        check_quote_remote_mock_guard(),
+        check_quote_mock_guard(),
     ]
 
     if skip_browser:
