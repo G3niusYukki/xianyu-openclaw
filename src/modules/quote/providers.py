@@ -418,14 +418,14 @@ class RemoteQuoteProvider(IQuoteProvider):
         eta = 16 * 60 if request.service_level == "express" else 30 * 60
 
         return QuoteResult(
-            provider="remote_mock",
+            provider="remote_api",
             base_fee=round(base_fee, 2),
             surcharges={"dynamic": round(dynamic, 2), "fuel": fuel},
             total_fee=total,
             eta_minutes=eta,
             confidence=0.93,
             explain={
-                "source": "remote_mock",
+                "source": "remote_api",
                 "origin": request.origin,
                 "destination": request.destination,
                 "weight_kg": request.weight,

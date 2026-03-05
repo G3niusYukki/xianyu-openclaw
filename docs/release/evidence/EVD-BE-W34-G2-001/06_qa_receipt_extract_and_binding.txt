@@ -1,0 +1,18 @@
+qa_receipt_file=/Users/brianzhibo/openclaw/xianyu-openclaw/docs/release/evidence/qa-close-loop-20260303-1040.md
+qa_receipt_sha256=3ae99d879d0c36e24a129939f47a9434544dcc82cf14f70334586f4f87feac7d
+commit_sha=1e40829f847410612c7e2967311d83995aea667c
+
+--- qa receipt key lines ---
+3:- 任务ID：XY-CLOSELOOP-QA-20260303-1040
+11:## 1) 本次复跑范围（最小E2E + 关键回归）
+13:### A. 运行前严格预检
+17:结果：**PASS**（`ready=true`，critical blocker = 0）  
+20:### B. 最小E2E闭环
+24:结果：**PASS**（`1 passed in 1.81s`）  
+27:### C. 关键回归（21条）
+43:结果：**PASS**（`21 passed in 0.23s`）  
+62:- 最小E2E：PASS
+63:- 关键回归：PASS（21/21）
+64:- 预检：PASS（ready=true）
+67:**NO_GO（当前不建议直接放量）**
+70:1. 本次“最小E2E+关键回归”全绿，代码侧门禁满足；

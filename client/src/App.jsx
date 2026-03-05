@@ -12,6 +12,10 @@ import History from './pages/History'
 import Pricing from './pages/Pricing'
 import Settings from './pages/Settings'
 import PrivateRoute from './components/PrivateRoute'
+import Detail from './pages/Detail'
+import Publish from './pages/Publish'
+import Chat from './pages/Chat'
+import Orders from './pages/Orders'
 
 function App() {
   return (
@@ -24,6 +28,10 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/pricing" element={<Pricing />} />
+            <Route path="/detail" element={<Detail />} />
+            <Route path="/publish" element={<Publish />} />
+            <Route path="/chat" element={<Chat />} />
+            <Route path="/orders" element={<Orders />} />
             <Route
               path="/dashboard"
               element={

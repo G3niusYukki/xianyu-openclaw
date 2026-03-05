@@ -48,6 +48,18 @@ def _safe_int(value: str | None, default: int, min_value: int, max_value: int) -
         return default
 
 
+def _error_payload(message: str, code: str = "INTERNAL_ERROR", details: Any = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "success": False,
+        "error": str(message),
+        "error_code": str(code),
+        "error_message": str(message),
+    }
+    if details is not None:
+        payload["details"] = details
+    return payload
+
+
 def _extract_json_payload(text: str) -> Any | None:
     raw = str(text or "").strip()
     if not raw:
@@ -585,7 +597,7 @@ class MimicOps:
 
         settings = self._get_xianguanjia_settings()
         if not settings["configured"]:
-            return {"success": False, "error": "闲管家凭证未配置"}
+            return _error_payload("闲管家凭证未配置", code="XGJ_NOT_CONFIGURED")
 
         data = dict(payload or {})
         shipping_info = data.get("shipping_info")
@@ -609,17 +621,20 @@ class MimicOps:
 
         order_id = str(data.get("order_id") or data.get("order_no") or "").strip()
         if not order_id:
-            return {"success": False, "error": "缺少订单号"}
+            return _error_payload("缺少订单号", code="MISSING_ORDER_ID")
 
         service = OrderFulfillmentService(
             db_path=str(self.project_root / "data" / "orders.db"),
             config=self._xianguanjia_service_config(),
         )
-        result = service.deliver(
-            order_id=order_id,
-            dry_run=self._to_bool(data.get("dry_run"), default=False),
-            shipping_info=shipping_info or None,
-        )
+        try:
+            result = service.deliver(
+                order_id=order_id,
+                dry_run=self._to_bool(data.get("dry_run"), default=False),
+                shipping_info=shipping_info or None,
+            )
+        except Exception as exc:
+            return _error_payload(f"发货重试失败: {exc}", code="XGJ_RETRY_SHIP_FAILED")
         return {"success": True, **result}
 
     def retry_xianguanjia_price(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -627,17 +642,17 @@ class MimicOps:
 
         settings = self._get_xianguanjia_settings()
         if not settings["configured"]:
-            return {"success": False, "error": "闲管家凭证未配置"}
+            return _error_payload("闲管家凭证未配置", code="XGJ_NOT_CONFIGURED")
 
         data = dict(payload or {})
         product_id = str(data.get("product_id") or data.get("productId") or "").strip()
         if not product_id:
-            return {"success": False, "error": "缺少商品 ID"}
+            return _error_payload("缺少商品 ID", code="MISSING_PRODUCT_ID")
 
         try:
             new_price = float(data.get("new_price"))
         except Exception:
-            return {"success": False, "error": "缺少有效的新价格"}
+            return _error_payload("缺少有效的新价格", code="INVALID_NEW_PRICE")
 
         original_price_raw = data.get("original_price")
         original_price = None
@@ -645,10 +660,13 @@ class MimicOps:
             try:
                 original_price = float(original_price_raw)
             except Exception:
-                return {"success": False, "error": "原价格式无效"}
+                return _error_payload("原价格式无效", code="INVALID_ORIGINAL_PRICE")
 
         service = OperationsService(config=self._xianguanjia_service_config())
-        result = _run_async(service.update_price(product_id, new_price, original_price))
+        try:
+            result = _run_async(service.update_price(product_id, new_price, original_price))
+        except Exception as exc:
+            return _error_payload(f"改价重试失败: {exc}", code="XGJ_RETRY_PRICE_FAILED")
         return {"success": bool(result.get("success")), **result}
 
     def handle_order_callback(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -669,7 +687,7 @@ class MimicOps:
                 ),
             )
         except Exception as exc:
-            return {"success": False, "error": str(exc)}
+            return _error_payload(f"回调处理失败: {exc}", code="XGJ_CALLBACK_FAILED")
 
         result["settings"] = {
             "configured": settings["configured"],
@@ -1629,6 +1647,17 @@ class MimicOps:
         self.template_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"success": True, "message": "Template saved", **payload}
 
+    def get_replies(self) -> dict[str, Any]:
+        template = self.get_template(default=False)
+        return {
+            "success": bool(template.get("success")),
+            "replies": {
+                "weight_template": str(template.get("weight_template") or DEFAULT_WEIGHT_TEMPLATE),
+                "volume_template": str(template.get("volume_template") or DEFAULT_VOLUME_TEMPLATE),
+            },
+            "updated_at": str(template.get("updated_at") or ""),
+        }
+
     @staticmethod
     def _decode_text_bytes(content: bytes) -> str:
         data = bytes(content or b"")
@@ -2581,6 +2610,7 @@ class MimicOps:
             "intent": intent,
             "agent": agent,
             "detail": detail,
+            "response_time_ms": response_time_ms,
             "response_time": response_time_ms,
         }
 
@@ -5784,12 +5814,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     data, filename = self.mimic_ops.export_cookie_plugin_bundle()
                     self._send_bytes(data=data, content_type="application/zip", download_name=filename)
                 except FileNotFoundError as exc:
-                    self._send_json({"success": False, "error": str(exc)}, status=404)
+                    self._send_json(_error_payload(str(exc), code="NOT_FOUND"), status=404)
                 return
 
             if path == "/api/get-template":
                 use_default = (query.get("default") or ["false"])[0].lower() in {"1", "true", "yes"}
                 self._send_json(self.mimic_ops.get_template(default=use_default))
+                return
+
+            if path == "/api/replies":
+                self._send_json(self.mimic_ops.get_replies())
                 return
 
             if path == "/api/get-markup-rules":
@@ -5855,11 +5889,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     return
                 return
 
-            self._send_json({"error": "Not Found"}, status=404)
+            self._send_json(_error_payload("Not Found", code="NOT_FOUND"), status=404)
         except sqlite3.Error as e:
-            self._send_json({"error": f"Database error: {e}"}, status=500)
+            self._send_json(_error_payload(f"Database error: {e}", code="DATABASE_ERROR"), status=500)
         except Exception as e:  # pragma: no cover - safety net
-            self._send_json({"error": str(e)}, status=500)
+            self._send_json(_error_payload(str(e), code="INTERNAL_ERROR"), status=500)
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -6057,9 +6091,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(payload, status=200 if payload.get("success") else 400)
                 return
 
-            self._send_json({"error": "Not Found"}, status=404)
+            self._send_json(_error_payload("Not Found", code="NOT_FOUND"), status=404)
         except Exception as e:  # pragma: no cover - safety net
-            self._send_json({"error": str(e)}, status=500)
+            self._send_json(_error_payload(str(e), code="INTERNAL_ERROR"), status=500)
 
     def log_message(self, format: str, *args: Any) -> None:
         return

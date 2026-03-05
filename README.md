@@ -617,14 +617,14 @@ xianyu-openclaw/
 ```bash
 git clone https://github.com/G3niusYukki/xianyu-openclaw.git
 cd xianyu-openclaw
-python -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv312 && source .venv312/bin/activate
 pip install -r requirements.txt
 
 # CLI
 python -m src.cli --help
 
-# 测试
-pytest tests/
+# 测试（固定入口，避免 ENV_MISMATCH）
+bash scripts/qa/lock_test_env.sh -q tests/
 
 # 代码检查
 ruff check src/

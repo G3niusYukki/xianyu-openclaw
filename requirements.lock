@@ -4,7 +4,7 @@
 # 此文件记录了经过测试的依赖版本，用于确保环境一致性
 # To generate this file: pip-compile requirements.txt --output-file requirements.lock
 #
-# Generated on: 2024-02-12
+# Generated on: 2026-03-05
 
 # Core
 pyyaml==6.0.1
@@ -28,9 +28,9 @@ pandas==2.2.1
 openai==1.12.0
 
 # Development
-pytest==7.4.4
-pytest-cov==4.1.0
-pytest-asyncio==0.23.3
+pytest==8.4.2
+pytest-cov==5.0.0
+pytest-asyncio==0.26.0
 black==23.12.1
 mypy==1.8.0
 ruff==0.1.15
@@ -45,14 +45,14 @@ exceptiongroup==1.2.0
 h11==0.14.0
 httpcore==1.0.2
 idna==3.6
-iniconfig==2.0.0
+iniconfig==2.3.0
 jsonschema==4.21.1
 jsonschema-specifications==2023.12.1
 markdown-it-py==3.0.0
 mdurl==0.1.2
-packaging==23.2
-pluggy==1.4.0
-pygments==2.17.2
+packaging==26.0
+pluggy==1.6.0
+pygments==2.19.2
 pyreadline3==3.4.1
 referencing==0.35.1
 rich==13.7.0
