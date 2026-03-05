@@ -57,7 +57,7 @@ def _get_or_create_key() -> bytes:
 
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.write_bytes(key)
-    
+
     # 设置安全的文件权限（仅所有者可读写）
     try:
         import stat
@@ -66,7 +66,7 @@ def _get_or_create_key() -> bytes:
     except Exception as e:
         logger.warning(f"Could not set restrictive permissions on key file: {e}")
         logger.info(f"Generated new encryption key (saved to {_KEY_FILE})")
-    
+
     return key
 
 
