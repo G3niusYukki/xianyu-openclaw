@@ -122,7 +122,7 @@ class Config:
         ]
         for env_file in env_files:
             if os.path.exists(env_file):
-                load_dotenv(env_file, override=True)
+                load_dotenv(env_file, override=False)
                 break
 
     def _resolve_env_variables(self) -> None:

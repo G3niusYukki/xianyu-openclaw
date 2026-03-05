@@ -450,6 +450,8 @@ class MimicOps:
         self.project_root = Path(project_root).resolve()
         self.module_console = module_console
         self._service_started_at = _now_iso()
+        self._instance_id = f"dashboard-{os.getpid()}-{int(time.time())}"
+        self._python_exec = sys.executable
         self._service_state: dict[str, Any] = {
             "suspended": False,
             "stopped": False,
@@ -2770,6 +2772,10 @@ class MimicOps:
             "user_id": user_id,
             "last_token_refresh": risk_control.get("last_event_at") if token_error is None else None,
             "service_start_time": self._service_started_at,
+            "instance_id": self._instance_id,
+            "project_root": str(self.project_root),
+            "python_exec": self._python_exec,
+            "started_at": self._service_started_at,
             "route_stats": route_stat_payload,
             "route_stats_by_courier": route_stats_by_courier,
             "message_stats": message_stats,

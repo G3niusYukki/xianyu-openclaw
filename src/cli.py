@@ -40,6 +40,7 @@ def _json_out(data: Any) -> None:
 
 
 _MODULE_TARGETS = ("presales", "operations", "aftersales")
+_EXPECTED_PROJECT_ROOT = "/Users/brianzhibo/openclaw/xianyu-openclaw"
 
 _BENCH_QUOTE_MESSAGES = [
     "安徽到上海 1kg 圆通多少钱",
@@ -201,7 +202,7 @@ def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[st
     checks = doctor_report.get("checks", [])
     check_map = {str(item.get("name", "")): item for item in checks}
 
-    required_names = {"Python版本", "数据库", "配置文件", "闲鱼Cookie"}
+    required_names = {"Python版本", "数据库", "配置文件", "闲鱼Cookie", "模块解释器锁定"}
     if target == "presales":
         required_names.add("消息首响SLA")
 
@@ -262,6 +263,20 @@ def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[st
 _MODULE_RUNTIME_DIR = Path("data/module_runtime")
 
 
+def _resolve_python_exec() -> str:
+    configured = str(os.getenv("OPENCLAW_PYTHON_EXEC", "")).strip() or str(os.getenv("PYTHON_EXEC", "")).strip()
+    if configured:
+        candidate = Path(configured).expanduser()
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+        try:
+            if candidate.exists() and candidate.is_file():
+                return str(candidate)
+        except OSError:
+            pass
+    return str(Path(sys.executable).resolve())
+
+
 def _module_state_path(target: str) -> Path:
     _MODULE_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     return _MODULE_RUNTIME_DIR / f"{target}.json"
@@ -298,8 +313,9 @@ def _process_alive(pid: int) -> bool:
 
 
 def _build_module_start_command(target: str, args: argparse.Namespace) -> list[str]:
+    python_exec = _resolve_python_exec()
     cmd = [
-        sys.executable,
+        python_exec,
         "-m",
         "src.cli",
         "module",
@@ -363,7 +379,11 @@ def _start_background_module(target: str, args: argparse.Namespace) -> dict[str,
     log_file = _module_log_path(target)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     handle = open(log_file, "a", encoding="utf-8")
-    handle.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] start target={target} cmd={' '.join(cmd)}\n")
+    python_exec = cmd[0] if cmd else _resolve_python_exec()
+    handle.write(
+        f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] start target={target} "
+        f"python_exec={python_exec} cmd={' '.join(cmd)}\n"
+    )
     handle.flush()
 
     popen_kwargs: dict[str, Any] = {
@@ -381,6 +401,7 @@ def _start_background_module(target: str, args: argparse.Namespace) -> dict[str,
     state = {
         "target": target,
         "pid": proc.pid,
+        "python_exec": python_exec,
         "log_file": str(log_file),
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "command": cmd,
@@ -925,12 +946,21 @@ async def cmd_doctor(args: argparse.Namespace) -> None:
 
     report = run_doctor(skip_gateway=bool(args.skip_gateway), skip_quote=bool(args.skip_quote))
     strict = bool(args.strict)
-    strict_ready = bool(report.get("ready", False)) and report.get("summary", {}).get("warning_failed", 0) == 0
+    project_root = str(Path.cwd().resolve())
+    project_root_match = project_root == _EXPECTED_PROJECT_ROOT
+    strict_ready = (
+        bool(report.get("ready", False))
+        and report.get("summary", {}).get("warning_failed", 0) == 0
+        and project_root_match
+    )
 
     output = {
         **report,
         "strict": strict,
         "strict_ready": strict_ready,
+        "project_root": project_root,
+        "expected_project_root": _EXPECTED_PROJECT_ROOT,
+        "project_root_match": project_root_match,
     }
     _json_out(output)
 
