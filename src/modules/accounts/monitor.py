@@ -439,7 +439,7 @@ class HealthChecker:
                 await self.monitor.raise_alert(
                     alert_type="browser_connection",
                     title="Browser connection failed",
-                    message="Cannot connect to OpenClaw browser",
+                    message="Cannot connect to legacy browser runtime",
                     source="health_check",
                 )
 

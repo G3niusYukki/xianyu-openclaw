@@ -170,7 +170,7 @@ class Config:
                 "logs_dir": "logs",
                 "runtime": "auto",
             },
-            "openclaw": {
+            "browser_runtime": {
                 "host": "localhost",
                 "port": 9222,
                 "timeout": 30,
@@ -295,6 +295,11 @@ class Config:
                     if key not in self._config[section]:
                         self._config[section][key] = value
 
+        if "browser_runtime" not in self._config and "openclaw" in self._config:
+            self._config["browser_runtime"] = dict(self._config["openclaw"])
+        if "openclaw" not in self._config and "browser_runtime" in self._config:
+            self._config["openclaw"] = dict(self._config["browser_runtime"])
+
     def _apply_env_overrides(self) -> None:
         """将常用运行时环境变量映射到结构化配置。"""
 
@@ -346,13 +351,16 @@ class Config:
         获取配置值
 
         Args:
-            key: 配置键，支持点号分隔的路径，如 "openclaw.host"
+            key: 配置键，支持点号分隔的路径，如 "browser_runtime.host"
             default: 默认值
 
         Returns:
             配置值
         """
+        alias_map = {"openclaw": "browser_runtime"}
         keys = key.split(".")
+        if keys and keys[0] in alias_map:
+            keys[0] = alias_map[keys[0]]
         value = self._config
 
         for k in keys:
@@ -374,6 +382,10 @@ class Config:
         Returns:
             配置段落字典
         """
+        if section == "openclaw":
+            section = "browser_runtime"
+        if section == "browser_runtime" and section not in self._config and "openclaw" in self._config:
+            return self._config.get("openclaw", default or {})
         return self._config.get(section, default or {})
 
     @property
@@ -383,8 +395,13 @@ class Config:
 
     @property
     def openclaw(self) -> dict[str, Any]:
-        """OpenClaw配置"""
-        return self.get_section("openclaw")
+        """兼容旧字段名。"""
+        return self.get_section("browser_runtime")
+
+    @property
+    def browser_runtime(self) -> dict[str, Any]:
+        """浏览器运行时配置"""
+        return self.get_section("browser_runtime")
 
     @property
     def ai(self) -> dict[str, Any]:

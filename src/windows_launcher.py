@@ -780,7 +780,7 @@ class WindowsLauncherApp(ctk.CTk):
             lines.append(f"业务 Base URL：{merged.get('AI_BASE_URL', '')}")
         lines.extend(
             [
-                f"服务端口：{merged.get('OPENCLAW_WEB_PORT', '')}",
+                f"服务端口：{merged.get('FRONTEND_PORT', '')}",
                 f"后台账号：{merged.get('AUTH_USERNAME', '')}",
                 f"后台密码：{_mask_secret(merged.get('AUTH_PASSWORD', ''))}",
                 f"Cookie 1：{_mask_secret(merged.get('XIANYU_COOKIE_1', ''))}",

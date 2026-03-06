@@ -23,13 +23,16 @@ class Provider(str, Enum):
     ZHIPU = "zhipu"
 
 
-class OpenClawConfig(BaseModel):
-    """OpenClaw配置模型"""
+class BrowserRuntimeConfig(BaseModel):
+    """浏览器运行时配置模型（兼容 legacy gateway 端口配置）"""
 
     host: str = "localhost"
-    port: int = Field(default=9222, ge=1, le=65535, description="OpenClaw服务端口")
+    port: int = Field(default=9222, ge=1, le=65535, description="浏览器运行时端口")
     timeout: int = Field(default=30, ge=1, le=300, description="连接超时时间（秒）")
     retry_times: int = Field(default=3, ge=0, le=10, description="重试次数")
+
+
+OpenClawConfig = BrowserRuntimeConfig
 
 
 class AIConfig(BaseModel):
@@ -237,7 +240,7 @@ class ConfigModel(BaseModel):
     """完整配置模型"""
 
     app: AppConfig = Field(default_factory=AppConfig)
-    openclaw: OpenClawConfig = Field(default_factory=OpenClawConfig)
+    browser_runtime: BrowserRuntimeConfig = Field(default_factory=BrowserRuntimeConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     accounts: list[AccountConfig] = Field(default_factory=list)
@@ -254,11 +257,21 @@ class ConfigModel(BaseModel):
     def validate_default_account(cls, v: str | None) -> str | None:
         return v
 
+    @property
+    def openclaw(self) -> BrowserRuntimeConfig:
+        """兼容旧字段名。"""
+        return self.browser_runtime
+
     def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
-        return self.model_dump()
+        data = self.model_dump()
+        data["openclaw"] = dict(data["browser_runtime"])
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ConfigModel":
         """从字典创建配置"""
-        return cls(**data)
+        normalized = dict(data)
+        if "browser_runtime" not in normalized and "openclaw" in normalized:
+            normalized["browser_runtime"] = normalized["openclaw"]
+        return cls(**normalized)

@@ -2,7 +2,7 @@
 Playwright Lite Browser Client
 
 本地轻量浏览器客户端：
-- 不依赖 OpenClaw Gateway
+- 不依赖 legacy browser gateway
 - 直接使用 Playwright 驱动 Chromium
 - 兼容现有服务层常用方法签名
 """

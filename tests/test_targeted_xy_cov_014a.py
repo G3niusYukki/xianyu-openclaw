@@ -85,9 +85,9 @@ def test_startup_checks_runtime_python_and_auto_gateway_success(monkeypatch: pyt
     assert "需要 3.10+" in py.message
 
     monkeypatch.setattr(sc, "resolve_runtime_mode", lambda: "auto")
-    monkeypatch.setattr(sc, "check_gateway_reachable", lambda: sc.StartupCheckResult("OpenClaw Gateway", True, "ok", True))
+    monkeypatch.setattr(sc, "check_gateway_reachable", lambda: sc.StartupCheckResult("Legacy Browser Gateway", True, "ok", True))
     results = sc.run_all_checks(skip_browser=False)
-    assert results[-1].name == "OpenClaw Gateway"
+    assert results[-1].name == "Legacy Browser Gateway"
     assert results[-1].passed is True
     assert results[-1].message == "ok"
 

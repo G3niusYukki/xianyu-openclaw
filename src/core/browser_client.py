@@ -1,11 +1,10 @@
 """
-OpenClaw Gateway Browser Client
+Legacy Browser Gateway Client
 
-通过 HTTP 调用 OpenClaw Gateway 的 Browser Control API 实现浏览器自动化。
-替代旧的 Playwright 直接调用方式，使浏览器引擎由 OpenClaw 统一管理和升级。
+通过 HTTP 调用 legacy browser gateway 的 Browser Control API 实现浏览器自动化。
+该客户端保留在仓库内，作为 API-first 主路径之外的补充浏览器运行时。
 
 Gateway Browser Control API 端口 = gateway_port + 2（默认 18791）
-文档: https://docs.openclaw.ai/tools/browser
 """
 
 import asyncio
@@ -58,10 +57,10 @@ class GatewayConfig:
 
 class BrowserClient:
     """
-    OpenClaw Gateway 浏览器客户端
+    Legacy browser gateway 浏览器客户端
 
-    通过 HTTP 调用 Gateway 的 Browser Control API 操作浏览器。
-    保持与旧 OpenClawController 近似的方法签名，降低服务层改动量。
+    通过 HTTP 调用 gateway 的 Browser Control API 操作浏览器。
+    保持与旧控制器近似的方法签名，降低服务层改动量。
     """
 
     def __init__(self, config: dict[str, Any] | None = None):
@@ -77,13 +76,13 @@ class BrowserClient:
         self._active_tab_id: str | None = None
 
     def _apply_env(self) -> None:
-        if v := os.environ.get("OPENCLAW_GATEWAY_HOST"):
+        if v := os.environ.get("BROWSER_RUNTIME_HOST") or os.environ.get("OPENCLAW_GATEWAY_HOST"):
             self.config.host = v
-        if v := os.environ.get("OPENCLAW_GATEWAY_PORT"):
+        if v := os.environ.get("BROWSER_RUNTIME_PORT") or os.environ.get("OPENCLAW_GATEWAY_PORT"):
             self.config.gateway_port = int(v)
-        if v := os.environ.get("OPENCLAW_GATEWAY_TOKEN"):
+        if v := os.environ.get("BROWSER_RUNTIME_TOKEN") or os.environ.get("OPENCLAW_GATEWAY_TOKEN"):
             self.config.token = v
-        if v := os.environ.get("OPENCLAW_BROWSER_PROFILE"):
+        if v := os.environ.get("BROWSER_RUNTIME_PROFILE") or os.environ.get("OPENCLAW_BROWSER_PROFILE"):
             self.config.profile = v
 
     def _apply_config(self, config: dict[str, Any]) -> None:
@@ -108,7 +107,7 @@ class BrowserClient:
     async def connect(self) -> bool:
         try:
             self.state = BrowserState.CONNECTING
-            self.logger.info(f"Connecting to OpenClaw Gateway at {self.config.browser_base_url} ...")
+            self.logger.info(f"Connecting to legacy browser gateway at {self.config.browser_base_url} ...")
 
             self._client = httpx.AsyncClient(
                 base_url=self.config.browser_base_url,
@@ -119,7 +118,7 @@ class BrowserClient:
             resp = await self._client.get("/", params=self._profile_params())
             if resp.status_code == 200:
                 self.state = BrowserState.CONNECTED
-                self.logger.info("Connected to OpenClaw browser")
+                self.logger.info("Connected to browser runtime")
                 return True
 
             if resp.status_code == 503:
@@ -128,7 +127,7 @@ class BrowserClient:
                 if start_resp.status_code == 200:
                     await asyncio.sleep(2)
                     self.state = BrowserState.CONNECTED
-                    self.logger.info("OpenClaw browser started")
+                    self.logger.info("Legacy browser runtime started")
                     return True
 
             self.state = BrowserState.ERROR
@@ -138,7 +137,7 @@ class BrowserClient:
         except httpx.ConnectError:
             self.state = BrowserState.ERROR
             self.logger.error(
-                f"Cannot reach OpenClaw Gateway at {self.config.browser_base_url}. Is the Gateway running?"
+                f"Cannot reach legacy browser gateway at {self.config.browser_base_url}. Is the gateway running?"
             )
             return False
         except Exception as e:
@@ -154,7 +153,7 @@ class BrowserClient:
             self._client = None
         self.state = BrowserState.DISCONNECTED
         self._active_tab_id = None
-        self.logger.info("Disconnected from OpenClaw browser")
+        self.logger.info("Disconnected from browser runtime")
 
     async def is_connected(self) -> bool:
         if self.state != BrowserState.CONNECTED or not self._client:
@@ -174,7 +173,7 @@ class BrowserClient:
 
     async def new_page(self) -> str:
         if not await self.ensure_connected():
-            raise BrowserError("Not connected to OpenClaw Gateway")
+            raise BrowserError("Not connected to legacy browser gateway")
 
         resp = await self._client.post(
             "/tabs/open",
@@ -526,7 +525,7 @@ class BrowserClient:
             for name, value in parsed_pairs.items()
         ]
         if not cookies:
-            self.logger.warning("No valid cookies parsed from XIANYU_COOKIE_1; skip gateway cookie seeding")
+            self.logger.warning("No valid cookies parsed from XIANYU_COOKIE_1; skip browser-runtime cookie seeding")
             return
 
         await self._client.post(
@@ -589,13 +588,13 @@ async def create_browser_client(config: dict[str, Any] | None = None) -> "Browse
     if runtime == "lite":
         return await _create_lite_client(config)
 
-    # auto: 网关可用优先 Pro，不可用回退 Lite。
+    # auto: legacy gateway 可用优先 Pro，不可用回退 Lite。
     gateway_ready = await _probe_gateway_available(config=config)
     if gateway_ready:
         try:
             return await _create_gateway_client(config)
         except Exception as exc:  # pragma: no cover - defensive path
-            get_logger().warning(f"Gateway runtime unavailable, fallback to lite: {exc}")
+            get_logger().warning(f"Legacy gateway runtime unavailable, fallback to lite: {exc}")
 
     return await _create_lite_client(config)
 
@@ -607,7 +606,7 @@ def _resolve_runtime(config: dict[str, Any] | None = None) -> str:
     except Exception:
         pass
 
-    raw = str(os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
+    raw = str(os.getenv("APP_RUNTIME") or os.getenv("BROWSER_RUNTIME_MODE") or os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
     if raw in {"auto", "lite", "pro"}:
         return raw
 
@@ -653,7 +652,7 @@ async def _create_gateway_client(config: dict[str, Any] | None = None) -> Browse
     client = BrowserClient(config)
     connected = await client.connect()
     if not connected:
-        raise BrowserError("Failed to connect to OpenClaw Gateway. Is the Gateway running? Check: docker compose ps")
+        raise BrowserError("Failed to connect to legacy browser gateway. Check: docker compose ps")
     return client
 
 

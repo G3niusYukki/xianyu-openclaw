@@ -96,7 +96,7 @@ browser:
 
 @pytest.fixture
 def mock_controller():
-    """Mock OpenClaw控制器"""
+    """Mock 浏览器运行时控制器"""
     controller = Mock()
     controller.connect = AsyncMock(return_value=True)
     controller.disconnect = AsyncMock(return_value=True)

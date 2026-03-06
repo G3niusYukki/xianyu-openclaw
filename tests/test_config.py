@@ -16,6 +16,7 @@ from src.core.config_models import (
     AccountConfig,
     AIConfig,
     BrowserConfig,
+    BrowserRuntimeConfig,
     ConfigModel,
     DatabaseConfig,
     MediaConfig,
@@ -76,28 +77,28 @@ app:
 class TestConfigModels:
     """配置模型测试"""
 
-    def test_openclaw_config_defaults(self):
-        """测试OpenClaw配置默认值"""
-        config = OpenClawConfig()
+    def test_browser_runtime_config_defaults(self):
+        """测试浏览器运行时配置默认值"""
+        config = BrowserRuntimeConfig()
         assert config.host == "localhost"
         assert config.port == 9222
         assert config.timeout == 30
         assert config.retry_times == 3
 
-    def test_openclaw_config_validation(self):
-        """测试OpenClaw配置验证"""
+    def test_browser_runtime_config_validation(self):
+        """测试浏览器运行时配置验证"""
         # 有效配置
-        config = OpenClawConfig(port=8080, timeout=60)
+        config = BrowserRuntimeConfig(port=8080, timeout=60)
         assert config.port == 8080
         assert config.timeout == 60
 
         # 无效端口
         with pytest.raises(ValidationError):
-            OpenClawConfig(port=70000)
+            BrowserRuntimeConfig(port=70000)
 
         # 无效超时
         with pytest.raises(ValidationError):
-            OpenClawConfig(timeout=0)
+            BrowserRuntimeConfig(timeout=0)
 
     def test_ai_config_provider_validation(self):
         """测试AI配置provider验证"""
@@ -254,6 +255,7 @@ class TestConfigModels:
         config_dict = config.to_dict()
         assert "app" in config_dict
         assert "openclaw" in config_dict
+        assert "browser_runtime" in config_dict
         assert "ai" in config_dict
         assert "accounts" in config_dict
 

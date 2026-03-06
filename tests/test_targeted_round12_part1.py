@@ -60,14 +60,14 @@ def test_cli_helpers_summary_and_process_alive_extra(monkeypatch, tmp_path):
             {"name": "数据库", "passed": True},
             {"name": "配置文件", "passed": True},
             {"name": "闲鱼Cookie", "passed": True},
-            {"name": "OpenClaw Gateway", "passed": False},
+            {"name": "Legacy Browser Gateway", "passed": False},
             {"name": "Lite 浏览器驱动", "passed": False},
         ]
     }
     monkeypatch.setattr("src.core.startup_checks.resolve_runtime_mode", lambda: "pro")
     monkeypatch.setattr("src.cli._messages_transport_mode", lambda: "dom")
     pro_summary = cli._module_check_summary("operations", doctor_report)
-    assert any(item.get("name") == "OpenClaw Gateway" for item in pro_summary["blockers"])
+    assert any(item.get("name") == "Legacy Browser Gateway" for item in pro_summary["blockers"])
 
     monkeypatch.setattr("src.core.startup_checks.resolve_runtime_mode", lambda: "lite")
     lite_summary = cli._module_check_summary("operations", doctor_report)
@@ -470,21 +470,21 @@ def test_startup_checks_and_service_container_extra(monkeypatch, tmp_path):
     monkeypatch.setattr(sc, "check_ai_config", lambda: sc.StartupCheckResult("AI服务", True, "ok", False))
     monkeypatch.setattr(sc, "check_cookies_configured", lambda: sc.StartupCheckResult("闲鱼Cookie", True, "ok", True))
     monkeypatch.setattr(sc, "check_cookie_expiration", lambda: sc.StartupCheckResult("Cookie有效性", True, "ok", False))
-    monkeypatch.setattr(sc, "check_gateway_reachable", lambda: sc.StartupCheckResult("OpenClaw Gateway", False, "down", True))
+    monkeypatch.setattr(sc, "check_gateway_reachable", lambda: sc.StartupCheckResult("Legacy Browser Gateway", False, "down", True))
     monkeypatch.setattr(sc, "check_lite_browser_dependency", lambda: sc.StartupCheckResult("Lite 浏览器驱动", True, "ok", True))
 
     skip_browser = sc.run_all_checks(skip_browser=True)
-    assert all(item.name != "OpenClaw Gateway" for item in skip_browser)
+    assert all(item.name != "Legacy Browser Gateway" for item in skip_browser)
 
     pro_checks = sc.run_all_checks(skip_browser=False)
-    assert any(item.name == "OpenClaw Gateway" for item in pro_checks)
+    assert any(item.name == "Legacy Browser Gateway" for item in pro_checks)
 
     monkeypatch.setattr(sc, "resolve_runtime_mode", lambda: "lite")
     lite_checks = sc.run_all_checks(skip_browser=False)
     assert any(item.name == "Lite 浏览器驱动" for item in lite_checks)
 
     monkeypatch.setattr(sc, "resolve_runtime_mode", lambda: "auto")
-    monkeypatch.setattr(sc, "check_gateway_reachable", lambda: sc.StartupCheckResult("OpenClaw Gateway", False, "down", True))
+    monkeypatch.setattr(sc, "check_gateway_reachable", lambda: sc.StartupCheckResult("Legacy Browser Gateway", False, "down", True))
     auto_checks = sc.run_all_checks(skip_browser=False)
     assert any(item.name == "Lite 浏览器驱动" for item in auto_checks)
 

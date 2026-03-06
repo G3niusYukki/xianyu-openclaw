@@ -209,7 +209,7 @@ def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[st
     required_checks = [check_map[name] for name in required_names if name in check_map]
     blockers = [item for item in required_checks if not bool(item.get("passed", False))]
 
-    gateway_item = check_map.get("OpenClaw Gateway")
+    gateway_item = check_map.get("Legacy Browser Gateway") or check_map.get("OpenClaw Gateway")
     lite_item = check_map.get("Lite 浏览器驱动")
 
     if uses_ws_only:
@@ -239,9 +239,9 @@ def _module_check_summary(target: str, doctor_report: dict[str, Any]) -> dict[st
                     "name": "浏览器运行时",
                     "passed": False,
                     "critical": True,
-                    "message": "auto 模式下 OpenClaw Gateway 与 Lite 驱动均不可用",
+                    "message": "auto 模式下 legacy browser gateway 与 Lite 驱动均不可用",
                     "suggestion": (
-                        "启动 Gateway（docker compose up -d）或安装 Playwright"
+                        "启动 legacy gateway（docker compose up -d）或安装 Playwright"
                         "（pip install playwright && playwright install chromium）。"
                     ),
                     "meta": {"runtime": runtime},

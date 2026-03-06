@@ -11,7 +11,7 @@ def test_doctor_report_not_ready_when_critical_check_fails(monkeypatch) -> None:
     monkeypatch.setattr(
         "src.core.doctor.run_all_checks",
         lambda skip_browser=False: [  # noqa: ARG005
-            StartupCheckResult("OpenClaw Gateway", False, "无法连接", critical=True),
+            StartupCheckResult("Legacy Browser Gateway", False, "无法连接", critical=True),
         ],
     )
     monkeypatch.setattr("src.core.doctor._extra_checks", lambda skip_quote=False: [])  # noqa: ARG005

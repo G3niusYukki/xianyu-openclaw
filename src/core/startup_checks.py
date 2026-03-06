@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from src.core.logger import get_logger
 
 logger = get_logger()
+LEGACY_GATEWAY_CHECK_NAME = "Legacy Browser Gateway"
 
 
 class StartupCheckResult:
@@ -27,9 +28,9 @@ class StartupCheckResult:
 
 
 def resolve_runtime_mode() -> str:
-    # Ensure `.env` values (e.g. OPENCLAW_RUNTIME) are visible before runtime resolution.
+    # Ensure `.env` values are visible before runtime resolution.
     load_dotenv(override=False)
-    env_runtime = str(os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
+    env_runtime = str(os.getenv("APP_RUNTIME") or os.getenv("BROWSER_RUNTIME_MODE") or os.getenv("OPENCLAW_RUNTIME", "")).strip().lower()
     if env_runtime in {"auto", "lite", "pro"}:
         return env_runtime
 
@@ -64,22 +65,22 @@ def check_gateway_reachable() -> StartupCheckResult:
     try:
         import httpx
 
-        host = os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
-        port = int(os.getenv("OPENCLAW_GATEWAY_PORT", "18789"))
+        host = os.getenv("BROWSER_RUNTIME_HOST") or os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
+        port = int(os.getenv("BROWSER_RUNTIME_PORT") or os.getenv("OPENCLAW_GATEWAY_PORT", "18789"))
         browser_port = port + 2
         url = f"http://{host}:{browser_port}/"
         resp = httpx.get(url, timeout=5)
         if resp.status_code == 200:
-            return StartupCheckResult("OpenClaw Gateway", True, f"可连接 ({host}:{browser_port})")
-        return StartupCheckResult("OpenClaw Gateway", False, f"响应异常 (HTTP {resp.status_code})")
+            return StartupCheckResult(LEGACY_GATEWAY_CHECK_NAME, True, f"可连接 ({host}:{browser_port})")
+        return StartupCheckResult(LEGACY_GATEWAY_CHECK_NAME, False, f"响应异常 (HTTP {resp.status_code})")
     except httpx.ConnectError:
         return StartupCheckResult(
-            "OpenClaw Gateway",
+            LEGACY_GATEWAY_CHECK_NAME,
             False,
-            "无法连接。请确认 OpenClaw Gateway 正在运行 (docker compose ps)",
+            "无法连接。请确认 legacy browser gateway 正在运行 (docker compose ps)",
         )
     except Exception as e:
-        return StartupCheckResult("OpenClaw Gateway", False, f"检查失败: {e}")
+        return StartupCheckResult(LEGACY_GATEWAY_CHECK_NAME, False, f"检查失败: {e}")
 
 
 def check_database_writable() -> StartupCheckResult:
@@ -171,7 +172,7 @@ def check_lite_browser_dependency() -> StartupCheckResult:
 
 
 def _is_production_env() -> bool:
-    env_keys = ("OPENCLAW_ENV", "APP_ENV", "ENV", "PYTHON_ENV")
+    env_keys = ("APP_ENV", "ENV", "PYTHON_ENV", "OPENCLAW_ENV")
     for key in env_keys:
         value = str(os.getenv(key, "")).strip().lower()
         if value in {"prod", "production"}:
@@ -252,14 +253,14 @@ def run_all_checks(skip_browser: bool = False) -> list[StartupCheckResult]:
         results.append(check_lite_browser_dependency())
         return results
 
-    # auto 模式：优先探测 gateway，失败则检查 lite 依赖。
+    # auto 模式：优先探测 legacy gateway，失败则检查 lite 依赖。
     gateway = check_gateway_reachable()
     if gateway.passed:
         results.append(gateway)
     else:
         results.append(
             StartupCheckResult(
-                "OpenClaw Gateway",
+                LEGACY_GATEWAY_CHECK_NAME,
                 False,
                 f"{gateway.message}（auto 模式将尝试 lite 回退）",
                 critical=False,
