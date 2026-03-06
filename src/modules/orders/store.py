@@ -21,7 +21,7 @@ class OrderStore:
             supply_order_no=str(detail.get("supply_order_no") or "").strip() or None,
             session_id=str(detail.get("session_id") or detail.get("chat_id") or ""),
             order_status=status,
-            callback_status="synced",
+            callback_status="none",  # Orders synced from open platform don't come from callbacks
             fulfillment_status=str(detail.get("fulfillment_status") or "pending"),
             manual_takeover=bool(detail.get("manual_takeover") or False),
         )
