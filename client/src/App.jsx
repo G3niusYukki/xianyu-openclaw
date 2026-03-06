@@ -1,75 +1,39 @@
 import React from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
-import { AuthProvider } from './hooks/useAuth'
+import ErrorBoundary from './components/ErrorBoundary'
 import Navbar from './components/Navbar'
-import Home from './pages/Home'
-import Login from './pages/Login'
-import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
-import Review from './pages/Review'
-import History from './pages/History'
-import Pricing from './pages/Pricing'
-import Settings from './pages/Settings'
-import PrivateRoute from './components/PrivateRoute'
-import Detail from './pages/Detail'
-import Publish from './pages/Publish'
-import Chat from './pages/Chat'
 import Orders from './pages/Orders'
+import AutoPublish from './pages/products/AutoPublish'
+import ProductList from './pages/products/ProductList'
+import AccountList from './pages/accounts/AccountList'
+import SystemConfig from './pages/config/SystemConfig'
+import Analytics from './pages/analytics/Analytics'
+import Messages from './pages/messages/Messages'
 
 function App() {
   return (
-    <AuthProvider>
+    <ErrorBoundary>
       <Router>
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-xy-bg text-xy-text-primary">
           <Navbar />
           <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/pricing" element={<Pricing />} />
-            <Route path="/detail" element={<Detail />} />
-            <Route path="/publish" element={<Publish />} />
-            <Route path="/chat" element={<Chat />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/products" element={<ProductList />} />
+            <Route path="/products/auto-publish" element={<AutoPublish />} />
             <Route path="/orders" element={<Orders />} />
-            <Route
-              path="/dashboard"
-              element={
-                <PrivateRoute>
-                  <Dashboard />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/review"
-              element={
-                <PrivateRoute>
-                  <Review />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/history"
-              element={
-                <PrivateRoute>
-                  <History />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/settings"
-              element={
-                <PrivateRoute>
-                  <Settings />
-                </PrivateRoute>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="/messages" element={<Messages />} />
+            <Route path="/accounts" element={<AccountList />} />
+            <Route path="/config" element={<SystemConfig />} />
+            <Route path="/analytics" element={<Analytics />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
-          <Toaster position="top-right" />
+          <Toaster position="top-right" toastOptions={{ className: 'text-sm font-medium' }} />
         </div>
       </Router>
-    </AuthProvider>
+    </ErrorBoundary>
   )
 }
 

@@ -1,38 +1,65 @@
 services:
-  openclaw-gateway:
-    image: coollabsio/openclaw:latest
-    container_name: xianyu-openclaw
+  node-backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: xianyu-node-backend
     ports:
-      - "${OPENCLAW_WEB_PORT:-8080}:8080"
+      - "${NODE_PORT:-3001}:3001"
+    env_file:
+      - .env
     volumes:
-      - ./skills:/home/node/.openclaw/workspace/skills
-      - ./src:/home/node/.openclaw/workspace/src
-      - ./config:/home/node/.openclaw/workspace/config
-      - ./data:/home/node/.openclaw/workspace/data
-      - ./requirements.txt:/home/node/.openclaw/workspace/requirements.txt
-      - ./skills:/data/workspace/skills
-      - ./src:/data/workspace/src
-      - ./config:/data/workspace/config
-      - ./data:/data/workspace/data
-      - ./requirements.txt:/data/workspace/requirements.txt
-      - ./scripts/init.sh:/app/config/init.sh
-      - openclaw-state:/home/node/.openclaw
-      - openclaw-state:/data/.openclaw
+      - node-data:/app/data
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3001
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  python-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    container_name: xianyu-python-backend
+    ports:
+      - "${PYTHON_PORT:-8091}:8091"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
     env_file:
       - .env
     environment:
-      - HOME=/home/node
-      - TERM=xterm-256color
-      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
-      - OPENCLAW_CUSTOM_INIT=/app/config/init.sh
-    init: true
-    restart: unless-stopped
+      PYTHONUNBUFFERED: 1
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/healthz"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "curl -sf http://localhost:8091/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 30s
+    restart: unless-stopped
+
+  react-frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VITE_NODE_API_URL: ${VITE_NODE_API_URL:-/api}
+        VITE_PY_API_URL: ${VITE_PY_API_URL:-/py}
+    container_name: xianyu-react-frontend
+    depends_on:
+      node-backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 
 volumes:
-  openclaw-state:
+  node-data:

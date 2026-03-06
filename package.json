@@ -1,7 +1,7 @@
 {
-  "name": "code-review-service",
+  "name": "xianyu-openclaw",
   "version": "1.0.0",
-  "description": "AI-powered code review service",
+  "description": "闲鱼管家 - 虚拟商品卖家自动化工作台",
   "private": true,
   "scripts": {
     "install:all": "cd server && npm install && cd ../client && npm install",

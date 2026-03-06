@@ -86,6 +86,9 @@ class OpenPlatformClient:
     def create_product(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
         return self._post("/api/open/product/create", payload)
 
+    def list_products(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
+        return self._post("/api/open/product/list", payload)
+
     def publish_product(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
         return self._post("/api/open/product/publish", payload)
 
@@ -109,3 +112,6 @@ class OpenPlatformClient:
 
     def get_order_detail(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
         return self._post("/api/open/order/detail", payload)
+
+    def list_authorized_users(self, payload: dict[str, Any] | None = None) -> XianGuanJiaResponse:
+        return self._post("/api/open/user/authorize/list", payload or {})

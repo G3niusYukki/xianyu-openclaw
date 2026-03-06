@@ -109,10 +109,18 @@ ALL_SUPPORTED_KEYS = [
     "AI_BASE_URL",
     "AI_MODEL",
     "AI_TEMPERATURE",
+    "XGJ_APP_KEY",
+    "XGJ_APP_SECRET",
+    "XGJ_MERCHANT_ID",
+    "XGJ_BASE_URL",
     "OPENCLAW_GATEWAY_TOKEN",
     "OPENCLAW_WEB_PORT",
     "AUTH_PASSWORD",
     "AUTH_USERNAME",
+    "NODE_PORT",
+    "PYTHON_PORT",
+    "FRONTEND_PORT",
+    "FRONTEND_URL",
     "XIANYU_COOKIE_1",
     "XIANYU_COOKIE_2",
     "ENCRYPTION_KEY",
@@ -136,7 +144,7 @@ def _prompt(text: str, default: str | None = None, required: bool = False, secre
 
 
 def _choose_gateway_provider() -> GatewayProvider:
-    print("\n请选择网关 AI 服务（用于 OpenClaw 对话与技能调度）:")
+    print("\n请选择主 AI 服务（用于消息回复、策略判断和通用文本任务）:")
     for idx, provider in enumerate(GATEWAY_PROVIDERS, start=1):
         print(f"{idx}) {provider.title}")
 
@@ -172,7 +180,7 @@ def _build_env_content(values: dict[str, str], gateway_key: str, content_key: st
     lines = [
         "# 由 setup_wizard 自动生成",
         "",
-        "# === Gateway AI Provider (required by OpenClaw startup) ===",
+        "# === Primary AI Provider ===",
         f"ANTHROPIC_API_KEY={values.get('ANTHROPIC_API_KEY', '')}",
         f"OPENAI_API_KEY={values.get('OPENAI_API_KEY', '')}",
         f"MOONSHOT_API_KEY={values.get('MOONSHOT_API_KEY', '')}",
@@ -193,11 +201,19 @@ def _build_env_content(values: dict[str, str], gateway_key: str, content_key: st
         f"AI_MODEL={values.get('AI_MODEL', 'deepseek-chat')}",
         f"AI_TEMPERATURE={values.get('AI_TEMPERATURE', '0.7')}",
         "",
-        "# === OpenClaw Gateway ===",
-        f"OPENCLAW_GATEWAY_TOKEN={values.get('OPENCLAW_GATEWAY_TOKEN', '')}",
-        f"OPENCLAW_WEB_PORT={values.get('OPENCLAW_WEB_PORT', '8080')}",
+        "# === XianGuanJia Open Platform ===",
+        f"XGJ_APP_KEY={values.get('XGJ_APP_KEY', '')}",
+        f"XGJ_APP_SECRET={values.get('XGJ_APP_SECRET', '')}",
+        f"XGJ_MERCHANT_ID={values.get('XGJ_MERCHANT_ID', '')}",
+        f"XGJ_BASE_URL={values.get('XGJ_BASE_URL', 'https://open.goofish.pro')}",
+        "",
+        "# === Local Auth & Ports ===",
         f"AUTH_PASSWORD={values.get('AUTH_PASSWORD', '')}",
         f"AUTH_USERNAME={values.get('AUTH_USERNAME', 'admin')}",
+        f"FRONTEND_PORT={values.get('FRONTEND_PORT', '5173')}",
+        f"NODE_PORT={values.get('NODE_PORT', '3001')}",
+        f"PYTHON_PORT={values.get('PYTHON_PORT', '8091')}",
+        f"FRONTEND_URL={values.get('FRONTEND_URL', 'http://localhost:5173')}",
         "",
         "# === Xianyu Cookie ===",
         f"XIANYU_COOKIE_1={values.get('XIANYU_COOKIE_1', '')}",
@@ -209,7 +225,7 @@ def _build_env_content(values: dict[str, str], gateway_key: str, content_key: st
         "# === Database ===",
         f"DATABASE_URL={values.get('DATABASE_URL', 'sqlite:///data/agent.db')}",
         "",
-        f"# 当前启用 Gateway Key: {gateway_key}",
+        f"# 当前启用 Main AI Key: {gateway_key}",
         f"# 当前启用 Business AI Key: {content_key}",
     ]
     return "\n".join(lines) + "\n"
@@ -235,13 +251,13 @@ def _run_post_start_checks(web_port: str) -> None:
     text = logs.stdout + logs.stderr
 
     if "At least one AI provider API key env var is required" in text:
-        print("\n[检查结果] 网关缺少可识别 API Key。请确认 Gateway Provider Key 已填写。")
+        print("\n[检查结果] 主 AI 服务未配置成功，请确认 AI Provider Key 已填写。")
         return
 
     print(f"\n启动完成。打开: http://localhost:{web_port}")
-    print("如提示 pairing required，可执行:")
-    print("  docker compose exec -it openclaw-gateway openclaw devices list")
-    print("  docker compose exec -it openclaw-gateway openclaw devices approve <requestId>")
+    print("Node 代理（可选）默认地址: http://localhost:3001")
+    print("Python 核心默认地址: http://localhost:8091")
+    print("如需查看容器日志，可执行: docker compose logs -f")
 
 
 def run_setup() -> int:
@@ -249,7 +265,7 @@ def run_setup() -> int:
     env_path = root / ".env"
 
     print("=" * 56)
-    print("闲鱼 OpenClaw 一站式部署向导")
+    print("闲鱼 API-first 一站式部署向导")
     print("=" * 56)
 
     existing = _read_existing_env(env_path)
@@ -296,8 +312,14 @@ def run_setup() -> int:
             required=True,
         )
 
-    token_default = existing.get("OPENCLAW_GATEWAY_TOKEN") or secrets.token_hex(32)
-    token = _prompt("设置 OPENCLAW_GATEWAY_TOKEN", default=token_default, required=True)
+    xgj_app_key = _prompt("填写 XGJ_APP_KEY（可留空，稍后也可在 /config 配置）", default=existing.get("XGJ_APP_KEY", ""))
+    xgj_app_secret = _prompt(
+        "填写 XGJ_APP_SECRET（可留空，稍后也可在 /config 配置）",
+        default=existing.get("XGJ_APP_SECRET", ""),
+        secret=True,
+    )
+    xgj_merchant_id = _prompt("填写 XGJ_MERCHANT_ID（可选）", default=existing.get("XGJ_MERCHANT_ID", ""))
+    xgj_base_url = _prompt("设置 XGJ_BASE_URL", default=existing.get("XGJ_BASE_URL", "https://open.goofish.pro"), required=True)
     password = _prompt(
         "设置 AUTH_PASSWORD（后台登录密码）",
         default=existing.get("AUTH_PASSWORD"),
@@ -305,7 +327,7 @@ def run_setup() -> int:
         secret=True,
     )
     username = _prompt("设置 AUTH_USERNAME", default=existing.get("AUTH_USERNAME", "admin"), required=True)
-    web_port = _prompt("设置 OPENCLAW_WEB_PORT", default=existing.get("OPENCLAW_WEB_PORT", "8080"), required=True)
+    web_port = _prompt("设置 FRONTEND_PORT（前端端口）", default=existing.get("FRONTEND_PORT", "5173"), required=True)
 
     cookie_1 = _prompt("粘贴 XIANYU_COOKIE_1", default=existing.get("XIANYU_COOKIE_1"), required=True)
     cookie_2 = _prompt("粘贴 XIANYU_COOKIE_2（可留空）", default=existing.get("XIANYU_COOKIE_2", ""), required=False)
@@ -334,10 +356,12 @@ def run_setup() -> int:
 
     merged.update(
         {
-            "OPENCLAW_GATEWAY_TOKEN": token,
             "AUTH_PASSWORD": password,
             "AUTH_USERNAME": username,
-            "OPENCLAW_WEB_PORT": web_port,
+            "FRONTEND_PORT": web_port,
+            "NODE_PORT": existing.get("NODE_PORT", "3001"),
+            "PYTHON_PORT": existing.get("PYTHON_PORT", "8091"),
+            "FRONTEND_URL": existing.get("FRONTEND_URL", f"http://localhost:{web_port}"),
             "XIANYU_COOKIE_1": cookie_1,
             "XIANYU_COOKIE_2": cookie_2,
             "AI_PROVIDER": content_provider.id,
@@ -347,6 +371,10 @@ def run_setup() -> int:
             "AI_TEMPERATURE": existing.get("AI_TEMPERATURE", "0.7"),
             "OPENAI_BASE_URL": existing.get("OPENAI_BASE_URL", ""),
             "CUSTOM_GATEWAY_BASE_URL": gateway_base_url,
+            "XGJ_APP_KEY": xgj_app_key,
+            "XGJ_APP_SECRET": xgj_app_secret,
+            "XGJ_MERCHANT_ID": xgj_merchant_id,
+            "XGJ_BASE_URL": xgj_base_url,
         }
     )
 
@@ -366,7 +394,7 @@ def run_setup() -> int:
             return result.returncode
 
         _run_post_start_checks(web_port)
-        print("后台可视化可执行: python3 -m src.dashboard_server --port 8091")
+        print("本地开发模式也可执行: ./start.sh")
     else:
         print("\n你可以稍后手动执行: docker compose up -d")
 

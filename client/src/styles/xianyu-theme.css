@@ -1,0 +1,53 @@
+/* 闲鱼专属设计主题 Token */
+:root {
+  /* 品牌色 */
+  --xy-brand-50: #fff7ed;
+  --xy-brand-100: #fff0e2;
+  --xy-brand-200: #fed7aa;
+  --xy-brand-300: #fdba74;
+  --xy-brand-400: #fb923c;
+  --xy-brand-500: #ff7a00;    /* 主色 */
+  --xy-brand-600: #eb6b00;    /* hover */
+  --xy-brand-700: #c2590a;    /* active */
+
+  /* 中性色 */
+  --xy-gray-50: #f8fafc;
+  --xy-gray-100: #f1f5f9;
+  --xy-gray-200: #e2e8f0;
+  --xy-gray-300: #cbd5e1;
+  --xy-gray-400: #94a3b8;
+  --xy-gray-500: #64748b;
+  --xy-gray-600: #475569;
+  --xy-gray-700: #334155;
+  --xy-gray-800: #1e293b;
+  --xy-gray-900: #0f172a;
+
+  /* 语义色 */
+  --xy-success: #22c55e;
+  --xy-success-bg: #dcfce7;
+  --xy-warning: #f59e0b;
+  --xy-warning-bg: #fef3c7;
+  --xy-error: #ef4444;
+  --xy-error-bg: #fee2e2;
+  --xy-info: #3b82f6;
+  --xy-info-bg: #dbeafe;
+
+  /* 基础与结构 */
+  --xy-bg: var(--xy-gray-50);
+  --xy-surface: #ffffff;
+  --xy-surface-soft: var(--xy-gray-50);
+  --xy-text-primary: var(--xy-gray-900);
+  --xy-text-secondary: var(--xy-gray-500);
+  --xy-text-muted: var(--xy-gray-400);
+  --xy-border: var(--xy-gray-200);
+  
+  /* 圆角 */
+  --xy-radius-sm: 8px;
+  --xy-radius-md: 14px;
+  --xy-radius-lg: 20px;
+
+  /* 阴影 */
+  --xy-shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --xy-shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --xy-shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.08);
+}

@@ -1,628 +1,112 @@
-# 闲鱼自动化工具 - 使用说明书
+# 用户指南
 
-> 这份说明书面向从未接触过计算机技术的普通用户。
+这份文档面向第一次使用本项目的卖家。
 
----
+## 1. 这个工具能做什么
 
-## 目录
+- 自动读取店铺状态、消息统计和订单数据
+- 用 AI 生成商品标题、描述和主图
+- 通过闲管家接口创建商品、上架、下架、改价、发货
+- 管理 Cookie、账号健康和自动化模块
 
-1. [这个工具能帮我做什么？](#1-这个工具能帮我做什么)
-2. [我需要准备什么？](#2-我需要准备什么)
-3. [安装步骤](#3-安装步骤)
-4. [获取闲鱼 Cookie](#4-获取闲鱼-cookie)
-5. [启动工具](#5-启动工具)
-6. [怎么用？直接对话就行](#6-怎么用直接对话就行)
-7. [日常维护](#7-日常维护)
-8. [自动化推进与飞书通知](#8-自动化推进与飞书通知)
-9. [常见问题](#9-常见问题)
-10. [名词解释](#10-名词解释)
+它不是聊天式 OpenClaw 助手，也不依赖 OpenClaw Gateway。
 
----
+## 2. 你需要准备什么
 
-## 1. 这个工具能帮我做什么？
+- 一台能联网的电脑
+- 一个能正常登录的闲鱼账号
+- 从浏览器复制出的闲鱼 Cookie
+- 一个 AI API Key
+- 一个闲管家 Open Platform 应用的 `AppKey/AppSecret`
 
-如果你在闲鱼上卖东西，每天需要重复做很多事情：发布商品、写标题和描述、每天擦亮、调价格、看数据。
+## 3. 获取 Cookie
 
-**这个工具让你用"说话"的方式完成所有操作。**
+1. 打开 `https://www.goofish.com` 并登录。
+2. 按 `F12` 打开开发者工具。
+3. 切到 `Network`。
+4. 刷新页面并点开任意请求。
+5. 复制请求头里的整段 `Cookie`。
+6. 写入 `.env` 的 `XIANYU_COOKIE_1`，或在前端 `店铺管理` 页面更新。
 
-你只需要打开一个网页，像跟助手聊天一样说：
-
-- "帮我发布一个 iPhone 15，价格 5999"
-- "擦亮所有商品"
-- "今天卖得怎么样"
-- "把那个 MacBook 降价到 8000"
-
-AI 助手会自动帮你在闲鱼上完成这些操作。
-
----
-
-## 2. 我需要准备什么？
-
-| 你需要 | 说明 |
-|--------|------|
-| 一台电脑或服务器 | Windows、macOS 或 Linux |
-| 能上网 | 需要连接互联网 |
-| 闲鱼账号 | 能正常登录的闲鱼账号 |
-| AI 服务密钥 | 网关模型（Anthropic/OpenAI/Kimi/MiniMax/智谱ZAI 任选一个）+ 业务文案模型（DeepSeek/百炼/火山/智谱等可选） |
-| Python 3.10+ | 仅在本地运行脚本（如一键向导、可视化后台）时需要 |
-| Docker | 一个免费的软件，用来运行工具 |
-
----
-
-## 3. 安装步骤
-
-### 3.1 安装 Docker
-
-**Windows 用户：**
-1. 打开 https://www.docker.com/products/docker-desktop/
-2. 下载 Docker Desktop for Windows
-3. 双击安装，一路点 Next
-4. 安装完成后重启电脑
-5. 打开 Docker Desktop，等左下角状态变成绿色 "Running"
-
-**macOS 用户：**
-1. 打开 https://www.docker.com/products/docker-desktop/
-2. 下载 Docker Desktop for Mac
-3. 拖到 Applications 安装
-4. 打开 Docker Desktop，等左下角状态变成绿色 "Running"
-
-### 3.2 下载本工具
-
-1. 打开 https://github.com/G3niusYukki/xianyu-openclaw
-2. 点击绿色的 "Code"按钮
-3. 点击 "Download ZIP"
-4. 解压到你想放的位置
-
-### 3.2.1 Windows 一键部署工具（推荐 Windows 用户）
-
-如果你使用 Windows，可以直接用图形化工具完成所有配置，不需要打开命令行：
-
-1. 确保已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-2. 从 [Releases 页面](https://github.com/G3niusYukki/xianyu-openclaw/releases/latest) 下载 `xianyu-openclaw-launcher.zip`
-3. 解压到你想放的位置（如桌面）
-4. 双击 `xianyu-openclaw-launcher.exe`
-5. 按向导步骤操作：
-   - **第 1 步**：工具会自动检测 Docker 是否安装，如未安装会引导你下载
-   - **第 2 步**：选择网关 AI 服务（推荐 Anthropic），填入 API Key
-   - **第 3 步**：选择业务文案 AI 服务（推荐 DeepSeek），填入 API Key
-   - **第 4 步**：设置登录密码、端口等（有默认值，可以不改）
-   - **第 5 步**：粘贴闲鱼 Cookie（获取方法见[第 4 节](#4-获取闲鱼-cookie)）
-   - **第 6 步**：确认所有信息，点击"生成配置并启动"
-6. 等待启动完成，工具会自动打开浏览器
-7. 用你设置的密码登录，开始使用！
-
-> 使用 EXE 工具后，你不再需要手动编辑 `.env` 文件或输入任何命令。
-
-### 3.3 获取 AI 密钥
-
-工具需要 AI 服务来理解你的指令。建议分成两类：
-
-- 网关模型（必填）：Anthropic / OpenAI / Moonshot(Kimi) / MiniMax / ZAI（智谱）
-- 业务文案模型（可选）：DeepSeek / 阿里百炼 / 火山方舟 / MiniMax / 智谱
-
-**Anthropic（推荐）：**
-1. 打开 https://console.anthropic.com/
-2. 注册账号
-3. 在 API Keys 页面创建密钥
-4. 复制密钥（以 `sk-ant-` 开头）
-
-**DeepSeek（最便宜）：**
-1. 打开 https://platform.deepseek.com/
-2. 注册账号
-3. 创建 API Key，复制密钥
-
-### 3.4 配置
-
-在工具文件夹中找到 `.env.example` 文件，复制一份改名为 `.env`。
-
-用记事本打开 `.env`，填入：
-
-```
-ANTHROPIC_API_KEY=你的AI密钥
-OPENCLAW_GATEWAY_TOKEN=随便设一个密码
-AUTH_PASSWORD=你的登录密码
-XIANYU_COOKIE_1=你的闲鱼Cookie（下一步教你获取）
-```
-
----
-
-### 3.5 中国大陆网络受限环境部署（离线/镜像方案）
-
-如果你在中国大陆，遇到以下问题：
-- 无法访问 GitHub
-- Docker Hub 拉取镜像失败
-- pip 安装 Python 包超时
-- 无法连接 OpenAI/Anthropic 等国外 AI 服务
-
-请使用以下方案：
-
-#### 方案 A：使用国内镜像源（推荐，网络受限但可联网）
-
-**1. 使用国内 pip 镜像（清华/阿里云）**
-
-修改安装脚本，在 `scripts/windows/setup_windows.bat` 中，将第19行改为：
-
-```batch
-call .venv\Scripts\pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
-
-或在用户目录创建 `pip.ini` 文件：
-
-```ini
-[global]
-index-url = https://pypi.tuna.tsinghua.edu.cn/simple
-trusted-host = pypi.tuna.tsinghua.edu.cn
-```
-
-文件位置：
-- Windows: `C:\Users\你的用户名\pip\pip.ini`
-- 或 `C:\Users\你的用户名\AppData\Roaming\pip\pip.ini`
-
-**2. 使用国内 Docker 镜像加速器**
-
-编辑 Docker Desktop 设置：
-- 打开 Docker Desktop → Settings → Docker Engine
-- 添加 registry-mirrors：
-
-```json
-{
-  "registry-mirrors": [
-    "https://mirror.ccs.tencentyun.com",
-    "https://hub-mirror.c.163.com",
-    "https://docker.mirrors.ustc.edu.cn"
-  ]
-}
-```
-
-**3. 使用国产 AI 服务（绕过 OpenAI/Anthropic）**
-
-编辑 `.env` 文件，使用 DeepSeek 或阿里云百炼：
-
-```env
-# === 网关配置 ===
-CUSTOM_GATEWAY_API_KEY=sk-your-deepseek-key
-CUSTOM_GATEWAY_BASE_URL=https://api.deepseek.com/v1
-
-# === 业务 AI 配置 ===
-DEEPSEEK_API_KEY=sk-your-deepseek-key
-AI_PROVIDER=deepseek
-AI_API_KEY=sk-your-deepseek-key
-AI_BASE_URL=https://api.deepseek.com/v1
-AI_MODEL=deepseek-chat
-```
-
-备选（阿里云百炼）：
-```env
-DASHSCOPE_API_KEY=sk-your-dashscope-key
-AI_PROVIDER=aliyun_bailian
-AI_API_KEY=sk-your-dashscope-key
-AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-AI_MODEL=qwen-turbo
-```
-
-#### 方案 B：完全离线部署（无法访问任何外网）
-
-**准备阶段（在有网络的电脑上进行）：**
-
-1. **下载项目代码**
-   - 从 GitHub 下载 ZIP 包，或让朋友帮你下载后复制
-
-2. **下载所有 Python 依赖包（whl格式）**
-
-在能联网的电脑上执行：
-```bash
-mkdir offline_packages
-pip download -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --only-binary=:all: --platform win_amd64
-pip download playwright -i https://pypi.tuna.tsinghua.edu.cn/simple --only-binary=:all: --platform win_amd64
-```
-
-3. **下载 Playwright 浏览器**
-- 从阿里云镜像下载 Chromium 浏览器
-- 或使用 U 盘从其他电脑复制已安装的浏览器
-
-4. **导出 Docker 镜像（如使用 Docker）**
-```bash
-docker pull coollabsio/openclaw:latest
-docker save coollabsio/openclaw:latest > openclaw-image.tar
-```
-
-**部署阶段（在离线 Windows 11 机器上）：**
-
-1. **传输文件**
-   将以下文件复制到目标机器：
-   - 项目代码文件夹
-   - `offline_packages/` 文件夹（所有 whl 文件）
-   - `chromium/` 浏览器文件夹
-   - `openclaw-image.tar`（如使用 Docker）
-
-2. **创建离线安装脚本**
-
-创建 `setup_offline.bat` 文件：
-
-```batch
-@echo off
-setlocal enabledelayedexpansion
-echo ============================================
-echo   闲鱼 OpenClaw - 离线部署
-echo ============================================
-cd /d %~dp0
-
-:: 检查 Python
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo [错误] 未检测到 Python，请先安装 Python 3.10+
-    pause
-    exit /b 1
-)
-
-:: 创建虚拟环境
-echo [*] 创建虚拟环境...
-python -m venv .venv
-
-:: 离线安装依赖
-echo [*] 离线安装依赖...
-.venv\Scripts\pip install --no-index --find-links=offline_packages -r requirements.txt
-
-:: 配置浏览器
-echo [*] 配置浏览器...
-set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-xcopy /E /I /Y chromium .venv\Lib\site-packages\playwright\driver\package\.local-browsers\chromium-1097 2>nul
-
-:: 创建目录
-mkdir data 2>nul
-mkdir logs 2>nul
-mkdir config 2>nul
-
-:: 复制配置文件
-if not exist .env copy .env.example .env
-if not exist config\config.yaml copy config\config.example.yaml config\config.yaml
-
-echo [OK] 部署完成！请编辑 .env 配置 AI Key 和 Cookie。
-pause
-```
-
-3. **运行安装脚本**
-   双击 `setup_offline.bat` 执行安装
-
-4. **配置和启动**
-   - 编辑 `.env` 文件，配置国产 AI 服务
-   - 运行 `scripts\windows\menu.bat` 启动
-
----
-
-## 4. 获取闲鱼 Cookie
-
-**什么是 Cookie？** 简单理解：当你登录闲鱼后，浏览器保存了一个"通行证"。我们需要把这个通行证告诉工具，工具才能代替你操作。
-
-### 获取步骤（推荐）
-
-1. 用 Chrome 浏览器打开 https://www.goofish.com
-2. 登录你的闲鱼账号
-3. 按 **F12** 打开开发者工具
-4. 点击顶部的 **Network** 标签
-5. 按 **F5** 刷新页面
-6. 左边出现很多请求，点击任意 `goofish.com` 请求
-7. 右边 `Request Headers` 找到 **Cookie:** 这一项
-8. 复制完整 Cookie 值（`a=...; b=...; ...` 这一整串）
-9. 粘贴到 `.env` 的 `XIANYU_COOKIE_1=` 后面，或到管理面板 `/cookie` 更新
-
-### 三种可用粘贴格式（面板都支持）
-
-1. 请求头字符串：`name=value; name2=value2; ...`
-2. 浏览器 Cookie 表格文本（Name/Value/Domain 那种复制结果）
-3. `cookies.txt`（Netscape）或 JSON 导出
-
-### 插件一键导入（Get-cookies.txt-LOCALLY）
-
-1. 打开本项目面板：`http://127.0.0.1:8091/cookie`
-2. 点击“下载内置插件包”（项目已内置源码，可离线交付）
-3. 解压后在浏览器扩展管理页加载 `Get-cookies.txt-LOCALLY/src`
-4. 打开闲鱼页面，用插件导出 `cookies.txt` / JSON / ZIP
-5. 回到 Cookie 页，选择“插件导出文件”，点击“插件一键导入并更新”
-6. 系统会自动识别并写入 `XIANYU_COOKIE_1`
-
-### 关键字段（建议至少包含）
-
-- `_tb_token_`
-- `cookie2`
-- `sgcookie`
-- `unb`
-
-### 常见问题排查
-
-1. 更新后仍无法用：通常是 Cookie 已过期，重新登录后再复制。
-2. 解析失败：先在 `/cookie` 页面点“智能解析”，再点“更新Cookie”。
-3. 字段缺失：说明复制不完整，必须复制完整 Cookie 行。
-4. 账号掉线：浏览器先确认闲鱼页面处于登录态，再重新获取。
-
-> Cookie 有有效期，通常 7-30 天后需要重新获取。
-> Cookie 等同账号登录态，不要分享给他人。
-
----
-
-## 5. 启动工具
-
-### 一键部署（推荐）
-
-不想手动改 `.env` 的话，直接运行：
+## 4. 安装
 
 ```bash
-python3 -m src.setup_wizard
+cp .env.example .env
+./start.sh
 ```
 
-Windows 用户也可以先执行（自动创建虚拟环境并安装依赖）：
+如果是第一次运行，脚本会创建 Python 虚拟环境并安装前后端依赖。
 
-```bat
-scripts\windows\setup_windows.bat
-# 一键安装 + 自检 + 启动
-scripts\windows\quickstart.bat
-```
+## 5. 打开页面
 
-按提示一步一步输入：
-- AI API Key
-- OpenClaw 登录密码
-- 闲鱼 Cookie
+- 前端工作台：`http://localhost:5173`
+- Python 核心：`http://localhost:8091`
+- Node 代理：`http://localhost:3001`
 
-向导会自动生成 `.env`，并可直接帮你执行 `docker compose up -d`。
+## 6. 页面怎么用
 
-### 第一次启动
+`工作台`
+- 看整体状态、Cookie 健康、消息和订单摘要。
 
-在工具文件夹中打开终端（命令行），执行：
+`商品管理`
+- 查询商品列表，执行上架 / 下架。
+
+`AI 智能自动上架`
+- 选择模板，填写商品名和价格，生成文案与预览图，再发布到闲管家。
+
+`订单中心`
+- 查询订单。
+- 待付款订单可改价。
+- 待发货订单可发货。
+
+`消息中心`
+- 看真实消息统计和消息模块日志。
+
+`店铺管理`
+- 更新 Cookie。
+- 查看账号健康度。
+- 启停自动化模块。
+
+`系统配置`
+- 配置 AI。
+- 配置闲管家。
+- 配置自动化运行参数。
+
+## 7. 常见问题
+
+### 看不到商品或订单
+
+通常是闲管家配置不完整：
+
+- `XGJ_APP_KEY`
+- `XGJ_APP_SECRET`
+- `XGJ_BASE_URL`
+
+### 前端能打开，但页面全报错
+
+优先检查：
+
+- Python 是否启动：`http://localhost:8091/healthz`
+- Node 是否启动：`http://localhost:3001/health`
+- `.env` 是否填了真实值
+
+### 自动上架能生成文案，但发不出去
+
+通常是以下原因：
+
+- 闲管家商品接口未授权
+- OSS 配置不完整
+- 生成文案通过了，但发布参数仍不满足目标类目要求
+
+### 消息中心没有“手动发送”
+
+这是刻意设计。当前页面只展示真实消息统计和日志，不再提供本地模拟发送。
+
+## 8. Docker 版
 
 ```bash
-docker compose up -d
-```
-
-等待几分钟下载和启动。
-
-### 打开使用
-
-浏览器访问：
-
-```
-http://localhost:8080
-```
-
-输入你在 `.env` 中设置的用户名（默认 admin）和密码登录。
-
-### 可视化后台（运营看板）
-
-如果你想看图表和操作日志，可单独启动后台页面：
-
-```bash
-python3 -m src.dashboard_server --port 8091
-```
-
-浏览器打开 `http://localhost:8091`，可看到趋势图、商品表现和最近操作记录。
-
-### 启动前自检（推荐）
-
-先执行 doctor，自动检查 Python、Cookie、数据库、网关连通性和首响配置：
-
-```bash
-python3 -m src.cli doctor --strict
-```
-
-### 关闭
-
-```bash
-docker compose down
-```
-
-### 再次启动
-
-```bash
-docker compose up -d
-```
-
----
-
-## 6. 怎么用？直接对话就行
-
-登录后你会看到一个对话界面。像跟助手聊天一样说你想做什么。
-
-### 发布商品
-
-> "帮我发布一个 iPhone 15 Pro 256G，95新，价格 5999，换新手机了"
-
-AI 会自动帮你生成标题和描述，然后在闲鱼上发布。
-
-### 擦亮商品
-
-> "帮我擦亮所有商品"
-
-AI 会自动帮你擦亮全部在售商品。
-
-### 调整价格
-
-> "把那个 iPhone 的价格改成 5500"
-
-### 查看数据
-
-> "今天运营数据怎么样"
->
-> "最近一周浏览量怎么变化的"
-
-### 管理账号
-
-> "我的账号还正常吗"
->
-> "Cookie 过期了，帮我更新"
-
----
-
-## 7. 日常维护
-
-## 合规提醒（很重要）
-
-- 只发布合法、真实、可交易的商品信息，不要发布假货、仿品或违规词内容。
-- 不要引导买家去微信、QQ 等站外交易。
-- 如果系统提示“命中禁词”或“操作过于频繁”，说明触发了合规保护，需要修改内容或稍后重试。
-- 合规规则在 `config/rules.yaml`，可按你的店铺运营策略调整。
-- `mode: block` 表示直接拦截，`mode: warn` 表示只记录告警但继续执行。
-
-### 每天要做的
-
-什么都不用做。你可以设置自动擦亮，AI 会按计划执行。
-
-### 每周建议做的
-
-- 打开对话，问问 "我的 Cookie 还有效吗"
-- 如果过期了，重新获取 Cookie（见第 4 步）
-- 查看周报：问 "这周运营情况怎么样"
-
-### 更新工具
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-这会自动获取 OpenClaw 最新版本。
-
----
-
-## 8. 自动化推进与飞书通知
-
-如果你希望系统自动持续处理询盘，并把告警推送到飞书，可以用下面命令：
-
-```bash
-python3 -m src.cli automation --action setup --enable-feishu --feishu-webhook "你的飞书webhook"
-python3 -m src.cli automation --action status
-python3 -m src.cli automation --action test-feishu
-```
-
-Windows 可以直接运行：
-
-```bat
-scripts\windows\automation_setup.bat 你的飞书webhook
-scripts\windows\feishu_test.bat
-scripts\windows\run_worker.bat 20 5
-```
-
-### 三大模块单独启动（售前/运营/售后）
-
-如果你只想开某一部分能力，可以按模块启动：
-
-```bash
-# 1) 售前客服（自动首响 + 自动报价）
-python3 -m src.cli module --action start --target presales --mode daemon --limit 20 --interval 5
-
-# 2) 闲鱼运营（擦亮/数据采集调度）
-python3 -m src.cli module --action start --target operations --mode daemon --init-default-tasks --interval 30
-
-# 3) 售后客服（售后订单跟进）
-python3 -m src.cli module --action start --target aftersales --mode daemon --limit 20 --interval 15 --issue-type delay
-```
-
-### 售前/售后推荐模式（真实可用链路）
-
-售前与售后建议改为 WebSocket 实时通道（和 `XianyuAutoAgent` 同类链路），可以减少对浏览器页面抓取的依赖。
-
-在 `config/config.yaml` 中确认：
-
-```yaml
-messages:
-  transport: "ws"
-  ws:
-    base_url: "wss://wss-goofish.dingtalk.com/"
-```
-
-然后用下面命令验证：
-
-```bash
-python3 -m src.cli messages --action list-unread --limit 5
-python3 -m src.cli module --action check --target presales
-```
-
-如果能返回会话列表，且 `module check` 无浏览器运行时阻塞，说明已切到 WS 实时通道。
-
-启动前建议先做模块检查：
-
-```bash
-python3 -m src.cli module --action check --target all --strict
-```
-
-查看运行状态：
-
-```bash
-python3 -m src.cli module --action status --target all --window-minutes 60
-python3 -m src.cli module --action logs --target all --tail-lines 80
-python3 -m src.cli module --action stop --target all
-```
-
-Windows 一键脚本：
-
-```bat
-scripts\windows\launcher.bat
-scripts\windows\lite_quickstart.bat
-scripts\windows\module_check.bat
-scripts\windows\module_status.bat
-scripts\windows\start_all_lite.bat
-scripts\windows\start_presales.bat daemon 20 5
-scripts\windows\start_operations.bat daemon 30
-scripts\windows\start_aftersales.bat daemon 20 15 delay
-```
-
----
-
-## 9. 常见问题
-
-### Q: 打不开 localhost:8080
-
-确认 Docker Desktop 是否在运行（图标是绿色的），执行 `docker compose ps` 看容器是否正常。
-
-### Q: 页面提示 `pairing required`
-
-这是首次设备配对，执行：
-
-```bash
-docker compose exec -it openclaw-gateway openclaw devices list
-docker compose exec -it openclaw-gateway openclaw devices approve <requestId>
-```
-
-### Q: 报错 `At least one AI provider API key env var is required`
-
-说明网关没有读到可识别的 Key。请在 `.env` 至少填写一个：
-`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `MOONSHOT_API_KEY` / `MINIMAX_API_KEY` / `ZAI_API_KEY`。
-
-### Q: AI 不回复
-
-检查 `.env` 中的 AI 密钥是否正确，确认账户有余额。
-
-### Q: 发布商品失败
-
-最可能是 Cookie 过期了。重新获取 Cookie 并更新。
-
-### Q: 怎么看日志
-
-```bash
+docker compose up -d --build
 docker compose logs -f
 ```
 
----
-
-## 10. 名词解释
-
-| 名词 | 解释 |
-|------|------|
-| Cookie | 登录闲鱼后浏览器保存的"通行证" |
-| Docker | 一个免费软件，让工具在任何电脑上都能运行 |
-| OpenClaw | 一个 AI 助手框架，提供对话能力和浏览器控制 |
-| API Key | AI 服务的"钥匙"，让工具能使用 AI |
-| 擦亮 | 闲鱼功能，刷新商品让排名更靠前 |
-| Gateway | OpenClaw 的核心服务，处理对话和浏览器控制 |
-| Skills | 技能，教 AI 如何操作闲鱼的说明书 |
-
----
-
-## 安全提示
-
-- 不要把 Cookie 和 API 密钥分享给任何人
-- 定期更新 Cookie
-- 操作频率不要太高，避免被闲鱼限制
-- 遵守闲鱼平台规则
-
----
-
-**版本**: v6.1.0 | **更新日期**: 2026-03-03
+这会启动 React、Node 和 Python 三个服务。

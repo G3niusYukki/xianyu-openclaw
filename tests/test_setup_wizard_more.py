@@ -80,10 +80,13 @@ def test_run_setup_paths(monkeypatch, tmp_path):
         mapping = {
             "请输入 ANTHROPIC_API_KEY": "gk",
             "请输入 DEEPSEEK_API_KEY": "ck",
-            "设置 OPENCLAW_GATEWAY_TOKEN": "tok",
+            "填写 XGJ_APP_KEY（可留空，稍后也可在 /config 配置）": "xgj-ak",
+            "填写 XGJ_APP_SECRET（可留空，稍后也可在 /config 配置）": "xgj-sk",
+            "填写 XGJ_MERCHANT_ID（可选）": "",
+            "设置 XGJ_BASE_URL": "https://open.goofish.pro",
             "设置 AUTH_PASSWORD（后台登录密码）": "pass",
             "设置 AUTH_USERNAME": "admin",
-            "设置 OPENCLAW_WEB_PORT": "8080",
+            "设置 FRONTEND_PORT（前端端口）": "5173",
             "粘贴 XIANYU_COOKIE_1": "c1",
             "粘贴 XIANYU_COOKIE_2（可留空）": "",
             "是否立即启动容器？[Y/n]": "n",
@@ -137,7 +140,7 @@ def test_run_post_start_checks_success_prints_actions(monkeypatch, capsys):
     sw._run_post_start_checks("8090")
     out = capsys.readouterr().out
     assert "启动完成。打开: http://localhost:8090" in out
-    assert "docker compose exec -it openclaw-gateway openclaw devices list" in out
+    assert "Node 代理（可选）默认地址: http://localhost:3001" in out
 
 
 def test_run_setup_same_provider_reuses_gateway_key(monkeypatch, tmp_path):
@@ -156,10 +159,13 @@ def test_run_setup_same_provider_reuses_gateway_key(monkeypatch, tmp_path):
 
     answers = {
         f"请输入 {gateway.env_key}": "k-same",
-        "设置 OPENCLAW_GATEWAY_TOKEN": "tok",
+        "填写 XGJ_APP_KEY（可留空，稍后也可在 /config 配置）": "xgj-ak",
+        "填写 XGJ_APP_SECRET（可留空，稍后也可在 /config 配置）": "xgj-sk",
+        "填写 XGJ_MERCHANT_ID（可选）": "",
+        "设置 XGJ_BASE_URL": "https://open.goofish.pro",
         "设置 AUTH_PASSWORD（后台登录密码）": "pass",
         "设置 AUTH_USERNAME": "admin",
-        "设置 OPENCLAW_WEB_PORT": "8080",
+        "设置 FRONTEND_PORT（前端端口）": "5173",
         "粘贴 XIANYU_COOKIE_1": "c1",
         "粘贴 XIANYU_COOKIE_2（可留空）": "",
         "是否立即启动容器？[Y/n]": "n",

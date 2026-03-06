@@ -2,7 +2,7 @@
 闲鱼自动化工具
 Xianyu Automation Tool
 
-基于 OpenClaw 框架的闲鱼自动化运营工具
+API-first 闲鱼自动化运营工具
 """
 
 __version__ = "6.2.0"

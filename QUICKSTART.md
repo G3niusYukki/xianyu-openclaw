@@ -1,136 +1,99 @@
-# QUICKSTART（推荐路径：Lite/Core）
+# QUICKSTART
 
-> 目标：0 基础用户首次启动并在 **http://127.0.0.1:8091** 完成配置与验证。
-> 说明：`5173` 仅用于前端开发热更新，不是默认使用地址。
+目标：在本机启动 API-first 版闲鱼自动化工作台。
 
-## 📋 前置要求
+## 1. 准备环境
 
-## 1) 推荐启动路径（唯一推荐）：Lite/Core
+- Python `3.10+`
+- Node.js `18+`
+- 一个可用的闲鱼 Cookie
+- 一个 AI 提供商 Key
+- 一个闲管家 Open Platform 应用
 
-本项目默认推荐 **Lite/Core 本地运行**：
-- Python 本地启动
-- Dashboard 默认地址 `http://127.0.0.1:8091`
-- 可直接在 Dashboard 完成 Cookie 配置、状态检查与模块控制
-
-> OpenClaw Gateway / Docker 部署属于可选方案，见文末“可选路径”。
-
----
-
-## 2) 最小环境变量集
-
-先复制模板：
+## 2. 配置 `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-然后至少填写以下变量（最小可运行集合）：
+最小配置：
 
-```bash
-# 网关模型 Key：以下至少 1 个
-ANTHROPIC_API_KEY=
-# 或 OPENAI_API_KEY / MOONSHOT_API_KEY / MINIMAX_API_KEY / ZAI_API_KEY / CUSTOM_GATEWAY_API_KEY
+```env
+XIANYU_COOKIE_1=
 
-# 本地鉴权
-OPENCLAW_GATEWAY_TOKEN=your-secret-token
-AUTH_PASSWORD=changeme
+AI_PROVIDER=deepseek
+AI_API_KEY=
+AI_BASE_URL=https://api.deepseek.com/v1
+AI_MODEL=deepseek-chat
 
-# 闲鱼登录态
-XIANYU_COOKIE_1=your_cookie_here
+XGJ_APP_KEY=
+XGJ_APP_SECRET=
+XGJ_BASE_URL=https://open.goofish.pro
 ```
 
-> 其余变量（如 `AI_PROVIDER/AI_API_KEY/AI_BASE_URL/AI_MODEL`）可按需后续补充，不阻塞首次启动验证。
-
----
-
-## 3) 0 基础首次配置步骤
-
-### Step A. 准备 Python 环境
+## 3. 安装依赖
 
 ```bash
-python3.12 -m venv .venv312
-source .venv312/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+
+cd server && npm install
+cd ../client && npm install
+cd ..
 ```
 
-### Step B. 获取并写入 Cookie
+## 4. 启动
 
-1. 浏览器打开 `https://www.goofish.com` 并登录
-2. 按 `F12` → `Network`
-3. 刷新页面并点任意请求
-4. 在 `Request Headers` 复制整行 `Cookie:` 内容
-5. 粘贴到 `.env` 的 `XIANYU_COOKIE_1`
-
-### Step C. 启动 Dashboard（首次入口）
+推荐一条命令：
 
 ```bash
-python -m src.dashboard_server --host 127.0.0.1 --port 8091
+./start.sh
 ```
 
-浏览器访问：**http://127.0.0.1:8091**
-
----
-
-## 4) 首次验证步骤（必须做）
-
-### 方式 1（推荐）：一条命令自动验证
+或分别启动：
 
 ```bash
-bash scripts/verify-quickstart.sh
+python3 -m src.dashboard_server --host 127.0.0.1 --port 8091
+cd server && npm run dev
+cd client && npm run dev
 ```
 
-脚本会验证：
-- `.env` 和最小环境变量是否就绪
-- Dashboard 是否可启动并通过 `/healthz`
-- Cookie 是否被 `/api/get-cookie` 正常读取
+## 5. 访问地址
 
-验证日志：`logs/verify-quickstart.log`
+- 前端：`http://127.0.0.1:5173`
+- Python：`http://127.0.0.1:8091`
+- Node：`http://127.0.0.1:3001`
 
-### 方式 2：手动验证命令链
+## 6. 首次检查
+
+先确认服务健康：
 
 ```bash
-# 1) 启动 dashboard
-python -m src.dashboard_server --host 127.0.0.1 --port 8091
-
-# 2) 新终端执行健康检查
 curl -fsS http://127.0.0.1:8091/healthz
-
-# 3) 检查 cookie 就绪
-curl -fsS http://127.0.0.1:8091/api/get-cookie
+curl -fsS http://127.0.0.1:3001/health
+curl -fsS http://127.0.0.1:8091/api/config/sections
 ```
 
-成功标准：
-- `/healthz` 返回 `{"status":"ok"}`
-- `/api/get-cookie` 返回 `"success": true`
+然后在前端检查：
 
----
+1. `工作台` 是否能显示系统状态。
+2. `店铺管理` 是否能识别 Cookie。
+3. `系统配置` 是否能读到 AI / 闲管家配置。
+4. `商品管理` / `订单中心` 是否能拉到真实数据。
+5. `自动上架` 是否能生成真实预览图。
 
-## 5) 可选路径（非推荐）
-
-### 可选 A：Docker
+## 7. Docker 启动
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 docker compose ps
-
-# 查看日志
-docker compose logs -f
-
-# 健康检查
-curl http://localhost:8080/healthz
 ```
 
-> Docker 用于容器化运维；不作为默认首启路径。
+前端默认映射到 `5173`，Python 到 `8091`，Node 到 `3001`。
 
-### 可选 B：OpenClaw Gateway 深度集成
+## 8. 重要说明
 
-如需 OpenClaw 设备配对与 Gateway 运维，可参考：
-- `docs/DEPLOYMENT.md`（可选部署章节）
-- `README.md` 的部署说明
-
----
-
-## 6) 常见地址说明（统一口径）
-
-- 默认业务面板：`http://127.0.0.1:8091`
-- `http://127.0.0.1:5173`：仅前端开发服务（Vite dev server）
+- 本项目当前不依赖 OpenClaw。
+- Node 只是可选代理层，不是配置真相源。
+- 不提供 mock 数据回退；接口缺失会直接暴露真实错误，便于排查。

@@ -107,7 +107,7 @@ class WindowsLauncherApp(ctk.CTk):
         self.env_path = self.project_root / ".env"
         self.existing_values = _read_existing_env(self.env_path)
 
-        self.title("闲鱼 OpenClaw 一键部署")
+        self.title("闲鱼 API-first 一键部署")
         self.geometry("800x650")
         self.minsize(760, 620)
 
@@ -127,7 +127,7 @@ class WindowsLauncherApp(ctk.CTk):
         self.token_var = ctk.StringVar(value=self.existing_values.get("OPENCLAW_GATEWAY_TOKEN", secrets.token_hex(32)))
         self.password_var = ctk.StringVar(value=self.existing_values.get("AUTH_PASSWORD", ""))
         self.username_var = ctk.StringVar(value=self.existing_values.get("AUTH_USERNAME", "admin"))
-        self.port_var = ctk.StringVar(value=self.existing_values.get("OPENCLAW_WEB_PORT", "8080"))
+        self.port_var = ctk.StringVar(value=self.existing_values.get("FRONTEND_PORT", "5173"))
         self.password_masked = True
 
         self.docker_ready = False
@@ -167,7 +167,7 @@ class WindowsLauncherApp(ctk.CTk):
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(7, weight=1)
 
-        ctk.CTkLabel(frame, text="闲鱼 OpenClaw 一键部署向导", font=ctk.CTkFont(size=30, weight="bold")).grid(
+        ctk.CTkLabel(frame, text="闲鱼 API-first 一键部署向导", font=ctk.CTkFont(size=30, weight="bold")).grid(
             row=0, column=0, padx=30, pady=(30, 8), sticky="w"
         )
         ctk.CTkLabel(frame, text="v6.1.0", text_color="gray70").grid(row=1, column=0, padx=30, pady=(0, 20), sticky="w")
@@ -221,11 +221,11 @@ class WindowsLauncherApp(ctk.CTk):
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(6, weight=1)
 
-        ctk.CTkLabel(frame, text="第 2 步：网关 AI 服务", font=ctk.CTkFont(size=24, weight="bold")).grid(
+        ctk.CTkLabel(frame, text="第 2 步：主 AI 服务", font=ctk.CTkFont(size=24, weight="bold")).grid(
             row=0, column=0, padx=30, pady=(30, 12), sticky="w"
         )
 
-        ctk.CTkLabel(frame, text="请选择用于 OpenClaw 对话与技能调度的网关模型服务。", text_color="gray80").grid(
+        ctk.CTkLabel(frame, text="请选择主 AI 服务，用于消息回复、策略判断和文本生成。", text_color="gray80").grid(
             row=1, column=0, padx=30, pady=(0, 18), sticky="w"
         )
 
@@ -326,7 +326,7 @@ class WindowsLauncherApp(ctk.CTk):
             row=0, column=0, padx=30, pady=(30, 12), sticky="w"
         )
 
-        ctk.CTkLabel(frame, text="OPENCLAW_GATEWAY_TOKEN", font=ctk.CTkFont(weight="bold")).grid(
+        ctk.CTkLabel(frame, text="兼容旧变量 OPENCLAW_GATEWAY_TOKEN（可留空）", font=ctk.CTkFont(weight="bold")).grid(
             row=1, column=0, padx=30, pady=(0, 6), sticky="w"
         )
         ctk.CTkEntry(frame, width=620, textvariable=self.token_var).grid(
@@ -350,7 +350,7 @@ class WindowsLauncherApp(ctk.CTk):
             row=6, column=0, padx=30, pady=(0, 12), sticky="w"
         )
 
-        ctk.CTkLabel(frame, text="OPENCLAW_WEB_PORT", font=ctk.CTkFont(weight="bold")).grid(
+        ctk.CTkLabel(frame, text="FRONTEND_PORT", font=ctk.CTkFont(weight="bold")).grid(
             row=7, column=0, padx=30, pady=(0, 6), sticky="w"
         )
         ctk.CTkEntry(frame, width=220, textvariable=self.port_var).grid(
@@ -508,7 +508,7 @@ class WindowsLauncherApp(ctk.CTk):
         self.gateway_key_label.configure(text=f"{provider.env_key}")
         self.gateway_key_entry.configure(placeholder_text=provider.hint)
         if provider.id == "custom":
-            self.gateway_hint_label.configure(text="提示：配置自定义 OpenAI 兼容的 Gateway Provider")
+            self.gateway_hint_label.configure(text="提示：配置自定义 OpenAI 兼容的主 AI Provider")
             self.gateway_custom_url_label.grid()
             self.gateway_custom_url_entry.grid()
         else:
@@ -628,7 +628,7 @@ class WindowsLauncherApp(ctk.CTk):
     def _validate_gateway_and_next(self) -> None:
         self.gateway_error_label.configure(text="")
         if not self.gateway_key_var.get().strip():
-            self.gateway_error_label.configure(text="请填写网关服务 API 密钥")
+            self.gateway_error_label.configure(text="请填写主 AI 服务 API 密钥")
             return
         provider = self._provider_by_gateway_id(self.gateway_provider_var.get())
         if provider.id == "custom" and not self.custom_gateway_base_url_var.get().strip():
@@ -640,7 +640,7 @@ class WindowsLauncherApp(ctk.CTk):
         self.content_error_label.configure(text="")
         self._sync_content_key_state()
         if not self.content_key_var.get().strip():
-            self.content_error_label.configure(text="请填写业务服务 API 密钥")
+            self.content_error_label.configure(text="请填写业务文案服务 API 密钥")
             return
         provider = self._provider_by_content_id(self.content_provider_var.get())
         if provider.id == "custom":
@@ -663,14 +663,10 @@ class WindowsLauncherApp(ctk.CTk):
 
     def _validate_auth_and_next(self) -> None:
         self.auth_error_label.configure(text="")
-        token = self.token_var.get().strip()
         password = self.password_var.get().strip()
         username = self.username_var.get().strip()
         port = self.port_var.get().strip()
 
-        if not token:
-            self.auth_error_label.configure(text="OPENCLAW_GATEWAY_TOKEN 不能为空")
-            return
         if not password:
             self.auth_error_label.configure(text="AUTH_PASSWORD 不能为空")
             return
@@ -678,7 +674,7 @@ class WindowsLauncherApp(ctk.CTk):
             self.auth_error_label.configure(text="AUTH_USERNAME 不能为空")
             return
         if not port.isdigit() or not (1 <= int(port) <= 65535):
-            self.auth_error_label.configure(text="OPENCLAW_WEB_PORT 需为 1-65535 的数字")
+            self.auth_error_label.configure(text="FRONTEND_PORT 需为 1-65535 的数字")
             return
         self._goto_next()
 
@@ -740,7 +736,7 @@ class WindowsLauncherApp(ctk.CTk):
                 "OPENCLAW_GATEWAY_TOKEN": self.token_var.get().strip(),
                 "AUTH_PASSWORD": self.password_var.get().strip(),
                 "AUTH_USERNAME": self.username_var.get().strip(),
-                "OPENCLAW_WEB_PORT": self.port_var.get().strip(),
+                "FRONTEND_PORT": self.port_var.get().strip(),
                 "XIANYU_COOKIE_1": self.cookie_1_placeholder.get(),
                 "XIANYU_COOKIE_2": self.cookie_2_placeholder.get(),
                 "AI_PROVIDER": content.id,
@@ -768,8 +764,8 @@ class WindowsLauncherApp(ctk.CTk):
         lines = [
             "请确认以下配置：",
             "",
-            f"网关服务：{gateway.title}",
-            f"网关密钥：{_mask_secret(merged.get(gateway.env_key, ''))}",
+            f"主 AI 服务：{gateway.title}",
+            f"主 AI 密钥：{_mask_secret(merged.get(gateway.env_key, ''))}",
         ]
         if gateway.id == "custom":
             lines.append(f"网关 Base URL：{merged.get('CUSTOM_GATEWAY_BASE_URL', '')}")
@@ -905,7 +901,7 @@ class WindowsLauncherApp(ctk.CTk):
                     logs = (logs_result.stdout or "") + (logs_result.stderr or "")
                     error_msg = "容器正在重启，可能原因：\n"
                     if "At least one AI provider API key" in logs:
-                        error_msg += "• AI Key未配置：请在第2步配置Gateway AI的API Key\n"
+                        error_msg += "• AI Key未配置：请在第2步配置主 AI 的 API Key\n"
                     elif "pairing required" in logs.lower():
                         error_msg += "• 需要设备配对：请在PowerShell执行配对命令\n"
                     elif "cookie" in logs.lower() and ("missing" in logs.lower() or "invalid" in logs.lower()):

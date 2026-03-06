@@ -595,6 +595,466 @@ class MimicOps:
             }
         }
 
+    @property
+    def runtime_config_path(self) -> Path:
+        return self.project_root / "config" / "config.yaml"
+
+    def _load_runtime_config(self) -> dict[str, Any]:
+        candidate_paths = [self.runtime_config_path, self.project_root / "config" / "config.example.yaml"]
+        for path in candidate_paths:
+            if not path.exists():
+                continue
+            try:
+                payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                if isinstance(payload, dict):
+                    return payload
+            except Exception:
+                continue
+        return {}
+
+    def _save_runtime_config(self, payload: dict[str, Any]) -> None:
+        self.runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime_config_path.write_text(
+            yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
+    def get_runtime_config_sections(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "sections": [
+                {
+                    "key": "xianguanjia",
+                    "name": "闲管家开放平台",
+                    "fields": [
+                        {"key": "app_key", "label": "App Key", "type": "text", "required": True},
+                        {"key": "app_secret", "label": "App Secret", "type": "password", "required": True},
+                        {"key": "merchant_id", "label": "Seller ID / Merchant ID", "type": "text"},
+                        {
+                            "key": "base_url",
+                            "label": "API Base URL",
+                            "type": "text",
+                            "default": "https://open.goofish.pro",
+                        },
+                    ],
+                },
+                {
+                    "key": "ai",
+                    "name": "AI 服务",
+                    "fields": [
+                        {
+                            "key": "provider",
+                            "label": "Provider",
+                            "type": "select",
+                            "options": [
+                                "deepseek",
+                                "openai",
+                                "aliyun_bailian",
+                                "volcengine_ark",
+                                "minimax",
+                                "zhipu",
+                                "claude",
+                            ],
+                            "default": "deepseek",
+                        },
+                        {"key": "api_key", "label": "API Key", "type": "password", "required": True},
+                        {"key": "base_url", "label": "Base URL", "type": "text"},
+                        {"key": "model", "label": "Model", "type": "text"},
+                        {"key": "temperature", "label": "Temperature", "type": "number", "default": 0.7},
+                    ],
+                },
+                {
+                    "key": "oss",
+                    "name": "阿里云 OSS",
+                    "fields": [
+                        {"key": "access_key_id", "label": "Access Key ID", "type": "text"},
+                        {"key": "access_key_secret", "label": "Access Key Secret", "type": "password"},
+                        {"key": "bucket", "label": "Bucket", "type": "text"},
+                        {"key": "endpoint", "label": "Endpoint", "type": "text"},
+                        {"key": "prefix", "label": "Prefix", "type": "text", "default": "xianyu/listing/"},
+                        {"key": "custom_domain", "label": "Custom Domain", "type": "text"},
+                    ],
+                },
+                {
+                    "key": "messages",
+                    "name": "消息自动化",
+                    "fields": [
+                        {"key": "enabled", "label": "启用自动回复", "type": "toggle", "default": False},
+                        {
+                            "key": "transport",
+                            "label": "消息通道",
+                            "type": "select",
+                            "options": ["ws", "auto", "dom"],
+                            "default": "ws",
+                        },
+                        {
+                            "key": "max_replies_per_run",
+                            "label": "单次最大回复数",
+                            "type": "number",
+                            "default": 10,
+                        },
+                        {"key": "default_reply", "label": "默认回复", "type": "textarea"},
+                        {"key": "virtual_default_reply", "label": "虚拟商品默认回复", "type": "textarea"},
+                    ],
+                },
+            ],
+        }
+
+    def get_runtime_config(self) -> dict[str, Any]:
+        cfg = get_config()
+        messages_cfg = cfg.get_section("messages", {})
+        xgj_settings = self._get_xianguanjia_settings()
+        return {
+            "ok": True,
+            "config": {
+                "xianguanjia": {
+                    "app_key": xgj_settings["app_key"],
+                    "app_secret": xgj_settings["app_secret"],
+                    "merchant_id": xgj_settings["merchant_id"],
+                    "base_url": xgj_settings["base_url"],
+                },
+                "ai": {
+                    "provider": self._get_env_value("AI_PROVIDER").strip() or "deepseek",
+                    "api_key": self._get_env_value("AI_API_KEY").strip(),
+                    "base_url": self._get_env_value("AI_BASE_URL").strip(),
+                    "model": self._get_env_value("AI_MODEL").strip(),
+                    "temperature": self._get_env_value("AI_TEMPERATURE").strip() or "0.7",
+                },
+                "oss": {
+                    "access_key_id": self._get_env_value("OSS_ACCESS_KEY_ID").strip(),
+                    "access_key_secret": self._get_env_value("OSS_ACCESS_KEY_SECRET").strip(),
+                    "bucket": self._get_env_value("OSS_BUCKET").strip(),
+                    "endpoint": self._get_env_value("OSS_ENDPOINT").strip(),
+                    "prefix": self._get_env_value("OSS_PREFIX").strip() or "xianyu/listing/",
+                    "custom_domain": self._get_env_value("OSS_CUSTOM_DOMAIN").strip(),
+                },
+                "messages": {
+                    "enabled": bool(messages_cfg.get("enabled", False)),
+                    "transport": str(messages_cfg.get("transport") or "ws"),
+                    "max_replies_per_run": int(messages_cfg.get("max_replies_per_run", 10) or 10),
+                    "default_reply": str(messages_cfg.get("default_reply") or ""),
+                    "virtual_default_reply": str(messages_cfg.get("virtual_default_reply") or ""),
+                },
+            },
+        }
+
+    def save_runtime_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = dict(payload or {})
+        env_updates = {
+            "XGJ_APP_KEY": str(((data.get("xianguanjia") or {}).get("app_key") or self._get_env_value("XGJ_APP_KEY"))).strip(),
+            "XGJ_APP_SECRET": str(((data.get("xianguanjia") or {}).get("app_secret") or self._get_env_value("XGJ_APP_SECRET"))).strip(),
+            "XGJ_MERCHANT_ID": str(((data.get("xianguanjia") or {}).get("merchant_id") or self._get_env_value("XGJ_MERCHANT_ID"))).strip(),
+            "XGJ_BASE_URL": str(((data.get("xianguanjia") or {}).get("base_url") or self._get_env_value("XGJ_BASE_URL"))).strip()
+            or "https://open.goofish.pro",
+            "AI_PROVIDER": str(((data.get("ai") or {}).get("provider") or self._get_env_value("AI_PROVIDER"))).strip() or "deepseek",
+            "AI_API_KEY": str(((data.get("ai") or {}).get("api_key") or self._get_env_value("AI_API_KEY"))).strip(),
+            "AI_BASE_URL": str(((data.get("ai") or {}).get("base_url") or self._get_env_value("AI_BASE_URL"))).strip(),
+            "AI_MODEL": str(((data.get("ai") or {}).get("model") or self._get_env_value("AI_MODEL"))).strip(),
+            "AI_TEMPERATURE": str(((data.get("ai") or {}).get("temperature") or self._get_env_value("AI_TEMPERATURE"))).strip()
+            or "0.7",
+            "OSS_ACCESS_KEY_ID": str(((data.get("oss") or {}).get("access_key_id") or self._get_env_value("OSS_ACCESS_KEY_ID"))).strip(),
+            "OSS_ACCESS_KEY_SECRET": str(((data.get("oss") or {}).get("access_key_secret") or self._get_env_value("OSS_ACCESS_KEY_SECRET"))).strip(),
+            "OSS_BUCKET": str(((data.get("oss") or {}).get("bucket") or self._get_env_value("OSS_BUCKET"))).strip(),
+            "OSS_ENDPOINT": str(((data.get("oss") or {}).get("endpoint") or self._get_env_value("OSS_ENDPOINT"))).strip(),
+            "OSS_PREFIX": str(((data.get("oss") or {}).get("prefix") or self._get_env_value("OSS_PREFIX"))).strip()
+            or "xianyu/listing/",
+            "OSS_CUSTOM_DOMAIN": str(((data.get("oss") or {}).get("custom_domain") or self._get_env_value("OSS_CUSTOM_DOMAIN"))).strip(),
+        }
+        for key, value in env_updates.items():
+            self._set_env_value(key, value)
+
+        runtime_cfg = self._load_runtime_config()
+        messages_cfg = runtime_cfg.get("messages") if isinstance(runtime_cfg.get("messages"), dict) else {}
+        messages_input = data.get("messages") if isinstance(data.get("messages"), dict) else {}
+        messages_cfg.update(
+            {
+                "enabled": self._to_bool(messages_input.get("enabled"), default=bool(messages_cfg.get("enabled", False))),
+                "transport": str(messages_input.get("transport") or messages_cfg.get("transport") or "ws").strip().lower() or "ws",
+                "max_replies_per_run": max(1, int(messages_input.get("max_replies_per_run") or messages_cfg.get("max_replies_per_run") or 10)),
+                "default_reply": str(messages_input.get("default_reply") or messages_cfg.get("default_reply") or "").strip(),
+                "virtual_default_reply": str(
+                    messages_input.get("virtual_default_reply") or messages_cfg.get("virtual_default_reply") or ""
+                ).strip(),
+            }
+        )
+        runtime_cfg["messages"] = messages_cfg
+        self._save_runtime_config(runtime_cfg)
+        get_config().reload()
+
+        saved = self.get_runtime_config()
+        saved["message"] = "配置已更新"
+        return saved
+
+    @staticmethod
+    def _extract_list_items(payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return [dict(item) for item in payload if isinstance(item, dict)]
+        if not isinstance(payload, dict):
+            return []
+        for key in ("list", "items", "rows", "records"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [dict(item) for item in value if isinstance(item, dict)]
+        nested = payload.get("data")
+        if isinstance(nested, dict):
+            return MimicOps._extract_list_items(nested)
+        return []
+
+    @staticmethod
+    def _pick_first_value(item: dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in item and item.get(key) not in (None, ""):
+                return item.get(key)
+        return None
+
+    def _open_platform_client(self):
+        from src.integrations.xianguanjia.open_platform_client import OpenPlatformClient
+
+        settings = self._get_xianguanjia_settings()
+        if not settings["configured"]:
+            return None, settings
+        client = OpenPlatformClient(
+            base_url=str(settings["base_url"]).strip(),
+            app_key=str(settings["app_key"]).strip(),
+            app_secret=str(settings["app_secret"]).strip(),
+            seller_id=str(settings["merchant_id"]).strip() or None,
+        )
+        return client, settings
+
+    def list_accounts(self) -> dict[str, Any]:
+        from src.modules.accounts.service import AccountsService
+
+        service = AccountsService()
+        accounts = service.get_accounts(enabled_only=False, mask_sensitive=True)
+        health_items = service.get_all_accounts_health()
+        health_by_id = {str(item.get("account_id")): item for item in health_items if isinstance(item, dict)}
+        current = service.get_current_account() or {}
+        current_id = str(current.get("id") or "").strip()
+        xgj_configured = bool(self._get_xianguanjia_settings().get("configured"))
+        module_status = self.module_console.status(window_minutes=30, limit=5)
+        modules = module_status.get("modules") if isinstance(module_status, dict) else {}
+        presales_process = modules.get("presales", {}).get("process", {}) if isinstance(modules, dict) else {}
+        automation_enabled = bool(presales_process.get("alive", False))
+
+        if not accounts:
+            cookie_text = self._get_env_value("XIANYU_COOKIE_1").strip()
+            if cookie_text:
+                accounts = [
+                    {
+                        "id": "default",
+                        "name": "当前账号",
+                        "cookie": self._mask_secret(cookie_text),
+                        "enabled": True,
+                        "status": "active",
+                    }
+                ]
+                current_id = "default"
+                health_by_id["default"] = {
+                    "account_id": "default",
+                    "health_score": 100,
+                    "health": "good",
+                    "last_operation": None,
+                }
+
+        payload = []
+        for item in accounts:
+            account_id = str(item.get("id") or "").strip()
+            health = health_by_id.get(account_id, {})
+            payload.append(
+                {
+                    "id": account_id,
+                    "name": str(item.get("name") or account_id),
+                    "cookie": str(item.get("cookie") or ""),
+                    "enabled": bool(item.get("enabled", True)),
+                    "status": str(item.get("status") or "active"),
+                    "current": account_id == current_id,
+                    "xgj_configured": xgj_configured,
+                    "automation_enabled": automation_enabled,
+                    "health_score": int(health.get("health_score", 100) or 100),
+                    "health": str(health.get("health") or "good"),
+                    "last_operation": health.get("last_operation"),
+                }
+            )
+
+        return {"ok": True, "accounts": payload}
+
+    def list_xianguanjia_products(
+        self,
+        *,
+        page_no: int = 1,
+        page_size: int = 20,
+        query: str = "",
+    ) -> dict[str, Any]:
+        client, settings = self._open_platform_client()
+        if client is None:
+            return {"ok": False, "error": "闲管家 API 未配置", "settings": settings}
+
+        response = client.list_products({"page_no": page_no, "page_size": page_size})
+        if not response.ok:
+            return {"ok": False, "error": response.error_message or "商品列表查询失败"}
+
+        raw_data = response.data or {}
+        items = self._extract_list_items(raw_data)
+        query_text = str(query or "").strip().lower()
+        normalized = []
+        for item in items:
+            product_id = str(self._pick_first_value(item, "product_id", "id", "item_id") or "").strip()
+            title = str(self._pick_first_value(item, "title", "item_title", "name") or "").strip()
+            if query_text and query_text not in title.lower() and query_text not in product_id.lower():
+                continue
+            images = item.get("images")
+            if not isinstance(images, list):
+                images = []
+            pic_url = str(
+                self._pick_first_value(item, "pic_url", "image", "cover", "cover_image", "main_image") or ""
+            ).strip()
+            if not pic_url and images:
+                pic_url = str(images[0] or "").strip()
+            normalized.append(
+                {
+                    **item,
+                    "product_id": product_id,
+                    "title": title,
+                    "price": self._pick_first_value(item, "price", "sale_price", "amount"),
+                    "status": self._pick_first_value(item, "status", "product_status", "item_status"),
+                    "stock": self._pick_first_value(item, "stock", "inventory", "quantity"),
+                    "view_count": self._pick_first_value(item, "view_count", "views"),
+                    "want_count": self._pick_first_value(item, "want_count", "wants"),
+                    "pic_url": pic_url,
+                    "images": images,
+                }
+            )
+
+        total = raw_data.get("total") if isinstance(raw_data, dict) else None
+        return {
+            "ok": True,
+            "data": {
+                "list": normalized,
+                "page_no": page_no,
+                "page_size": page_size,
+                "total": int(total or len(normalized)),
+            },
+        }
+
+    def list_xianguanjia_orders(
+        self,
+        *,
+        page_no: int = 1,
+        page_size: int = 20,
+        order_status: int | None = None,
+        query: str = "",
+    ) -> dict[str, Any]:
+        client, settings = self._open_platform_client()
+        if client is None:
+            return {"ok": False, "error": "闲管家 API 未配置", "settings": settings}
+
+        payload: dict[str, Any] = {"page_no": page_no, "page_size": page_size}
+        if order_status is not None:
+            payload["order_status"] = int(order_status)
+        response = client.list_orders(payload)
+        if not response.ok:
+            return {"ok": False, "error": response.error_message or "订单列表查询失败"}
+
+        raw_data = response.data or {}
+        items = self._extract_list_items(raw_data)
+        query_text = str(query or "").strip().lower()
+        normalized = []
+        for item in items:
+            order_id = str(self._pick_first_value(item, "order_id", "tid", "biz_order_id") or "").strip()
+            title = str(self._pick_first_value(item, "title", "item_title", "product_title") or "").strip()
+            buyer_name = str(self._pick_first_value(item, "buyer_name", "buyer_nick", "buyerNick") or "").strip()
+            if query_text and all(query_text not in value.lower() for value in (order_id, title, buyer_name)):
+                continue
+            normalized.append(
+                {
+                    **item,
+                    "order_id": order_id,
+                    "title": title,
+                    "buyer_name": buyer_name,
+                    "status": self._pick_first_value(item, "status", "order_status"),
+                    "total_fee": self._pick_first_value(item, "total_fee", "price", "amount"),
+                    "create_time": self._pick_first_value(item, "create_time", "created_at", "gmt_create"),
+                    "pic_url": self._pick_first_value(item, "pic_url", "image", "item_pic"),
+                }
+            )
+
+        total = raw_data.get("total") if isinstance(raw_data, dict) else None
+        return {
+            "ok": True,
+            "data": {
+                "list": normalized,
+                "page_no": page_no,
+                "page_size": page_size,
+                "total": int(total or len(normalized)),
+            },
+        }
+
+    def publish_xianguanjia_product(self, payload: dict[str, Any]) -> dict[str, Any]:
+        client, settings = self._open_platform_client()
+        if client is None:
+            return {"ok": False, "error": "闲管家 API 未配置", "settings": settings}
+        product_id = str(payload.get("product_id") or "").strip()
+        if not product_id:
+            return {"ok": False, "error": "缺少商品 ID"}
+        response = client.publish_product({"product_id": product_id})
+        return {"ok": bool(response.ok), "data": response.data, "error": response.error_message}
+
+    def unpublish_xianguanjia_product(self, payload: dict[str, Any]) -> dict[str, Any]:
+        client, settings = self._open_platform_client()
+        if client is None:
+            return {"ok": False, "error": "闲管家 API 未配置", "settings": settings}
+        product_id = str(payload.get("product_id") or "").strip()
+        if not product_id:
+            return {"ok": False, "error": "缺少商品 ID"}
+        response = client.unpublish_product({"product_id": product_id})
+        return {"ok": bool(response.ok), "data": response.data, "error": response.error_message}
+
+    def modify_xianguanjia_order_price(self, payload: dict[str, Any]) -> dict[str, Any]:
+        client, settings = self._open_platform_client()
+        if client is None:
+            return {"ok": False, "error": "闲管家 API 未配置", "settings": settings}
+        order_id = str(payload.get("order_id") or "").strip()
+        if not order_id:
+            return {"ok": False, "error": "缺少订单号"}
+        try:
+            total_fee = int(payload.get("total_fee"))
+        except Exception:
+            return {"ok": False, "error": "缺少有效的改价金额（分）"}
+        response = client.modify_order_price({"order_id": order_id, "total_fee": total_fee})
+        return {"ok": bool(response.ok), "data": response.data, "error": response.error_message}
+
+    def deliver_xianguanjia_order(self, payload: dict[str, Any]) -> dict[str, Any]:
+        client, settings = self._open_platform_client()
+        if client is None:
+            return {"ok": False, "error": "闲管家 API 未配置", "settings": settings}
+        order_id = str(payload.get("order_id") or "").strip()
+        if not order_id:
+            return {"ok": False, "error": "缺少订单号"}
+        response = client.delivery_order({"order_id": order_id})
+        return {"ok": bool(response.ok), "data": response.data, "error": response.error_message}
+
+    def read_generated_image(self, raw_path: str) -> tuple[bytes, str]:
+        text = str(raw_path or "").strip()
+        if not text:
+            raise FileNotFoundError("图片路径为空")
+        candidate = Path(text)
+        if not candidate.is_absolute():
+            candidate = (self.project_root / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        allowed_root = (self.project_root / "data" / "generated_images").resolve()
+        if not str(candidate).startswith(str(allowed_root)):
+            raise PermissionError("不允许访问该图片路径")
+        if not candidate.is_file():
+            raise FileNotFoundError("图片不存在")
+        content_type = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+        }.get(candidate.suffix.lower(), "application/octet-stream")
+        return candidate.read_bytes(), content_type
+
     def retry_xianguanjia_delivery(self, payload: dict[str, Any]) -> dict[str, Any]:
         from src.modules.orders.service import OrderFulfillmentService
 
@@ -3220,6 +3680,30 @@ class MimicOps:
                 user_id = str(value or "").strip() or None
                 break
 
+        cookie_score = 0
+        cookie_state = "bad"
+        if bool(cookie.get("success", False)):
+            cookie_score = 60
+            cookie_state = "warning"
+            if token_error is None and risk_level not in {"warning", "blocked"}:
+                cookie_score = 100
+                cookie_state = "good"
+            elif risk_level == "blocked":
+                cookie_score = 20
+                cookie_state = "bad"
+
+        try:
+            from src.modules.orders.service import OrderFulfillmentService
+
+            order_summary = OrderFulfillmentService(
+                db_path=str(self.project_root / "data" / "orders.db"),
+                config=self._xianguanjia_service_config(),
+            ).get_summary()
+        except Exception:
+            order_summary = {}
+
+        accounts_summary = self.list_accounts()
+
         return {
             "success": True,
             "service": dict(self._service_state),
@@ -3227,6 +3711,11 @@ class MimicOps:
             "cookie_exists": bool(cookie.get("success", False)),
             "cookie_valid": bool(cookie.get("success", False)),
             "cookie_length": int(cookie.get("length", 0) or 0),
+            "cookie_health": {
+                "score": cookie_score,
+                "status": cookie_state,
+                "token_error": token_error,
+            },
             "xianyu_connected": xianyu_connected,
             "token_available": token_available,
             "token_error": token_error,
@@ -3241,6 +3730,8 @@ class MimicOps:
             "route_stats": route_stat_payload,
             "route_stats_by_courier": route_stats_by_courier,
             "message_stats": message_stats,
+            "order_summary": order_summary,
+            "accounts": accounts_summary.get("accounts", []),
             "xianguanjia": xgj_settings,
             "risk_control": risk_control,
             "recovery": recovery,
@@ -6226,6 +6717,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _handle_listing_preview(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            from src.modules.listing.auto_publish import AutoPublishService
+
+            service = AutoPublishService(config=self.mimic_ops._xianguanjia_service_config())
+            return _run_async(service.generate_preview(body))
+        except Exception as exc:
+            return {"ok": False, "step": "error", "error": str(exc)}
+
+    def _handle_listing_publish(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            from src.integrations.xianguanjia.open_platform_client import OpenPlatformClient
+            from src.modules.listing.auto_publish import AutoPublishService
+
+            cfg = self.mimic_ops._xianguanjia_service_config().get("xianguanjia", {})
+            app_key = str(cfg.get("app_key", "")).strip()
+            app_secret = str(cfg.get("app_secret", "")).strip()
+            if not app_key or not app_secret:
+                return {"ok": False, "step": "init", "error": "闲管家 API 未配置"}
+
+            api_client = OpenPlatformClient(
+                base_url=str(cfg.get("base_url", "https://open.goofish.pro")).strip(),
+                app_key=app_key,
+                app_secret=app_secret,
+                seller_id=str(cfg.get("merchant_id", "")).strip() or None,
+            )
+            service = AutoPublishService(api_client=api_client, config=self.mimic_ops._xianguanjia_service_config())
+            preview_data = body.get("preview_data")
+            if isinstance(preview_data, dict):
+                return _run_async(service.publish_from_preview(preview_data))
+            return _run_async(service.publish(body))
+        except Exception as exc:
+            return {"ok": False, "step": "error", "error": str(exc)}
+
     def _read_json_body(self) -> dict[str, Any]:
         try:
             content_len = int(self.headers.get("Content-Length", "0"))
@@ -6312,32 +6837,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return self.repo.get_top_products(limit=limit)
 
     def _aggregate_dashboard_payload(self, path: str) -> dict[str, Any] | None:
-        aggregate_query = getattr(self.mimic_ops, "get_dashboard_readonly_aggregate", None)
-        if not callable(aggregate_query):
-            return None
-
-        aggregate = aggregate_query()
-        if not isinstance(aggregate, dict):
-            return None
-        if not aggregate.get("success"):
-            return aggregate
-
-        sections = aggregate.get("sections") if isinstance(aggregate.get("sections"), dict) else {}
-        panel_map = {
-            "/api/summary": "operations_funnel_overview",
-            "/api/trend": "fulfillment_efficiency",
-            "/api/recent-operations": "exception_priority_pool",
-            "/api/top-products": "product_operations",
-        }
-        key = panel_map.get(path, "operations_funnel_overview")
-        panel_payload = sections.get(key) if isinstance(sections.get(key), dict) else {}
-        return {
-            "success": True,
-            "readonly": True,
-            "source": "virtual_goods_service.get_dashboard_metrics",
-            "view": key,
-            "data": panel_payload,
-        }
+        # React workbench relies on the stable legacy shape of /api/summary,/api/trend and related endpoints.
+        # The richer virtual-goods aggregate payload remains available on /api/dashboard.
+        return None
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -6439,6 +6941,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 payload = self.module_console.logs(target=target, tail_lines=tail)
                 status = 200 if not payload.get("error") else 500
                 self._send_json(payload, status=status)
+                return
+
+            if path == "/api/config":
+                self._send_json(self.mimic_ops.get_runtime_config())
+                return
+
+            if path == "/api/config/sections":
+                self._send_json(self.mimic_ops.get_runtime_config_sections())
+                return
+
+            if path == "/api/accounts":
+                self._send_json(self.mimic_ops.list_accounts())
                 return
 
             if path == "/api/status":
@@ -6578,6 +7092,52 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(payload, status=200 if payload.get("success") else 400)
                 return
 
+            if path == "/api/xgj/products":
+                page_no = _safe_int((query.get("page_no") or ["1"])[0], default=1, min_value=1, max_value=9999)
+                page_size = _safe_int((query.get("page_size") or ["20"])[0], default=20, min_value=1, max_value=200)
+                search = str((query.get("search") or [""])[0]).strip()
+                payload = self.mimic_ops.list_xianguanjia_products(
+                    page_no=page_no,
+                    page_size=page_size,
+                    query=search,
+                )
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
+                return
+
+            if path == "/api/xgj/orders":
+                page_no = _safe_int((query.get("page_no") or ["1"])[0], default=1, min_value=1, max_value=9999)
+                page_size = _safe_int((query.get("page_size") or ["20"])[0], default=20, min_value=1, max_value=200)
+                status_raw = str((query.get("order_status") or [""])[0]).strip()
+                order_status = int(status_raw) if status_raw.isdigit() else None
+                search = str((query.get("search") or [""])[0]).strip()
+                payload = self.mimic_ops.list_xianguanjia_orders(
+                    page_no=page_no,
+                    page_size=page_size,
+                    order_status=order_status,
+                    query=search,
+                )
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
+                return
+
+            if path == "/api/listing/templates":
+                from src.modules.listing.templates import list_templates
+
+                self._send_json({"ok": True, "templates": list_templates()})
+                return
+
+            if path == "/api/generated-image":
+                raw_path = str((query.get("path") or [""])[0]).strip()
+                try:
+                    data, content_type = self.mimic_ops.read_generated_image(raw_path)
+                except FileNotFoundError as exc:
+                    self._send_json(_error_payload(str(exc), code="NOT_FOUND"), status=404)
+                    return
+                except PermissionError as exc:
+                    self._send_json(_error_payload(str(exc), code="FORBIDDEN"), status=403)
+                    return
+                self._send_bytes(data=data, content_type=content_type)
+                return
+
             self._send_json(_error_payload("Not Found", code="NOT_FOUND"), status=404)
         except sqlite3.Error as e:
             self._send_json(_error_payload(f"Database error: {e}", code="DATABASE_ERROR"), status=500)
@@ -6615,6 +7175,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/service/auto-fix":
                 payload = self.mimic_ops.service_auto_fix()
                 self._send_json(payload, status=200 if payload.get("success") else 400)
+                return
+
+            if path == "/api/config":
+                body = self._read_json_body()
+                payload = self.mimic_ops.save_runtime_config(body)
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
                 return
 
             if path == "/api/update-cookie":
@@ -6785,6 +7351,42 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 order_id = str(body.get("order_id") or body.get("xianyu_order_id") or "").strip()
                 payload = self.mimic_ops.inspect_virtual_goods_order(order_id)
                 self._send_json(payload, status=200 if payload.get("success") else 400)
+                return
+
+            if path == "/api/xgj/product/publish":
+                body = self._read_json_body()
+                payload = self.mimic_ops.publish_xianguanjia_product(body)
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
+                return
+
+            if path == "/api/xgj/product/unpublish":
+                body = self._read_json_body()
+                payload = self.mimic_ops.unpublish_xianguanjia_product(body)
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
+                return
+
+            if path == "/api/xgj/order/modify-price":
+                body = self._read_json_body()
+                payload = self.mimic_ops.modify_xianguanjia_order_price(body)
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
+                return
+
+            if path == "/api/xgj/order/deliver":
+                body = self._read_json_body()
+                payload = self.mimic_ops.deliver_xianguanjia_order(body)
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
+                return
+
+            if path == "/api/listing/preview":
+                body = self._read_json_body()
+                payload = self._handle_listing_preview(body)
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
+                return
+
+            if path == "/api/listing/publish":
+                body = self._read_json_body()
+                payload = self._handle_listing_publish(body)
+                self._send_json(payload, status=200 if payload.get("ok") else 400)
                 return
 
             self._send_json(_error_payload("Not Found", code="NOT_FOUND"), status=404)

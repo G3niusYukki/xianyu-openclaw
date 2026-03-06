@@ -2,7 +2,7 @@
 闲鱼自动化工具 - 主入口
 Xianyu Automation Tool - Main Entry Point
 
-基于OpenClaw框架的闲鱼自动化运营工具
+API-first 闲鱼自动化运营工具
 """
 
 import asyncio

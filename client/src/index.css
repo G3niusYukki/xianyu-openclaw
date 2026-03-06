@@ -1,27 +1,8 @@
+@import './styles/xianyu-theme.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-:root {
-  --xy-bg: #f5f7fb;
-  --xy-surface: #ffffff;
-  --xy-surface-soft: #f8fbff;
-  --xy-text-primary: #0f172a;
-  --xy-text-secondary: #475569;
-  --xy-brand-500: #ff7a00;
-  --xy-brand-600: #eb6b00;
-  --xy-brand-100: #fff0e2;
-  --xy-info-500: #1d4ed8;
-  --xy-success-500: #16a34a;
-  --xy-warning-500: #d97706;
-  --xy-border: #e2e8f0;
-  --xy-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-  --xy-radius-lg: 20px;
-  --xy-radius-md: 14px;
-  --xy-duration-fast: 140ms;
-  --xy-duration-base: 260ms;
-  --xy-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-}
 
 body {
   margin: 0;
@@ -33,25 +14,32 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 布局基础类 */
 .xy-page {
   @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6;
 }
 
+/* 组件类 */
 .xy-card {
   background: var(--xy-surface);
   border: 1px solid var(--xy-border);
   border-radius: var(--xy-radius-lg);
-  box-shadow: var(--xy-shadow);
+  box-shadow: var(--xy-shadow-sm);
+  transition: box-shadow 0.2s ease-in-out;
+}
+.xy-card:hover {
+  box-shadow: var(--xy-shadow-md);
 }
 
 .xy-card-soft {
   background: var(--xy-surface-soft);
-  border: 1px solid #dbeafe;
+  border: 1px solid var(--xy-border);
   border-radius: var(--xy-radius-md);
 }
 
 .xy-title {
-  @apply text-2xl md:text-3xl font-bold tracking-tight;
+  @apply text-xl md:text-2xl font-bold tracking-tight;
+  color: var(--xy-text-primary);
 }
 
 .xy-subtitle {
@@ -59,34 +47,78 @@ body {
   @apply text-sm md:text-base;
 }
 
-.xy-btn-primary {
-  background: var(--xy-brand-500);
-  color: #fff;
-  border-radius: 12px;
-  transition: transform var(--xy-duration-fast) var(--xy-ease-out),
-    background var(--xy-duration-base) var(--xy-ease-out);
+/* 按钮基础类 */
+.xy-btn {
+  @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+  border-radius: var(--xy-radius-sm);
 }
 
+.xy-btn-primary {
+  @apply xy-btn;
+  background: var(--xy-brand-500);
+  color: #fff;
+}
 .xy-btn-primary:hover {
   background: var(--xy-brand-600);
-  transform: translateY(-1px);
+}
+.xy-btn-primary:focus {
+  @apply ring-xy-brand-500;
 }
 
 .xy-btn-secondary {
-  background: #fff;
+  @apply xy-btn;
+  background: var(--xy-surface);
   color: var(--xy-text-primary);
   border: 1px solid var(--xy-border);
-  border-radius: 12px;
-  transition: all var(--xy-duration-fast) var(--xy-ease-out);
 }
-
 .xy-btn-secondary:hover {
-  border-color: #cbd5e1;
-  background: #f8fafc;
+  background: var(--xy-gray-50);
+  border-color: var(--xy-gray-300);
+}
+.xy-btn-secondary:focus {
+  @apply ring-gray-200;
 }
 
+.xy-btn-danger {
+  @apply xy-btn;
+  background: var(--xy-error);
+  color: #fff;
+}
+.xy-btn-danger:hover {
+  background: #dc2626;
+}
+.xy-btn-danger:focus {
+  @apply ring-red-500;
+}
+
+/* 输入框基础类 */
+.xy-input {
+  @apply block w-full rounded-md shadow-sm sm:text-sm;
+  background: var(--xy-surface);
+  border: 1px solid var(--xy-border);
+  color: var(--xy-text-primary);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.xy-input:focus {
+  border-color: var(--xy-brand-500);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--xy-brand-100);
+}
+.xy-input:disabled {
+  background: var(--xy-gray-100);
+  color: var(--xy-gray-500);
+  cursor: not-allowed;
+}
+
+/* 标签基础类 */
+.xy-label {
+  @apply block text-sm font-medium mb-1;
+  color: var(--xy-text-primary);
+}
+
+/* 动画 */
 .xy-enter {
-  animation: xy-enter var(--xy-duration-base) var(--xy-ease-out);
+  animation: xy-enter 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes xy-enter {
@@ -101,9 +133,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

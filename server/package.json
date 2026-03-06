@@ -1,30 +1,20 @@
 {
-  "name": "code-review-server",
+  "name": "xianyu-openclaw-server",
   "version": "1.0.0",
-  "description": "AI-powered code review service backend",
+  "description": "闲鱼自动化工作台 Node.js 后端",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "db:migrate": "node src/config/database.js",
     "test": "jest"
   },
   "dependencies": {
     "axios": "^1.6.0",
-    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "express-validator": "^7.0.1",
     "helmet": "^7.1.0",
-    "jsonwebtoken": "^9.0.2",
-    "morgan": "^1.10.0",
-    "multer": "^1.4.5-lts.1",
-    "node-cron": "^3.0.2",
-    "pg": "^8.11.3",
-    "pg-hstore": "^2.3.4",
-    "sequelize": "^6.35.0",
-    "stripe": "^14.3.0"
+    "morgan": "^1.10.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",

@@ -1,0 +1,23 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN pip install --no-cache-dir playwright && playwright install --with-deps chromium
+
+RUN groupadd -r appgrp && useradd -r -g appgrp -d /app appusr
+
+COPY src/ ./src/
+COPY config/ ./config/
+
+RUN mkdir -p /app/data && chown -R appusr:appgrp /app/data
+
+USER appusr
+EXPOSE 8091
+CMD ["python", "-m", "src.dashboard_server", "--host", "0.0.0.0"]

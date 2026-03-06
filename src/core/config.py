@@ -67,8 +67,11 @@ class Config:
             self._load_env_file()
             self._resolve_env_variables()
             self._set_defaults()
+            self._apply_env_overrides()
         else:
             self._set_defaults()
+            self._load_env_file()
+            self._apply_env_overrides()
 
     def _find_config_file(self) -> str | None:
         """
@@ -291,6 +294,52 @@ class Config:
                 for key, value in values.items():
                     if key not in self._config[section]:
                         self._config[section][key] = value
+
+    def _apply_env_overrides(self) -> None:
+        """将常用运行时环境变量映射到结构化配置。"""
+
+        def parse_value(raw: str, value_type: str) -> Any:
+            text = str(raw)
+            if value_type == "bool":
+                return text.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+            if value_type == "int":
+                try:
+                    return int(text.strip())
+                except ValueError:
+                    return None
+            if value_type == "float":
+                try:
+                    return float(text.strip())
+                except ValueError:
+                    return None
+            return text
+
+        overrides = [
+            ("app", "runtime", "APP_RUNTIME", "str"),
+            ("ai", "provider", "AI_PROVIDER", "str"),
+            ("ai", "api_key", "AI_API_KEY", "str"),
+            ("ai", "base_url", "AI_BASE_URL", "str"),
+            ("ai", "model", "AI_MODEL", "str"),
+            ("ai", "temperature", "AI_TEMPERATURE", "float"),
+            ("messages", "enabled", "MESSAGES_ENABLED", "bool"),
+            ("messages", "transport", "MESSAGES_TRANSPORT", "str"),
+            ("messages", "default_reply", "MESSAGES_DEFAULT_REPLY", "str"),
+            ("messages", "virtual_default_reply", "MESSAGES_VIRTUAL_DEFAULT_REPLY", "str"),
+            ("messages", "max_replies_per_run", "MESSAGES_MAX_REPLIES_PER_RUN", "int"),
+        ]
+
+        for section, key, env_key, value_type in overrides:
+            raw = os.getenv(env_key)
+            if raw in {None, ""}:
+                continue
+            value = parse_value(raw, value_type)
+            if value is None:
+                continue
+            section_payload = self._config.setdefault(section, {})
+            if not isinstance(section_payload, dict):
+                section_payload = {}
+                self._config[section] = section_payload
+            section_payload[key] = value
 
     def get(self, key: str, default: Any = None) -> Any:
         """

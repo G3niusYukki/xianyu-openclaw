@@ -1,7 +1,7 @@
 """
 闲鱼自动化工具 CLI
 
-供 OpenClaw Agent 通过 bash tool 调用的命令行接口。
+供自动化脚本、测试和运维任务调用的命令行接口。
 所有命令输出结构化 JSON，方便 Agent 解析结果。
 
 用法:
@@ -40,7 +40,7 @@ def _json_out(data: Any) -> None:
 
 
 _MODULE_TARGETS = ("presales", "operations", "aftersales")
-_EXPECTED_PROJECT_ROOT = "/Users/brianzhibo/openclaw/xianyu-openclaw"
+_EXPECTED_PROJECT_ROOT = "/Users/peterzhang/xianyu-openclaw"
 
 _BENCH_QUOTE_MESSAGES = [
     "安徽到上海 1kg 圆通多少钱",
@@ -1752,7 +1752,7 @@ async def cmd_virtual_goods(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xianyu-cli",
-        description="闲鱼自动化工具 CLI — 供 OpenClaw Agent 调用",
+        description="闲鱼自动化工具 CLI",
     )
     sub = parser.add_subparsers(dest="command", help="可用命令")
 
@@ -1886,7 +1886,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # doctor
     p = sub.add_parser("doctor", help="运行系统自检并输出修复建议")
-    p.add_argument("--skip-gateway", action="store_true", help="跳过 OpenClaw Gateway 连通性检查")
+    p.add_argument("--skip-gateway", action="store_true", help="跳过 Legacy Gateway 连通性检查")
     p.add_argument("--skip-quote", action="store_true", help="跳过自动报价成本源检查")
     p.add_argument("--strict", action="store_true", help="警告也按失败处理（返回非0）")
 
