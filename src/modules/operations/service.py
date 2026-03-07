@@ -5,21 +5,21 @@ Operations Service
 提供闲鱼店铺日常运营操作功能
 """
 
+from __future__ import annotations
+
 import asyncio
 import random
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.core.compliance import get_compliance_guard
 from src.core.config import get_config
-from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
 from src.integrations.xianguanjia.open_platform_client import OpenPlatformClient
 from src.modules.analytics.service import AnalyticsService
 from src.modules.listing.models import Listing
 from src.modules.listing.service import ListingService
-from src.modules.orders.xianguanjia import XianGuanJiaClient
 
 
 class OperationsSelectors:
@@ -73,23 +73,14 @@ class OperationsService:
         controller=None,
         config: dict | None = None,
         analytics: AnalyticsService | None = None,
-        price_api_client: XianGuanJiaClient | None = None,
+        api_client: OpenPlatformClient | None = None,
     ):
-        """
-        初始化运营服务
-
-        Args:
-            controller: 浏览器控制器
-            config: 配置字典
-            analytics: 数据分析服务
-        """
         self.controller = controller
         self.config = config or {}
         self.logger = get_logger()
         self.analytics = analytics
         self.compliance = get_compliance_guard()
-        self.price_api_client = price_api_client or self._build_price_api_client()
-        self.product_api_client = self._build_product_api_client()
+        self.api_client = api_client or self._build_api_client()
 
         browser_config = get_config().browser
         self.delay_range = (
@@ -99,32 +90,7 @@ class OperationsService:
 
         self.selectors = OperationsSelectors()
 
-    def _build_price_api_client(self) -> XianGuanJiaClient | None:
-        cfg = self.config.get("xianguanjia")
-        if not isinstance(cfg, dict):
-            return None
-        if not cfg.get("enabled", False):
-            return None
-
-        app_key = str(cfg.get("app_key", "")).strip()
-        app_secret = str(cfg.get("app_secret", "")).strip()
-        if not app_key or not app_secret:
-            return None
-
-        try:
-            return XianGuanJiaClient(
-                app_key=app_key,
-                app_secret=app_secret,
-                base_url=str(cfg.get("base_url", "https://open.goofish.pro")).strip(),
-                timeout=float(cfg.get("timeout", 30.0)),
-                merchant_id=str(cfg.get("merchant_id", "")).strip() or None,
-                merchant_query_key=str(cfg.get("merchant_query_key", "merchantId")).strip() or "merchantId",
-            )
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize XianGuanJia price client: {e}")
-            return None
-
-    def _build_product_api_client(self) -> OpenPlatformClient | None:
+    def _build_api_client(self) -> OpenPlatformClient | None:
         cfg = self.config.get("xianguanjia")
         if not isinstance(cfg, dict) or not cfg.get("enabled", False):
             return None
@@ -138,15 +104,14 @@ class OperationsService:
                 app_key=app_key,
                 app_secret=app_secret,
                 timeout=float(cfg.get("timeout", 30.0)),
-                seller_id=str(cfg.get("seller_id", "")).strip() or None,
             )
         except Exception as e:
-            self.logger.warning(f"Failed to initialize XianGuanJia product client: {e}")
+            self.logger.warning(f"Failed to initialize XianGuanJia API client: {e}")
             return None
 
     @staticmethod
     def _ts() -> str:
-        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @classmethod
     def _exec_contract(
@@ -176,31 +141,34 @@ class OperationsService:
     async def _try_update_price_via_api(
         self, product_id: str, new_price: float, original_price: float | None = None
     ) -> tuple[dict[str, Any] | None, str | None]:
-        if not self.price_api_client:
-            return None, None
+        if not self.api_client:
+            return None, "api_client_not_configured"
+
+        payload: dict[str, Any] = {
+            "product_id": str(product_id),
+            "price": self._price_to_minor_units(new_price),
+        }
+        if original_price is not None:
+            payload["original_price"] = self._price_to_minor_units(original_price)
 
         try:
-            response = await asyncio.to_thread(
-                self.price_api_client.edit_product,
-                product_id=product_id,
-                price=self._price_to_minor_units(new_price),
-                original_price=self._price_to_minor_units(original_price) if original_price is not None else None,
-            )
+            response = await asyncio.to_thread(self.api_client.edit_product, payload)
         except Exception as e:
             self.logger.warning(f"XianGuanJia price update failed for {product_id}: {e}")
             return None, str(e)
 
-        result = {
+        if not response.ok:
+            return None, response.error_message or "api_call_failed"
+
+        return {
             "success": True,
             "product_id": product_id,
             "action": "price_update",
             "old_price": original_price,
             "new_price": new_price,
             "channel": "xianguanjia_api",
-            "api_response": response,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        return result, None
+        }, None
 
     def _random_delay(self, min_factor: float = 1.0, max_factor: float = 1.0) -> float:
         """生成随机延迟"""
@@ -214,7 +182,6 @@ class OperationsService:
         *,
         payload: dict[str, Any] | None = None,
         internal_listing_id: str | None = None,
-        allow_dom_fallback: bool = False,
         api_client: OpenPlatformClient | None = None,
     ) -> dict[str, Any]:
         listing_service = ListingService(
@@ -236,198 +203,64 @@ class OperationsService:
             action,
             payload=payload,
             listing=listing,
-            api_client=api_client or self.product_api_client,
-            allow_dom_fallback=allow_dom_fallback,
+            api_client=api_client or self.api_client,
+            allow_dom_fallback=False,
         )
 
     async def polish_listing(self, product_id: str) -> dict[str, Any]:
-        """
-        擦亮单个商品
-
-        Args:
-            product_id: 商品ID
-
-        Returns:
-            操作结果
-        """
-        self.logger.info(f"Polishing listing: {product_id}")
-
-        if not self.controller:
-            raise BrowserError("Browser controller is not initialized. Cannot polish listing.")
-
-        try:
-            page_id = await self.controller.new_page()
-            url = f"https://www.goofish.com/item/{product_id}"
-            await self.controller.navigate(page_id, url)
-
-            await asyncio.sleep(self._random_delay())
-
-            success = await self.controller.click(page_id, self.selectors.POLISH_BUTTON)
-            if success:
-                await asyncio.sleep(self._random_delay())
-                await self.controller.click(page_id, self.selectors.POLISH_CONFIRM)
-                await asyncio.sleep(self._random_delay())
-
-            await self.controller.close_page(page_id)
-
-            result = {
-                "success": success,
-                "product_id": product_id,
-                "action": "polish",
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-
-            if self.analytics:
-                await self.analytics.log_operation("POLISH", product_id, details=result)
-
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Polish failed: {e}")
-            return self._error_result("polish", product_id, str(e))
+        """擦亮功能已停用。闲鱼平台已限制擦亮效果，该功能不再提供价值。"""
+        return {
+            "success": False,
+            "product_id": product_id,
+            "action": "polish",
+            "error": "feature_disabled",
+            "message": "擦亮功能已停用：闲鱼平台已限制擦亮效果",
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
     async def batch_polish(self, product_ids: list[str] | None = None, max_items: int = 50) -> dict[str, Any]:
-        """
-        批量擦亮商品
+        """批量擦亮功能已停用。"""
+        return {
+            "success": 0,
+            "failed": 0,
+            "total": 0,
+            "action": "batch_polish",
+            "blocked": True,
+            "message": "擦亮功能已停用：闲鱼平台已限制擦亮效果",
+            "details": [],
+        }
 
-        Args:
-            product_ids: 商品ID列表，为空则擦亮所有可擦亮商品
-            max_items: 最大擦亮数量
-
-        Returns:
-            操作汇总结果
-        """
-        self.logger.info(f"Starting batch polish (max: {max_items})...")
-
-        if not self.controller:
-            raise BrowserError("Browser controller is not initialized. Cannot batch polish.")
-
+    async def modify_order_price(self, order_no: str, order_price: int, express_fee: int | None = None) -> dict[str, Any]:
+        if not self.api_client:
+            return {"success": False, "channel": "xianguanjia_api", "error": "api_client_not_configured"}
+        payload: dict[str, Any] = {
+            "order_no": str(order_no),
+            "order_price": int(order_price),
+        }
+        if express_fee is not None:
+            payload["express_fee"] = int(express_fee)
         try:
-            rate_check = await self.compliance.evaluate_batch_polish_rate("batch_polish:global")
-            if rate_check["blocked"]:
-                summary = {
-                    "success": 0,
-                    "failed": 0,
-                    "total": 0,
-                    "action": "batch_polish",
-                    "blocked": True,
-                    "message": rate_check["message"],
-                    "details": [],
+            response = await asyncio.to_thread(self.api_client.modify_order_price, payload)
+            if not response.ok:
+                return {
+                    "success": False,
+                    "channel": "xianguanjia_api",
+                    "order_no": order_no,
+                    "order_price": int(order_price),
+                    "error": response.error_message or "api_call_failed",
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }
-                if self.analytics:
-                    await self.analytics.log_operation(
-                        "COMPLIANCE_BLOCK",
-                        None,
-                        details={"event": "BATCH_POLISH_RATE_LIMIT", **summary},
-                        status="blocked",
-                    )
-                return summary
-            if rate_check["warn"] and self.analytics:
-                await self.analytics.log_operation(
-                    "COMPLIANCE_WARN",
-                    None,
-                    details={
-                        "event": "BATCH_POLISH_RATE_LIMIT_WARN",
-                        "message": rate_check["message"],
-                        "action": "batch_polish",
-                    },
-                    status="warning",
-                )
-
-            page_id = await self.controller.new_page()
-            await self.controller.navigate(page_id, self.selectors.MY_SELLING)
-            await asyncio.sleep(self._random_delay(1.5, 2.5))
-
-            results = []
-
-            if not product_ids:
-                items = await self.controller.find_elements(page_id, self.selectors.SELLING_ITEM)
-                product_ids = await self._extract_product_ids(page_id, limit=min(len(items), max_items))
-            else:
-                product_ids = product_ids[:max_items]
-
-            for idx, product_id in enumerate(product_ids):
-                await asyncio.sleep(self._random_delay())
-
-                success = await self.controller.click(page_id, self.selectors.POLISH_BUTTON)
-                confirmed = False
-                if success:
-                    await asyncio.sleep(self._random_delay())
-                    confirmed = await self.controller.click(page_id, self.selectors.POLISH_CONFIRM)
-                    await asyncio.sleep(self._random_delay(2, 4))
-
-                results.append({"success": bool(success and confirmed), "product_id": product_id, "action": "polish"})
-                if idx >= max_items - 1:
-                    break
-
-            summary = {
-                "success": sum(1 for r in results if r["success"]),
-                "failed": sum(1 for r in results if not r["success"]),
-                "total": len(results),
-                "action": "batch_polish",
-                "details": results,
-            }
-
-            if self.analytics:
-                await self.analytics.log_operation("BATCH_POLISH", None, details=summary)
-
-            self.logger.success(f"Batch polish complete: {summary['success']} items polished")
-            await self.controller.close_page(page_id)
-
-            return summary
-
-        except Exception as e:
-            self.logger.error(f"Batch polish failed: {e}")
-            return self._error_result("batch_polish", None, str(e))
-
-    async def _extract_product_ids(self, page_id: str, limit: int = 50) -> list[str]:
-        """从当前页面提取真实商品ID，失败时回退为占位ID"""
-        script = """
-(() => {
-  const ids = new Set();
-  const anchors = Array.from(document.querySelectorAll("a[href*='/item/']"));
-  for (const a of anchors) {
-    const href = a.getAttribute("href") || "";
-    const m = href.match(/\\/item\\/([a-zA-Z0-9_-]+)/);
-    if (m && m[1]) ids.add(m[1]);
-  }
-  const cards = Array.from(document.querySelectorAll("[data-item-id],[data-id]"));
-  for (const el of cards) {
-    const id = el.getAttribute("data-item-id") || el.getAttribute("data-id") || "";
-    if (id) ids.add(id);
-  }
-  return Array.from(ids);
-})();
-"""
-        extracted = await self.controller.execute_script(page_id, script)
-        if isinstance(extracted, list) and extracted:
-            return [str(pid) for pid in extracted[:limit]]
-        return [f"unknown_{i + 1}" for i in range(limit)]
-
-    async def modify_order_price(
-        self, order_no: str, order_price: int, express_fee: int | None = None
-    ) -> dict[str, Any]:
-        if not self.price_api_client:
-            return {"success": False, "channel": "order_price_api", "error": "price_api_client_not_configured"}
-        try:
-            response = await asyncio.to_thread(
-                self.price_api_client.modify_order_price,
-                order_no=order_no,
-                order_price=int(order_price),
-                express_fee=int(express_fee) if express_fee is not None else None,
-            )
             return {
                 "success": True,
-                "channel": "order_price_api",
+                "channel": "xianguanjia_api",
                 "order_no": order_no,
                 "order_price": int(order_price),
-                "api_response": response,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
         except Exception as e:
             return {
                 "success": False,
-                "channel": "order_price_api",
+                "channel": "xianguanjia_api",
                 "order_no": order_no,
                 "order_price": int(order_price),
                 "error": str(e),
@@ -437,17 +270,7 @@ class OperationsService:
     async def update_price(
         self, product_id: str, new_price: float, original_price: float | None = None
     ) -> dict[str, Any]:
-        """
-        更新商品价格
-
-        Args:
-            product_id: 商品ID
-            new_price: 新价格
-            original_price: 原价
-
-        Returns:
-            操作结果
-        """
+        """通过闲管家 API 更新商品价格（纯 API，无 DOM fallback）。"""
         self.logger.info(f"Updating price for {product_id}: {original_price} -> {new_price}")
 
         api_result, api_error = await self._try_update_price_via_api(product_id, new_price, original_price)
@@ -456,55 +279,13 @@ class OperationsService:
                 await self.analytics.log_operation("PRICE_UPDATE", product_id, details=api_result)
             return api_result
 
-        if not self.controller:
-            if api_error:
-                result = self._error_result("price_update", product_id, api_error)
-                result["old_price"] = original_price
-                result["new_price"] = new_price
-                result["channel"] = "xianguanjia_api"
-                if self.analytics:
-                    await self.analytics.log_operation("PRICE_UPDATE", product_id, details=result)
-                return result
-            raise BrowserError("Browser controller is not initialized. Cannot update price.")
-
-        try:
-            page_id = await self.controller.new_page()
-            url = f"https://www.goofish.com/item/{product_id}"
-            await self.controller.navigate(page_id, url)
-            await asyncio.sleep(self._random_delay())
-
-            success = await self.controller.click(page_id, self.selectors.EDIT_PRICE)
-            if success:
-                await asyncio.sleep(self._random_delay())
-
-                await self.controller.type_text(page_id, self.selectors.PRICE_INPUT, str(new_price))
-                await asyncio.sleep(self._random_delay())
-
-                await self.controller.click(page_id, self.selectors.PRICE_SUBMIT)
-                await asyncio.sleep(self._random_delay())
-
-            await self.controller.close_page(page_id)
-
-            result = {
-                "success": success,
-                "product_id": product_id,
-                "action": "price_update",
-                "old_price": original_price,
-                "new_price": new_price,
-                "channel": "dom",
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            if api_error:
-                result["api_error"] = api_error
-
-            if self.analytics:
-                await self.analytics.log_operation("PRICE_UPDATE", product_id, details=result)
-
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Price update failed: {e}")
-            return self._error_result("price_update", product_id, str(e))
+        result = self._error_result("price_update", product_id, api_error or "api_client_not_configured")
+        result["old_price"] = original_price
+        result["new_price"] = new_price
+        result["channel"] = "xianguanjia_api"
+        if self.analytics:
+            await self.analytics.log_operation("PRICE_UPDATE", product_id, details=result)
+        return result
 
     async def batch_update_price(self, updates: list[dict[str, Any]], delay_range: tuple = (3, 6)) -> dict[str, Any]:
         """
@@ -550,158 +331,169 @@ class OperationsService:
         self.logger.success(f"Batch price update complete: {summary['success']}/{summary['total']}")
         return summary
 
-    async def delist(self, product_id: str, reason: str = "不卖了", confirm: bool = True) -> dict[str, Any]:
-        """
-        下架商品
-
-        Args:
-            product_id: 商品ID
-            reason: 下架原因
-            confirm: 是否确认下架
-
-        Returns:
-            操作结果
-        """
+    async def delist(self, product_id: str, reason: str = "不卖了") -> dict[str, Any]:
+        """通过闲管家 API 下架商品。"""
         self.logger.info(f"Delisting {product_id}, reason: {reason}")
 
-        if not self.controller:
-            raise BrowserError("Browser controller is not initialized. Cannot delist.")
+        if not self.api_client:
+            return self._error_result("delist", product_id, "api_client_not_configured")
 
         try:
-            page_id = await self.controller.new_page()
-            url = f"https://www.goofish.com/item/{product_id}"
-            await self.controller.navigate(page_id, url)
-            await asyncio.sleep(self._random_delay())
-
-            success = await self.controller.click(page_id, self.selectors.DELIST_BUTTON)
-            if success:
-                await asyncio.sleep(self._random_delay())
-
-                if confirm:
-                    await self.controller.click(page_id, self.selectors.DELIST_CONFIRM)
-                    await asyncio.sleep(self._random_delay())
-
-            await self.controller.close_page(page_id)
-
+            response = await asyncio.to_thread(
+                self.api_client.unpublish_product, {"product_id": str(product_id)}
+            )
+            success = response.ok
             result = {
                 "success": success,
                 "product_id": product_id,
                 "action": "delist",
                 "reason": reason,
+                "channel": "xianguanjia_api",
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
+            if not success:
+                result["error"] = response.error_message or "api_call_failed"
 
             if self.analytics:
                 await self.analytics.log_operation("DELIST", product_id, details=result)
-
             return result
-
         except Exception as e:
             self.logger.error(f"Delist failed: {e}")
             return self._error_result("delist", product_id, str(e))
 
     async def relist(self, product_id: str) -> dict[str, Any]:
-        """
-        重新上架商品
-
-        Args:
-            product_id: 商品ID
-
-        Returns:
-            操作结果
-        """
+        """通过闲管家 API 重新上架商品。"""
         self.logger.info(f"Relisting {product_id}")
 
-        if not self.controller:
-            raise BrowserError("Browser controller is not initialized. Cannot relist.")
+        if not self.api_client:
+            return self._error_result("relist", product_id, "api_client_not_configured")
 
         try:
-            page_id = await self.controller.new_page()
-            url = f"https://www.goofish.com/item/{product_id}"
-            await self.controller.navigate(page_id, url)
-            await asyncio.sleep(self._random_delay())
-
-            success = await self.controller.click(page_id, self.selectors.RELIST_BUTTON)
-            if success:
-                await asyncio.sleep(self._random_delay())
-                await self.controller.click(page_id, self.selectors.RELIST_CONFIRM)
-                await asyncio.sleep(self._random_delay())
-
-            await self.controller.close_page(page_id)
-
+            response = await asyncio.to_thread(
+                self.api_client.publish_product, {"product_id": str(product_id)}
+            )
+            success = response.ok
             result = {
                 "success": success,
                 "product_id": product_id,
                 "action": "relist",
+                "channel": "xianguanjia_api",
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
+            if not success:
+                result["error"] = response.error_message or "api_call_failed"
 
             if self.analytics:
                 await self.analytics.log_operation("RELIST", product_id, details=result)
-
             return result
-
         except Exception as e:
             self.logger.error(f"Relist failed: {e}")
             return self._error_result("relist", product_id, str(e))
 
     async def refresh_inventory(self) -> dict[str, Any]:
-        """
-        刷新库存信息
-
-        Returns:
-            刷新结果
-        """
+        """通过闲管家 API 获取商品列表刷新库存。"""
         self.logger.info("Refreshing inventory...")
 
-        if not self.controller:
-            raise BrowserError("Browser controller is not initialized. Cannot refresh inventory.")
+        if not self.api_client:
+            return {"success": False, "action": "inventory_refresh", "error": "api_client_not_configured"}
 
         try:
-            page_id = await self.controller.new_page()
-            await self.controller.navigate(page_id, self.selectors.MY_SELLING)
-            await asyncio.sleep(self._random_delay(1.5, 2.5))
+            response = await asyncio.to_thread(
+                self.api_client.list_products, {"page_no": 1, "page_size": 100}
+            )
+            if not response.ok:
+                return {"success": False, "action": "inventory_refresh", "error": response.error_message}
 
-            items = await self.controller.find_elements(page_id, self.selectors.SELLING_ITEM)
-
-            await self.controller.close_page(page_id)
-
+            data = response.data or {}
+            items = data.get("list", []) if isinstance(data, dict) else []
             return {
                 "success": True,
                 "action": "inventory_refresh",
-                "total_items": len(items),
+                "total_items": len(items) if isinstance(items, list) else 0,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
-
         except Exception as e:
             self.logger.error(f"Inventory refresh failed: {e}")
             return {"success": False, "action": "inventory_refresh", "error": str(e)}
 
     async def get_listing_stats(self) -> dict[str, Any]:
-        """
-        获取商品统计数据
-
-        Returns:
-            统计数据
-        """
+        """通过闲管家 API 获取商品统计。"""
         self.logger.info("Fetching listing statistics...")
 
-        if not self.controller:
-            raise BrowserError("Browser controller is not initialized. Cannot fetch stats.")
+        if not self.api_client:
+            return {"error": "api_client_not_configured"}
 
         try:
-            page_id = await self.controller.new_page()
-            await self.controller.navigate(page_id, self.selectors.MY_SELLING)
-            await asyncio.sleep(self._random_delay())
+            response = await asyncio.to_thread(
+                self.api_client.list_products, {"page_no": 1, "page_size": 100}
+            )
+            if not response.ok:
+                return {"error": response.error_message or "api_call_failed"}
 
-            stats = {"total": 0, "active": 0, "sold": 0, "deleted": 0, "total_views": 0, "total_wants": 0}
+            data = response.data or {}
+            items = data.get("list", []) if isinstance(data, dict) else []
+            if not isinstance(items, list):
+                items = []
 
-            await self.controller.close_page(page_id)
-            return stats
-
+            total = len(items)
+            active = sum(1 for i in items if isinstance(i, dict) and i.get("status") in (1, "1", "on_sale"))
+            return {
+                "total": total,
+                "active": active,
+                "sold": 0,
+                "deleted": 0,
+                "total_views": sum(i.get("view_count", 0) for i in items if isinstance(i, dict)),
+                "total_wants": sum(i.get("want_count", 0) for i in items if isinstance(i, dict)),
+            }
         except Exception as e:
             self.logger.error(f"Failed to fetch stats: {e}")
             return {"error": str(e)}
+
+    async def auto_adjust_price(
+        self,
+        product_id: str,
+        current_price: float,
+        *,
+        strategy: str = "step_down",
+        step_amount: float = 1.0,
+        min_price: float | None = None,
+        max_discount_pct: float = 0.3,
+    ) -> dict[str, Any]:
+        """自动改价 — 未支付订单场景下的策略性降价。
+
+        Args:
+            product_id: 商品 ID
+            current_price: 当前价格
+            strategy: 改价策略 (step_down=阶梯降价, restore=恢复原价)
+            step_amount: 每次降价金额
+            min_price: 最低价格保护
+            max_discount_pct: 最大折扣比例 (0.0~1.0)
+        """
+        if not 0.0 <= max_discount_pct <= 1.0:
+            return self._error_result("auto_adjust_price", product_id, "max_discount_pct must be between 0.0 and 1.0")
+
+        if strategy == "restore":
+            return await self.update_price(product_id, current_price)
+
+        floor = min_price if min_price is not None else current_price * (1 - max_discount_pct)
+        new_price = max(floor, current_price - step_amount)
+        new_price = round(new_price, 2)
+
+        if new_price >= current_price:
+            return {
+                "success": False,
+                "product_id": product_id,
+                "action": "auto_adjust_price",
+                "error": "price_at_floor",
+                "current_price": current_price,
+                "floor_price": floor,
+            }
+
+        result = await self.update_price(product_id, new_price, current_price)
+        result["action"] = "auto_adjust_price"
+        result["strategy"] = strategy
+        result["price_change"] = round(current_price - new_price, 2)
+        return result
 
     def _error_result(self, action: str, product_id: str | None, error: str) -> dict[str, Any]:
         """生成错误结果"""

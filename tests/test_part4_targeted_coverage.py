@@ -8,8 +8,6 @@ import pytest
 
 from src.core.error_handler import BrowserError
 from src.core import browser_client as bc
-from src.lite.msgpack import MessagePackDecoder, decrypt_payload
-from src.lite.ws_client import LiteWsClient
 from src.modules.messages.ws_live import GoofishWsTransport
 from src.modules.quote.models import QuoteRequest
 from src.modules.quote.route import contains_match, normalize_location, normalize_request_route, route_candidates
@@ -151,59 +149,6 @@ async def test_ws_send_reg_ack_and_queue_behaviors(monkeypatch):
     await t._push_event({"chat_id": "c0", "sender_user_id": "u0", "text": "a", "create_time": now_ms})
     await t._push_event({"chat_id": "c1", "sender_user_id": "u1", "text": "b", "create_time": now_ms})
     assert t._queue.qsize() == 1
-
-
-def test_lite_msgpack_branches_and_decrypt():
-    assert MessagePackDecoder(bytes([0xC0])).decode() is None
-    assert MessagePackDecoder(bytes([0xC2])).decode() is False
-    assert MessagePackDecoder(bytes([0xC3])).decode() is True
-    assert MessagePackDecoder(bytes([0xCC, 0x05])).decode() == 5
-    assert MessagePackDecoder(bytes([0xD0, 0xFF])).decode() == -1
-    assert MessagePackDecoder(bytes([0xD9, 0x01, 0x61])).decode() == "a"
-    assert MessagePackDecoder(bytes([0xDC, 0x00, 0x01, 0x01])).decode() == [1]
-    assert MessagePackDecoder(bytes([0xDE, 0x00, 0x01, 0xA1, 0x61, 0x01])).decode() == {"a": 1}
-
-    with pytest.raises(ValueError):
-        MessagePackDecoder(bytes([0xC1])).decode()
-
-    assert decrypt_payload("") is None
-    assert "hex" in decrypt_payload("wQ==")
-
-
-@pytest.mark.asyncio
-async def test_lite_ws_client_extract_handle_send_stop(monkeypatch):
-    async def tp():
-        return "tok"
-
-    c = LiteWsClient(ws_url="wss://x", cookie="u=1", device_id="d", my_user_id="me", token_provider=tp, message_expire_ms=1)
-
-    assert c._extract_event(None) is None
-    valid = {
-        "1": {
-            "2": "chat1@goofish",
-            "5": 2000000000000,
-            "10": {"reminderContent": "hi", "senderUserId": "u1", "reminderUrl": "https://x?itemId=123"},
-        }
-    }
-    monkeypatch.setattr("src.lite.ws_client.time.time", lambda: 2000000000)
-    evt = c._extract_event(valid)
-    assert evt and evt["item_id"] == "123"
-    assert c._extract_event({"1": {"2": "chat1@goofish", "10": {"reminderContent": "hi", "senderUserId": "me"}}}) is None
-
-    monkeypatch.setattr("src.lite.ws_client.decrypt_payload", lambda _x: valid)
-    await c._handle_sync({"body": {"syncPushPackage": {"data": [{"data": "x"}]}}})
-    assert (await c.next_event())["chat_id"] == "chat1"
-
-    class WS:
-        async def send(self, *_a, **_k):
-            return None
-
-        async def close(self):
-            return None
-
-    c._ws = WS()
-    assert await c.send_text("chat1", "u1", "hello") is True
-    await c.stop()
 
 
 def test_quote_route_and_setup(tmp_path):

@@ -23,7 +23,7 @@ def test_listing_models_roundtrip():
     assert m.product_id == "p1" and m.views == 0
 
 
-def test_load_listings_from_csv_success_and_bad_row(tmp_path, monkeypatch):
+def test_load_listings_from_csv_success_and_bad_row(tmp_path, caplog):
     csv_path = tmp_path / "listings.csv"
     pd.DataFrame(
         [
@@ -39,14 +39,13 @@ def test_load_listings_from_csv_success_and_bad_row(tmp_path, monkeypatch):
         ]
     ).to_csv(csv_path, index=False)
 
-    printed = []
-    monkeypatch.setattr("builtins.print", lambda *a, **k: printed.append(a))
-
-    rows = load_listings_from_csv(str(csv_path))
+    import logging
+    with caplog.at_level(logging.WARNING):
+        rows = load_listings_from_csv(str(csv_path))
     assert len(rows) == 1
     assert rows[0].images[0].local_path == "a.jpg"
     assert rows[0].tags == ["x", "y"]
-    assert printed, "bad row should be reported"
+    assert any("Error parsing row" in r.message for r in caplog.records), "bad row should be reported via logger"
 
 
 def test_load_listings_from_csv_defaults(tmp_path):

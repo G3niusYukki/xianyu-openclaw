@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from .models import TicketQuote, TicketSelection
 
 
-@dataclass(slots=True)
+@dataclass
 class TicketPricingPolicy:
     """Transforms an upstream quote into a sale price."""
 

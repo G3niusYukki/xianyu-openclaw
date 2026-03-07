@@ -5,6 +5,8 @@ Configuration Management Module
 提供YAML配置加载、环境变量管理、配置验证等功能
 """
 
+from __future__ import annotations
+
 import os
 import threading
 from functools import lru_cache
@@ -69,6 +71,8 @@ class Config:
             self._set_defaults()
             self._apply_env_overrides()
         else:
+            if config_path:
+                self.logger.error(f"指定的配置文件不存在: {config_path}，使用默认配置")
             self._set_defaults()
             self._load_env_file()
             self._apply_env_overrides()
@@ -113,7 +117,7 @@ class Config:
             raise ConfigError(f"Invalid YAML: {e}") from e
         except Exception as e:
             self.logger.error(f"Failed to load config file: {e}")
-            self._config = {}
+            raise ConfigError(f"Config load failed: {e}") from e
 
     def _load_env_file(self) -> None:
         """

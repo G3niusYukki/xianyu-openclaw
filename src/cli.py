@@ -22,6 +22,8 @@
     python -m src.cli messages --action auto-reply --limit 20 --dry-run
 """
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json

@@ -7,6 +7,7 @@ import src.core.config as config_module
 import src.core.doctor as doctor
 import src.modules.content.service as content_module
 from src.core.config import Config
+from src.core.error_handler import ConfigError
 from src.modules.content.service import ContentService
 
 
@@ -132,8 +133,8 @@ def test_config_load_yaml_validation_error_and_file_errors(tmp_path, reset_confi
 
     cfg = Config(str(tmp_path / "nope.yaml"))
 
-    cfg._load_yaml_config(str(invalid_file))
-    assert cfg._config == {}
+    with pytest.raises(ConfigError):
+        cfg._load_yaml_config(str(invalid_file))
 
     cfg._load_yaml_config(str(tmp_path / "not-found.yaml"))
     assert cfg._config == {}
@@ -141,8 +142,8 @@ def test_config_load_yaml_validation_error_and_file_errors(tmp_path, reset_confi
     normal_file = tmp_path / "normal.yaml"
     normal_file.write_text("app:\n  name: demo\n", encoding="utf-8")
     monkeypatch.setattr(config_module.yaml, "safe_load", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
-    cfg._load_yaml_config(str(normal_file))
-    assert cfg._config == {}
+    with pytest.raises(ConfigError):
+        cfg._load_yaml_config(str(normal_file))
 
 
 def test_config_properties_access(reset_config_singleton, tmp_path):

@@ -23,7 +23,7 @@ _WEIGHT_KG_PATTERN = r"(\d+\.?\d*)\s*(?:kg|KG|公斤|千克)"
 _WEIGHT_JIN_PATTERN = r"(\d+\.?\d*)\s*斤"
 
 
-@dataclass(slots=True)
+@dataclass
 class ExtractedInfo:
     origin: str | None = None
     destination: str | None = None

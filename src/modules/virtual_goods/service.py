@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .callbacks import VirtualGoodsCallbackService
@@ -22,7 +22,7 @@ class VirtualGoodsService:
 
     @staticmethod
     def _now() -> datetime:
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
 
     @classmethod
     def _ts(cls) -> str:
@@ -54,6 +54,8 @@ class VirtualGoodsService:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.store.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     @staticmethod
@@ -126,7 +128,7 @@ class VirtualGoodsService:
             item = self._callback_view(row)
             if item["event_kind"] == "unknown":
                 unknown_count += 1
-            created_at = datetime.strptime(str(item["created_at"]), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+            created_at = datetime.strptime(str(item["created_at"]), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
             item["age_seconds"] = max(0, int((now - created_at).total_seconds()))
             items.append(item)
 

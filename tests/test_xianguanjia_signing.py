@@ -19,7 +19,7 @@ def test_open_platform_sign_formula() -> None:
         body=body,
     )
     body_md5 = hashlib.md5(body.encode("utf-8")).hexdigest()
-    expected = hashlib.md5(f"A1B2C3D4{body_md5}1740380565SECRET".encode("utf-8")).hexdigest()
+    expected = hashlib.md5(f"A1B2C3D4,{body_md5},1740380565,SECRET".encode("utf-8")).hexdigest()
     assert sign == expected
 
 
@@ -49,7 +49,6 @@ def test_callback_verify_pass_and_fail() -> None:
         app_secret="AS",
         timestamp="1000",
         body="{}",
-        seller_id="S01",
     )
     assert verify_open_platform_callback_signature(
         app_key="AK",
@@ -57,7 +56,6 @@ def test_callback_verify_pass_and_fail() -> None:
         timestamp="1000",
         sign=op_sign,
         body="{}",
-        seller_id="S01",
     )
     assert not verify_open_platform_callback_signature(
         app_key="AK",
@@ -65,7 +63,6 @@ def test_callback_verify_pass_and_fail() -> None:
         timestamp="1000",
         sign="deadbeef",
         body="{}",
-        seller_id="S01",
     )
 
     vs_sign = sign_virtual_supply_request(

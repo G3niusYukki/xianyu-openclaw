@@ -17,9 +17,6 @@ export default function AutoPublish() {
     extra_info: ''
   });
   const [preview, setPreview] = useState(null);
-  const previewImages = preview?.local_images || [];
-
-  const generatedImageUrl = (imagePath) => `/py/api/generated-image?path=${encodeURIComponent(imagePath)}`;
 
   useEffect(() => {
     // 载入模板
@@ -195,26 +192,14 @@ export default function AutoPublish() {
               <h3 className="font-semibold text-xy-text-primary flex items-center gap-2">
                 <ImageIcon className="w-4 h-4" /> 主图预览
               </h3>
-              {previewImages.length > 0 ? (
-                <div className="grid grid-cols-2 gap-3">
-                  {previewImages.map((imagePath, index) => (
-                    <div key={imagePath} className="bg-xy-gray-100 rounded-xl overflow-hidden border border-xy-border">
-                      <img
-                        src={generatedImageUrl(imagePath)}
-                        alt={`预览图 ${index + 1}`}
-                        className="w-full aspect-[3/4] object-cover"
-                      />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="bg-xy-gray-100 rounded-xl overflow-hidden border border-xy-border relative">
-                  <div className="aspect-[3/4] flex items-center justify-center text-xy-text-secondary text-sm">
-                    当前预览未生成图片
+              <div className="bg-xy-gray-100 rounded-xl overflow-hidden border border-xy-border relative">
+                <div className="aspect-[3/4] flex items-center justify-center">
+                  {/* 在生产中我们会先传OSS或有个临时链接，这里如果是本地绝对路径或者直接二进制就不太好展示，暂用占位或通过 Python 后端代理 */}
+                  <div className="text-xy-text-secondary text-sm">
+                    (图片已生成：{preview.local_images?.length}张)
                   </div>
                 </div>
-              )}
-              <p className="text-xs text-xy-text-muted">已生成 {previewImages.length} 张本地图，可在发布前继续修改文案。</p>
+              </div>
             </div>
 
             {/* 右侧：文案编辑 */}

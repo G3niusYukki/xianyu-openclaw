@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass(slots=True)
+@dataclass
 class TicketSelection:
     """Structured ticket request extracted from a screenshot."""
 
@@ -20,7 +20,7 @@ class TicketSelection:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass
 class TicketQuote:
     """Quoted sale price for a ticket request."""
 
@@ -34,7 +34,7 @@ class TicketQuote:
     details: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass
 class TicketListingDraft:
     """Draft listing content to be published on Xianyu."""
 
@@ -45,7 +45,7 @@ class TicketListingDraft:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass
 class TicketPurchaseRequest:
     """Purchase request sent to an upstream ticket provider."""
 
@@ -55,7 +55,7 @@ class TicketPurchaseRequest:
     buyer_requirements: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass
 class TicketPurchaseResult:
     """Result returned by an upstream ticket provider."""
 

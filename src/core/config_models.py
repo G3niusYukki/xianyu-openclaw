@@ -5,6 +5,8 @@ Configuration Models and Validation
 使用Pydantic进行配置验证
 """
 
+from __future__ import annotations
+
 from enum import Enum
 from typing import Any
 

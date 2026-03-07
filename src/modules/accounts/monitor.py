@@ -5,6 +5,8 @@ Monitoring and Alert System
 提供异常监控、告警通知和自动恢复功能
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 from collections.abc import Callable

@@ -1,12 +1,14 @@
 """报价缓存（TTL + stale-while-revalidate）。"""
 
+from __future__ import annotations
+
 import time
 from dataclasses import dataclass
 
 from src.modules.quote.models import QuoteResult
 
 
-@dataclass(slots=True)
+@dataclass
 class QuoteCacheEntry:
     value: QuoteResult
     expires_at: float

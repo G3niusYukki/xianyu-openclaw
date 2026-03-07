@@ -5,6 +5,8 @@ Data Visualization
 提供数据图表生成功能
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
 
@@ -91,7 +93,7 @@ class DataVisualizer:
             lines.append("-" * len(title))
 
         height = 10
-        for _i, (item, value) in enumerate(zip(data, values, strict=False)):
+        for _i, (item, value) in enumerate(zip(data, values)):
             label = str(item.get(label_key, ""))[:10]
             normalized = (value - min_val) / (max_val - min_val)
             pos = int(normalized * height)
@@ -164,7 +166,7 @@ class DataVisualizer:
         lines = ["📈 Views Trend (Last 30 days)"]
         lines.append("-" * 40)
 
-        for d, v in zip(trend_data[-14:], values[-14:], strict=False):
+        for d, v in zip(trend_data[-14:], values[-14:]):
             date = d.get("date", "")[5:]
             bar_len = int(v / max_val * 20)
             bar = "▓" * bar_len

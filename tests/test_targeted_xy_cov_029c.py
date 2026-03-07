@@ -5,24 +5,30 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.core.error_handler import BrowserError
 from src.modules.operations.service import OperationsService
 import src.modules.quote.cost_table as ct
 from src.modules.quote.cost_table import CostRecord, CostTableRepository
 
 
 @pytest.mark.asyncio
-async def test_operations_controller_guard_branches_raise() -> None:
+async def test_operations_no_api_client_returns_error_or_disabled() -> None:
     svc = OperationsService(controller=None)
 
-    with pytest.raises(BrowserError, match="Cannot polish listing"):
-        await svc.polish_listing("p1")
-    with pytest.raises(BrowserError, match="Cannot update price"):
-        await svc.update_price("p1", 9.9)
-    with pytest.raises(BrowserError, match="Cannot delist"):
-        await svc.delist("p1")
-    with pytest.raises(BrowserError, match="Cannot relist"):
-        await svc.relist("p1")
+    polish = await svc.polish_listing("p1")
+    assert polish["success"] is False
+    assert polish["error"] == "feature_disabled"
+
+    price = await svc.update_price("p1", 9.9)
+    assert price["success"] is False
+    assert price["error"] == "api_client_not_configured"
+
+    delist_result = await svc.delist("p1")
+    assert delist_result["success"] is False
+    assert delist_result["error"] == "api_client_not_configured"
+
+    relist_result = await svc.relist("p1")
+    assert relist_result["success"] is False
+    assert relist_result["error"] == "api_client_not_configured"
 
 
 @pytest.mark.asyncio

@@ -79,7 +79,7 @@ def encrypt_value(plaintext: str) -> str:
         f = Fernet(_get_or_create_key())
         return f.encrypt(plaintext.encode("utf-8")).decode("utf-8")
     except ImportError:
-        logger.warning("cryptography package not installed. Run: pip install cryptography. Storing value as-is.")
+        logger.warning("cryptography 未安装，Cookie 将以明文存储。建议执行: pip install cryptography")
         return plaintext
 
 
@@ -91,7 +91,7 @@ def decrypt_value(ciphertext: str) -> str:
         f = Fernet(_get_or_create_key())
         return f.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
     except ImportError:
-        logger.warning("cryptography package not installed. Returning value as-is.")
+        logger.warning("cryptography 未安装，Cookie 将以明文存储。建议执行: pip install cryptography")
         return ciphertext
     except Exception:
         return ciphertext

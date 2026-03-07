@@ -120,7 +120,7 @@ async def test_misc_helpers_and_runtime_resolution_fallback(monkeypatch):
     monkeypatch.delenv("OPENCLAW_RUNTIME", raising=False)
     monkeypatch.setattr("src.core.browser_client.load_dotenv", lambda **_k: (_ for _ in ()).throw(RuntimeError("x")))
     monkeypatch.setattr("src.core.config.get_config", lambda: (_ for _ in ()).throw(RuntimeError("cfg")))
-    assert bc._resolve_runtime(None) == "auto"
+    assert bc._resolve_runtime(None) == "lite"
 
 
 @pytest.mark.asyncio

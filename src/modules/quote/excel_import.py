@@ -10,7 +10,7 @@ from src.modules.quote.cost_table import CostRecord, CostTableRepository, normal
 from src.modules.quote.geo_resolver import GeoResolver
 
 
-@dataclass(slots=True)
+@dataclass
 class ImportResult:
     records: list[CostRecord]
     detected_couriers: list[str]

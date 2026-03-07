@@ -1,49 +1,28 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 from xml.etree import ElementTree as ET
 
 import pytest
 
-from src.modules.operations.service import OperationsService, OperationsSelectors
+from src.modules.operations.service import OperationsService
 from src.modules.quote.cost_table import CostRecord, CostTableRepository, normalize_location_name
 
 
 @pytest.mark.asyncio
-async def test_operations_polish_listing_click_false_skips_confirm(monkeypatch) -> None:
-    monkeypatch.setattr("src.modules.operations.service.asyncio.sleep", AsyncMock())
-
-    controller = SimpleNamespace(
-        new_page=AsyncMock(return_value="pg1"),
-        navigate=AsyncMock(),
-        click=AsyncMock(return_value=False),
-        close_page=AsyncMock(),
-    )
-    analytics = SimpleNamespace(log_operation=AsyncMock())
-
-    svc = OperationsService(controller=controller, analytics=analytics)
+async def test_operations_polish_listing_returns_disabled() -> None:
+    svc = OperationsService(controller=None)
     result = await svc.polish_listing("pid-1")
 
     assert result["success"] is False
     assert result["action"] == "polish"
     assert result["product_id"] == "pid-1"
-    assert controller.click.await_count == 1
-    assert controller.click.await_args_list[0].args == ("pg1", OperationsSelectors.POLISH_BUTTON)
-    analytics.log_operation.assert_awaited_once()
-    op, pid = analytics.log_operation.await_args.args[:2]
-    details = analytics.log_operation.await_args.kwargs["details"]
-    assert op == "POLISH" and pid == "pid-1"
-    assert details["success"] is False and details["product_id"] == "pid-1"
+    assert result["error"] == "feature_disabled"
+    assert "擦亮功能已停用" in result["message"]
 
 
 @pytest.mark.asyncio
-async def test_operations_batch_polish_blocked_no_analytics_does_not_touch_browser() -> None:
-    controller = SimpleNamespace(new_page=AsyncMock())
-    svc = OperationsService(controller=controller, analytics=None)
-    svc.compliance = SimpleNamespace(
-        evaluate_batch_polish_rate=AsyncMock(return_value={"blocked": True, "warn": False, "message": "rate"})
-    )
+async def test_operations_batch_polish_returns_disabled_status() -> None:
+    svc = OperationsService(controller=None, analytics=None)
 
     summary = await svc.batch_polish(product_ids=["a", "b"], max_items=2)
 
@@ -53,10 +32,9 @@ async def test_operations_batch_polish_blocked_no_analytics_does_not_touch_brows
         "total": 0,
         "action": "batch_polish",
         "blocked": True,
-        "message": "rate",
+        "message": "擦亮功能已停用：闲鱼平台已限制擦亮效果",
         "details": [],
     }
-    controller.new_page.assert_not_awaited()
 
 
 def test_cost_table_normalize_location_via_geo_alias(monkeypatch) -> None:

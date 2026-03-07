@@ -17,6 +17,8 @@ class AnalyticsService:
         """
         os.makedirs("data", exist_ok=True)
         with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
             cursor = conn.cursor()
 
             # Create operations log table
@@ -48,6 +50,8 @@ class AnalyticsService:
         """
         try:
             with closing(sqlite3.connect(self.db_path)) as conn, conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")
                 conn.execute(
                     "INSERT INTO operation_logs (operation_type, details, status) VALUES (?, ?, ?)",
                     (op_type, details, status),
@@ -61,6 +65,8 @@ class AnalyticsService:
         """
         try:
             with closing(sqlite3.connect(self.db_path)) as conn, conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")
                 conn.execute(
                     "INSERT INTO product_metrics (product_title, views, wants, cconsultations) VALUES (?, ?, ?, ?)",
                     (title, views, wants, consultations),

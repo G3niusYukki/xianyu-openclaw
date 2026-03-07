@@ -5,6 +5,8 @@ Accounts Management Service
 提供多闲鱼账号的统一管理功能
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -57,14 +59,17 @@ class AccountsService:
         self._load_account_stats()
 
     def _load_accounts(self) -> None:
-        """加载账号配置"""
+        """加载账号配置（config.yaml + data/accounts.json 合并）"""
         accounts_config = self.config.accounts or []
 
         self.accounts = []
+        loaded_ids: set[str] = set()
+
         for acc in accounts_config:
             raw_cookie = self._resolve_env(acc.get("cookie", ""))
+            aid = acc.get("id", "")
             account = {
-                "id": acc.get("id", ""),
+                "id": aid,
                 "name": acc.get("name", acc.get("id", "")),
                 "cookie_encrypted": ensure_encrypted(raw_cookie),
                 "priority": acc.get("priority", 1),
@@ -74,6 +79,14 @@ class AccountsService:
                 "created_at": datetime.now().isoformat(),
             }
             self.accounts.append(account)
+            if aid:
+                loaded_ids.add(aid)
+
+        for persisted in self._load_persisted_accounts():
+            pid = persisted.get("id", "")
+            if pid and pid not in loaded_ids:
+                self.accounts.append(persisted)
+                loaded_ids.add(pid)
 
         if not self.accounts:
             self.logger.warning("No accounts configured")
@@ -117,8 +130,46 @@ class AccountsService:
         """保存账号统计"""
         stats_file = Path("data/account_stats.json")
         stats_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(stats_file, "w", encoding="utf-8") as f:
-            json.dump(self.account_stats, f, ensure_ascii=False, indent=2)
+        try:
+            with open(stats_file, "w", encoding="utf-8") as f:
+                json.dump(self.account_stats, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.logger.warning(f"Failed to save account stats: {e}")
+
+    def _persist_accounts(self) -> None:
+        """将当前账号列表持久化到 data/accounts.json，重启后可恢复。"""
+        accounts_file = Path("data/accounts.json")
+        accounts_file.parent.mkdir(parents=True, exist_ok=True)
+        serializable = []
+        for acc in self.accounts:
+            serializable.append({
+                "id": acc.get("id"),
+                "name": acc.get("name"),
+                "cookie_encrypted": acc.get("cookie_encrypted"),
+                "priority": acc.get("priority", 1),
+                "enabled": acc.get("enabled", True),
+                "status": acc.get("status", AccountStatus.ACTIVE),
+                "created_at": acc.get("created_at"),
+            })
+        try:
+            with open(accounts_file, "w", encoding="utf-8") as f:
+                json.dump(serializable, f, ensure_ascii=False, indent=2)
+            self.logger.debug(f"Persisted {len(serializable)} accounts to {accounts_file}")
+        except Exception as e:
+            self.logger.warning(f"Failed to persist accounts: {e}")
+
+    def _load_persisted_accounts(self) -> list[dict[str, Any]]:
+        """从 data/accounts.json 加载持久化账号（补充配置文件中未包含的账号）。"""
+        accounts_file = Path("data/accounts.json")
+        if not accounts_file.exists():
+            return []
+        try:
+            with open(accounts_file, encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            self.logger.warning(f"Failed to load persisted accounts: {e}")
+            return []
 
     def get_accounts(self, enabled_only: bool = True, mask_sensitive: bool = True) -> list[dict[str, Any]]:
         """
@@ -253,6 +304,7 @@ class AccountsService:
             "health_score": 100,
         }
         self._save_account_stats()
+        self._persist_accounts()
 
         self.logger.info(f"Added account: {account_id}")
         return True
@@ -272,6 +324,7 @@ class AccountsService:
                 self.accounts.pop(i)
                 self.account_stats.pop(account_id, None)
                 self._save_account_stats()
+                self._persist_accounts()
                 self.logger.info(f"Removed account: {account_id}")
                 return True
         return False
@@ -290,24 +343,18 @@ class AccountsService:
             if account.get("id") == account_id:
                 account["enabled"] = False
                 account["status"] = AccountStatus.MAINTENANCE
+                self._persist_accounts()
                 self.logger.info(f"Disabled account: {account_id}")
                 return True
         return False
 
     def enable_account(self, account_id: str) -> bool:
-        """
-        启用账号
-
-        Args:
-            account_id: 账号ID
-
-        Returns:
-            是否成功
-        """
+        """启用账号"""
         for account in self.accounts:
             if account.get("id") == account_id:
                 account["enabled"] = True
                 account["status"] = AccountStatus.ACTIVE
+                self._persist_accounts()
                 self.logger.info(f"Enabled account: {account_id}")
                 return True
         return False
@@ -346,6 +393,7 @@ class AccountsService:
             if enabled is not None:
                 account["enabled"] = enabled
                 account["status"] = AccountStatus.ACTIVE if enabled else AccountStatus.MAINTENANCE
+            self._persist_accounts()
             return True
         return False
 
@@ -460,6 +508,7 @@ class AccountsService:
             if account.get("id") == account_id:
                 account["cookie_encrypted"] = ensure_encrypted(new_cookie)
                 account["last_login"] = datetime.now().isoformat()
+                self._persist_accounts()
                 self.logger.info(f"Refreshed cookie for account: {account_id}")
                 return True
         return False

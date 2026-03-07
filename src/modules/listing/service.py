@@ -5,10 +5,12 @@ Listing Service
 提供闲鱼商品发布功能
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import random
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -123,7 +125,7 @@ class ListingService:
 
     @staticmethod
     def _ts() -> str:
-        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @staticmethod
     def _build_execution_contract(
@@ -158,7 +160,6 @@ class ListingService:
             app_key=app_key,
             app_secret=app_secret,
             timeout=float(cfg.get("timeout", 30.0)),
-            seller_id=str(cfg.get("seller_id", "")).strip() or None,
         )
 
     def _build_mapping_store(self):
@@ -449,35 +450,39 @@ class ListingService:
                     message=rate_check["message"],
                 )
 
-            if not self.controller:
-                raise BrowserError("Browser controller is not initialized. Cannot publish.")
-
-            product_id, product_url = await self._execute_publish(listing)
-            persisted = self._persist_listing_mapping(
-                internal_listing_id=listing.internal_listing_id, product_id=product_id
+            api_result = await self.execute_product_action(
+                "create",
+                payload={
+                    "title": listing.title,
+                    "description": listing.description,
+                    "price": listing.price,
+                    "images": listing.images,
+                },
+                listing=listing,
+                api_client=self._build_open_platform_client(),
+                allow_dom_fallback=False,
             )
-            mapping_status = self._to_contract_mapping_status((persisted or {}).get("mapping_status"))
+
+            ok = api_result.get("ok", False)
+            data = api_result.get("data", {})
+            product_id = data.get("xianyu_product_id")
 
             result = PublishResult(
-                success=True,
+                success=ok,
                 product_id=product_id,
-                product_url=product_url,
+                product_url="",
                 internal_listing_id=listing.internal_listing_id,
                 action="publish",
-                code="OK",
-                message="ok",
-                data={
-                    "xianyu_product_id": product_id,
-                    "internal_listing_id": listing.internal_listing_id,
-                    "mapping_status": mapping_status,
-                    "channel": "dom",
-                    "code": "OK",
-                    "message": "ok",
-                },
-                errors=[],
+                code=data.get("code", "API_ERROR") if not ok else "OK",
+                message=data.get("message", "ok"),
+                data=data,
+                errors=api_result.get("errors", []),
             )
 
-            self.logger.success(f"Listing created: {product_url}")
+            if ok:
+                self.logger.success(f"Listing created via API: product_id={product_id}")
+            else:
+                self.logger.error(f"API create failed: {data.get('message')}")
             return result
 
         except Exception as e:
@@ -522,15 +527,7 @@ class ListingService:
             self.logger.warning(f"Failed to write compliance audit log: {e}")
 
     async def _execute_publish(self, listing: Listing) -> tuple:
-        """
-        执行发布操作
-
-        Args:
-            listing: 商品信息
-
-        Returns:
-            (product_id, product_url)
-        """
+        """已废弃 — DOM 发布流程。所有发布已迁移到闲管家 API。"""
         page_id = await self.controller.new_page()
         self.logger.debug(f"Created page: {page_id}")
 
@@ -862,37 +859,30 @@ class ListingService:
             self.logger.error(f"Delete failed: {e}")
             return False
 
-    async def get_my_listings(self, page: int = 1) -> list[dict[str, Any]]:
-        """
-        获取我的商品列表
-
-        Args:
-            page: 页码
-
-        Returns:
-            商品列表
-        """
+    async def get_my_listings(self, page: int = 1, page_size: int = 20) -> list[dict[str, Any]]:
+        """通过闲管家 API 获取商品列表。"""
         self.logger.info(f"Fetching listings page {page}")
 
-        if not self.controller:
-            raise BrowserError("Browser controller is not initialized. Cannot fetch listings.")
+        client = self._build_open_platform_client()
+        if not client:
+            self.logger.warning("OpenPlatformClient not configured, cannot fetch listings")
+            return []
 
         try:
-            page_id = await self.controller.new_page()
-            url = f"{self.selectors.MY_SELLING}?page={page}"
-            await self.controller.navigate(page_id, url)
-            await asyncio.sleep(self._random_delay())
+            response = await asyncio.to_thread(
+                client.list_products, {"page_no": page, "page_size": page_size}
+            )
+            if not response.ok:
+                self.logger.error(f"Failed to fetch listings: {response.error_message}")
+                return []
 
-            items = []
-            item_elements = await self.controller.find_elements(page_id, ".selling-item")
+            data = response.data or {}
+            items = data.get("list", []) if isinstance(data, dict) else []
+            if not isinstance(items, list):
+                return []
 
-            for _element in item_elements:
-                item_info = {"product_id": "", "title": "", "price": 0, "status": "", "views": 0, "wants": 0}
-                items.append(item_info)
-
-            self.logger.info(f"Found {len(items)} listings")
+            self.logger.info(f"Found {len(items)} listings via API")
             return items
-
         except Exception as e:
             self.logger.error(f"Failed to fetch listings: {e}")
             return []

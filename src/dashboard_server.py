@@ -24,9 +24,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import logging
+
 import yaml
 
 from src.core.config import get_config
+
+logger = logging.getLogger(__name__)
 from src.modules.messages.service import MessagesService
 from src.modules.quote.cost_table import CostTableRepository, normalize_courier_name
 from src.modules.quote.setup import DEFAULT_MARKUP_RULES, QuoteSetupService
@@ -2283,6 +2287,8 @@ class MimicOps:
         try:
             with closing(sqlite3.connect(db_path)) as conn:
                 conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")
 
                 total_replied = int(
                     conn.execute(
@@ -3680,29 +3686,21 @@ class MimicOps:
                 user_id = str(value or "").strip() or None
                 break
 
-        cookie_score = 0
-        cookie_state = "bad"
-        if bool(cookie.get("success", False)):
-            cookie_score = 60
-            cookie_state = "warning"
-            if token_error is None and risk_level not in {"warning", "blocked"}:
-                cookie_score = 100
-                cookie_state = "good"
-            elif risk_level == "blocked":
-                cookie_score = 20
-                cookie_state = "bad"
-
+        cookie_health_info: dict[str, Any] = {"healthy": False, "message": "未检查", "score": 0}
         try:
-            from src.modules.orders.service import OrderFulfillmentService
-
-            order_summary = OrderFulfillmentService(
-                db_path=str(self.project_root / "data" / "orders.db"),
-                config=self._xianguanjia_service_config(),
-            ).get_summary()
+            from src.core.cookie_health import CookieHealthChecker
+            if cookie_text:
+                _ck_checker = CookieHealthChecker(cookie_text, timeout_seconds=5.0)
+                _ck_result = _ck_checker.check_sync(force=False)
+                cookie_health_info = {
+                    "healthy": bool(_ck_result.get("healthy")),
+                    "message": _ck_result.get("message", ""),
+                    "score": 100 if _ck_result.get("healthy") else 0,
+                }
+            else:
+                cookie_health_info = {"healthy": False, "message": "Cookie 未配置", "score": 0}
         except Exception:
-            order_summary = {}
-
-        accounts_summary = self.list_accounts()
+            pass
 
         return {
             "success": True,
@@ -3711,11 +3709,7 @@ class MimicOps:
             "cookie_exists": bool(cookie.get("success", False)),
             "cookie_valid": bool(cookie.get("success", False)),
             "cookie_length": int(cookie.get("length", 0) or 0),
-            "cookie_health": {
-                "score": cookie_score,
-                "status": cookie_state,
-                "token_error": token_error,
-            },
+            "cookie_health": cookie_health_info,
             "xianyu_connected": xianyu_connected,
             "token_available": token_available,
             "token_error": token_error,
@@ -6718,20 +6712,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _handle_listing_preview(self, body: dict[str, Any]) -> dict[str, Any]:
+        """生成自动上架预览。"""
         try:
+            import asyncio
             from src.modules.listing.auto_publish import AutoPublishService
-
-            service = AutoPublishService(config=self.mimic_ops._xianguanjia_service_config())
-            return _run_async(service.generate_preview(body))
-        except Exception as exc:
-            return {"ok": False, "step": "error", "error": str(exc)}
+            service = AutoPublishService(config=self._xianguanjia_service_config())
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(service.generate_preview(body))
+            finally:
+                loop.close()
+        except Exception as e:
+            return {"ok": False, "step": "error", "error": str(e)}
 
     def _handle_listing_publish(self, body: dict[str, Any]) -> dict[str, Any]:
+        """执行自动上架。"""
         try:
-            from src.integrations.xianguanjia.open_platform_client import OpenPlatformClient
+            import asyncio
             from src.modules.listing.auto_publish import AutoPublishService
+            from src.integrations.xianguanjia.open_platform_client import OpenPlatformClient
 
-            cfg = self.mimic_ops._xianguanjia_service_config().get("xianguanjia", {})
+            cfg = self._xianguanjia_service_config().get("xianguanjia", {})
             app_key = str(cfg.get("app_key", "")).strip()
             app_secret = str(cfg.get("app_secret", "")).strip()
             if not app_key or not app_secret:
@@ -6741,15 +6742,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 base_url=str(cfg.get("base_url", "https://open.goofish.pro")).strip(),
                 app_key=app_key,
                 app_secret=app_secret,
-                seller_id=str(cfg.get("merchant_id", "")).strip() or None,
             )
-            service = AutoPublishService(api_client=api_client, config=self.mimic_ops._xianguanjia_service_config())
+            service = AutoPublishService(
+                api_client=api_client,
+                config=self._xianguanjia_service_config(),
+            )
+
             preview_data = body.get("preview_data")
-            if isinstance(preview_data, dict):
-                return _run_async(service.publish_from_preview(preview_data))
-            return _run_async(service.publish(body))
-        except Exception as exc:
-            return {"ok": False, "step": "error", "error": str(exc)}
+            loop = asyncio.new_event_loop()
+            try:
+                if preview_data and isinstance(preview_data, dict):
+                    return loop.run_until_complete(service.publish_from_preview(preview_data))
+                return loop.run_until_complete(service.publish(body))
+            finally:
+                loop.close()
+        except Exception as e:
+            return {"ok": False, "step": "error", "error": str(e)}
 
     def _read_json_body(self) -> dict[str, Any]:
         try:
@@ -7092,50 +7100,92 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(payload, status=200 if payload.get("success") else 400)
                 return
 
-            if path == "/api/xgj/products":
-                page_no = _safe_int((query.get("page_no") or ["1"])[0], default=1, min_value=1, max_value=9999)
-                page_size = _safe_int((query.get("page_size") or ["20"])[0], default=20, min_value=1, max_value=200)
-                search = str((query.get("search") or [""])[0]).strip()
-                payload = self.mimic_ops.list_xianguanjia_products(
-                    page_no=page_no,
-                    page_size=page_size,
-                    query=search,
-                )
-                self._send_json(payload, status=200 if payload.get("ok") else 400)
-                return
-
-            if path == "/api/xgj/orders":
-                page_no = _safe_int((query.get("page_no") or ["1"])[0], default=1, min_value=1, max_value=9999)
-                page_size = _safe_int((query.get("page_size") or ["20"])[0], default=20, min_value=1, max_value=200)
-                status_raw = str((query.get("order_status") or [""])[0]).strip()
-                order_status = int(status_raw) if status_raw.isdigit() else None
-                search = str((query.get("search") or [""])[0]).strip()
-                payload = self.mimic_ops.list_xianguanjia_orders(
-                    page_no=page_no,
-                    page_size=page_size,
-                    order_status=order_status,
-                    query=search,
-                )
-                self._send_json(payload, status=200 if payload.get("ok") else 400)
-                return
-
             if path == "/api/listing/templates":
                 from src.modules.listing.templates import list_templates
-
                 self._send_json({"ok": True, "templates": list_templates()})
                 return
 
-            if path == "/api/generated-image":
-                raw_path = str((query.get("path") or [""])[0]).strip()
+            if path == "/api/health/check":
+                import time as _t
+                result: dict[str, Any] = {"timestamp": _now_iso()}
+
+                cookie_info: dict[str, Any] = {"ok": False, "message": "未检查"}
                 try:
-                    data, content_type = self.mimic_ops.read_generated_image(raw_path)
-                except FileNotFoundError as exc:
-                    self._send_json(_error_payload(str(exc), code="NOT_FOUND"), status=404)
+                    from src.core.cookie_health import CookieHealthChecker
+                    cookie_text = os.environ.get("XIANYU_COOKIE_1", "")
+                    if not cookie_text:
+                        ck = self.mimic_ops.get_cookie()
+                        cookie_text = str(ck.get("cookie", "") or "")
+                    checker = CookieHealthChecker(cookie_text, timeout_seconds=8.0)
+                    ck_result = checker.check_sync(force=True)
+                    cookie_info = {"ok": bool(ck_result.get("healthy")), "message": ck_result.get("message", "")}
+                except Exception as exc:
+                    cookie_info = {"ok": False, "message": f"检查异常: {exc}"}
+                result["cookie"] = cookie_info
+
+                ai_info: dict[str, Any] = {"ok": False, "message": "未配置"}
+                try:
+                    ai_key = os.environ.get("AI_API_KEY", "")
+                    ai_base = os.environ.get("AI_BASE_URL", "")
+                    if not ai_key or not ai_base:
+                        try:
+                            cfg_res = self._xianguanjia_service_config()
+                            ai_cfg = cfg_res.get("ai", {})
+                            ai_key = ai_key or str(ai_cfg.get("api_key", "") or "")
+                            ai_base = ai_base or str(ai_cfg.get("base_url", "") or "")
+                        except Exception:
+                            pass
+                    if ai_key and ai_base:
+                        t0 = _t.time()
+                        import httpx
+                        models_url = ai_base.rstrip("/") + "/models"
+                        with httpx.Client(timeout=8.0) as hc:
+                            resp = hc.get(models_url, headers={"Authorization": f"Bearer {ai_key}"})
+                        latency = int((_t.time() - t0) * 1000)
+                        if resp.status_code == 200:
+                            ai_info = {"ok": True, "message": "连通", "latency_ms": latency}
+                        else:
+                            ai_info = {"ok": False, "message": f"HTTP {resp.status_code}", "latency_ms": latency}
+                    else:
+                        ai_info = {"ok": False, "message": "API Key 或 Base URL 未配置"}
+                except Exception as exc:
+                    ai_info = {"ok": False, "message": f"检查异常: {type(exc).__name__}"}
+                result["ai"] = ai_info
+
+                result["services"] = {"python": {"ok": True, "message": "运行中"}}
+                self._send_json(result)
+                return
+
+            if path == "/api/cookie/auto-grab/status":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                grabber = getattr(DashboardHandler, "_cookie_grabber", None)
+                try:
+                    for _ in range(600):
+                        if grabber is not None:
+                            p = grabber.progress
+                            event = json.dumps({
+                                "stage": p.stage.value if hasattr(p.stage, "value") else str(p.stage),
+                                "message": p.message,
+                                "hint": p.hint,
+                                "progress": p.progress,
+                                "error": p.error,
+                            }, ensure_ascii=False)
+                            self.wfile.write(f"data: {event}\n\n".encode())
+                            self.wfile.flush()
+                            if p.stage.value in {"success", "failed", "cancelled"}:
+                                break
+                        else:
+                            event = json.dumps({"stage": "idle", "message": "未在运行", "hint": "", "progress": 0, "error": ""}, ensure_ascii=False)
+                            self.wfile.write(f"data: {event}\n\n".encode())
+                            self.wfile.flush()
+                            break
+                        time.sleep(0.5)
+                except (BrokenPipeError, ConnectionResetError):
                     return
-                except PermissionError as exc:
-                    self._send_json(_error_payload(str(exc), code="FORBIDDEN"), status=403)
-                    return
-                self._send_bytes(data=data, content_type=content_type)
                 return
 
             self._send_json(_error_payload("Not Found", code="NOT_FOUND"), status=404)
@@ -7353,30 +7403,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(payload, status=200 if payload.get("success") else 400)
                 return
 
-            if path == "/api/xgj/product/publish":
-                body = self._read_json_body()
-                payload = self.mimic_ops.publish_xianguanjia_product(body)
-                self._send_json(payload, status=200 if payload.get("ok") else 400)
-                return
-
-            if path == "/api/xgj/product/unpublish":
-                body = self._read_json_body()
-                payload = self.mimic_ops.unpublish_xianguanjia_product(body)
-                self._send_json(payload, status=200 if payload.get("ok") else 400)
-                return
-
-            if path == "/api/xgj/order/modify-price":
-                body = self._read_json_body()
-                payload = self.mimic_ops.modify_xianguanjia_order_price(body)
-                self._send_json(payload, status=200 if payload.get("ok") else 400)
-                return
-
-            if path == "/api/xgj/order/deliver":
-                body = self._read_json_body()
-                payload = self.mimic_ops.deliver_xianguanjia_order(body)
-                self._send_json(payload, status=200 if payload.get("ok") else 400)
-                return
-
             if path == "/api/listing/preview":
                 body = self._read_json_body()
                 payload = self._handle_listing_preview(body)
@@ -7389,6 +7415,49 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(payload, status=200 if payload.get("ok") else 400)
                 return
 
+            if path == "/api/cookie/auto-grab":
+                import threading
+                from src.core.cookie_grabber import CookieGrabber
+
+                if getattr(DashboardHandler, "_cookie_grab_running", False):
+                    self._send_json({"ok": False, "error": "已有获取任务在运行"}, status=409)
+                    return
+
+                grabber = CookieGrabber()
+                DashboardHandler._cookie_grabber = grabber
+                DashboardHandler._cookie_grab_running = True
+
+                def _run_grab() -> None:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    try:
+                        result = loop.run_until_complete(grabber.auto_grab())
+                        DashboardHandler._cookie_grab_result = {
+                            "ok": result.ok,
+                            "source": result.source,
+                            "message": result.message,
+                            "error": result.error,
+                        }
+                    except Exception as exc:
+                        DashboardHandler._cookie_grab_result = {"ok": False, "error": str(exc)}
+                    finally:
+                        loop.close()
+                        DashboardHandler._cookie_grab_running = False
+
+                t = threading.Thread(target=_run_grab, daemon=True)
+                t.start()
+                self._send_json({"ok": True, "message": "Cookie 获取任务已启动，请通过 SSE 接口监听进度"})
+                return
+
+            if path == "/api/cookie/auto-grab/cancel":
+                grabber = getattr(DashboardHandler, "_cookie_grabber", None)
+                if grabber is not None:
+                    grabber.cancel()
+                    self._send_json({"ok": True, "message": "已取消"})
+                else:
+                    self._send_json({"ok": False, "error": "没有正在运行的获取任务"})
+                return
+
             self._send_json(_error_payload("Not Found", code="NOT_FOUND"), status=404)
         except Exception as e:  # pragma: no cover - safety net
             self._send_json(_error_payload(str(e), code="INTERNAL_ERROR"), status=500)
@@ -7398,6 +7467,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8091, db_path: str | None = None) -> None:
+    import signal
+
     config = get_config()
     resolved_db = db_path or config.database.get("path", "data/agent.db")
 
@@ -7410,8 +7481,16 @@ def run_server(host: str = "127.0.0.1", port: int = 8091, db_path: str | None = 
     )
 
     server = ThreadingHTTPServer((host, port), DashboardHandler)
-    print(f"Dashboard running: http://{host}:{port}")
-    print(f"Using database: {resolved_db}")
+
+    def _shutdown(signum, frame):
+        logger.info("收到信号 %s，正在关闭...", signum)
+        server.shutdown()
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
+
+    logger.info("Dashboard running: http://%s:%s", host, port)
+    logger.info("Using database: %s", resolved_db)
     server.serve_forever()
 
 

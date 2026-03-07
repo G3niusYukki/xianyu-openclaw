@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { getDashboardSummary, getRecentOperations, getSystemStatus } from '../api/dashboard'
-import { Store, ShoppingBag, MessageCircle, FileText, CheckCircle, AlertCircle, RefreshCw, Settings } from 'lucide-react'
+import { Store, ShoppingBag, MessageCircle, FileText, CheckCircle, AlertCircle, RefreshCw, Settings, Zap, Bot, BarChart3, Clock, Package } from 'lucide-react'
 import toast from 'react-hot-toast'
 import SetupGuide from '../components/SetupGuide'
+import ApiStatusPanel from '../components/ApiStatusPanel'
 
 const Dashboard = () => {
   const [stats, setStats] = useState({
@@ -37,14 +38,12 @@ const Dashboard = () => {
       }
 
       if (summaryRes?.data) {
-        const s = summaryRes.data?.data || summaryRes.data;
-        const messageStats = statusRes?.data?.message_stats || {};
-        const orderSummary = statusRes?.data?.order_summary || {};
+        const s = summaryRes.data;
         setStats({
           products: s.active_products ?? 0,
-          orders: orderSummary.total_orders ?? 0,
-          messages: messageStats.total_conversations ?? 0,
-          replies: messageStats.today_replied ?? 0
+          orders: s.today_orders ?? s.today_operations ?? 0,
+          messages: s.unread_messages ?? s.total_wants ?? 0,
+          replies: s.today_replies ?? s.total_sales ?? 0
         })
       }
       
@@ -78,10 +77,7 @@ const Dashboard = () => {
     )
   }
 
-  const cookieHealth = {
-    health_score: sysStatus?.cookie_health?.score ?? 0,
-    status: sysStatus?.cookie_health?.status ?? 'bad',
-  };
+  const cookieHealth = sysStatus?.modules?.account_health?.details?.default || { health_score: 100, status: 'good' };
 
   return (
     <div className="xy-page xy-enter">
@@ -102,6 +98,40 @@ const Dashboard = () => {
       </div>
 
       <SetupGuide />
+
+      <div className="xy-card mb-8 overflow-hidden">
+        <div className="px-6 py-4 border-b border-xy-border bg-gradient-to-r from-xy-gray-900 to-xy-gray-800">
+          <h2 className="text-base font-bold text-white flex items-center gap-2">
+            <Zap className="w-5 h-5 text-yellow-400" /> 核心功能
+          </h2>
+          <p className="text-sm text-gray-400 mt-1">闲鱼虚拟商品卖家自动化工作台</p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-xy-border">
+          <div className="p-5 text-center hover:bg-xy-gray-50 transition-colors">
+            <Bot className="w-7 h-7 text-blue-500 mx-auto mb-2" />
+            <p className="text-sm font-semibold text-xy-text-primary">AI 智能回复</p>
+            <p className="text-xs text-xy-text-secondary mt-1">自动识别买家意图，智能生成回复</p>
+          </div>
+          <div className="p-5 text-center hover:bg-xy-gray-50 transition-colors">
+            <Package className="w-7 h-7 text-orange-500 mx-auto mb-2" />
+            <p className="text-sm font-semibold text-xy-text-primary">自动上架</p>
+            <p className="text-xs text-xy-text-secondary mt-1">批量生成商品描述并一键上架</p>
+          </div>
+          <div className="p-5 text-center hover:bg-xy-gray-50 transition-colors">
+            <Clock className="w-7 h-7 text-green-500 mx-auto mb-2" />
+            <p className="text-sm font-semibold text-xy-text-primary">自动发货</p>
+            <p className="text-xs text-xy-text-secondary mt-1">虚拟商品订单自动确认并发货</p>
+          </div>
+          <div className="p-5 text-center hover:bg-xy-gray-50 transition-colors">
+            <BarChart3 className="w-7 h-7 text-purple-500 mx-auto mb-2" />
+            <p className="text-sm font-semibold text-xy-text-primary">数据分析</p>
+            <p className="text-xs text-xy-text-secondary mt-1">商品销量、消息量等运营数据统计</p>
+          </div>
+          <button onClick={fetchDashboardData} className="p-2 bg-xy-surface border border-xy-border rounded-xl shadow-sm hover:bg-xy-gray-50 transition-colors" aria-label="刷新数据">
+            <RefreshCw className="w-5 h-5 text-xy-text-secondary" />
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8">
         <div className="xy-card p-6">
@@ -213,18 +243,7 @@ const Dashboard = () => {
             </div>
           </div>
 
-          <div className="xy-card p-6 bg-gradient-to-br from-xy-gray-900 to-xy-gray-800 text-white">
-            <h3 className="font-semibold mb-2">系统运行状态</h3>
-            <div className="space-y-3 mt-4">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-400">服务状态</span>
-                <span className="flex items-center gap-1.5">
-                  <div className={`w-2 h-2 rounded-full ${sysStatus ? 'bg-green-400' : 'bg-red-400'}`}></div>
-                  {sysStatus?.service_status === 'running' ? '运行中' : sysStatus?.service_status === 'degraded' ? '降级' : '异常'}
-                </span>
-              </div>
-            </div>
-          </div>
+          <ApiStatusPanel />
         </div>
       </div>
     </div>

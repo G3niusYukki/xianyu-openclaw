@@ -5,6 +5,8 @@ Performance Optimization Utilities
 提供缓存、异步优化等性能优化功能
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json

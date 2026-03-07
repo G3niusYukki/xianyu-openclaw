@@ -1,7 +1,8 @@
 """闲管家虚拟货源 Client 骨架。
 
-注意：该文件当前仅包含骨架 + 测试 + 文档映射，
-不接入 P0 默认执行链。
+已废弃 — 用户业务场景不需要虚拟货源接口（/goofish/* 路径）。
+自动发货由闲管家平台完成，不需要自建供货服务。
+保留仅为代码完整性，不应在业务流程中调用。
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from .models import XianGuanJiaResponse
 from .signing import sign_virtual_supply_request
 
 
-@dataclass(slots=True)
+@dataclass
 class VirtualSupplyClient:
     base_url: str
     app_id: str

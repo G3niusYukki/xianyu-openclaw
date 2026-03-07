@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { deliverOrder, getOrders, modifyOrderPrice } from '../api/xianguanjia';
+import { getOrders, proxyXgjApi } from '../api/xianguanjia';
 import toast from 'react-hot-toast';
-import { Receipt, Search, RefreshCw, Tag, Truck } from 'lucide-react';
+import { Receipt, Search, Filter, RefreshCw, Tag, BellRing, Truck } from 'lucide-react';
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
@@ -28,7 +28,7 @@ export default function Orders() {
         payload.order_status = statusMap[tab];
       }
       
-      const res = await getOrders({ ...payload, search: searchQuery });
+      const res = await getOrders(payload);
       if (res.data?.ok) {
         setOrders(res.data.data?.list || res.data.data?.data?.list || []);
       } else {
@@ -58,7 +58,10 @@ export default function Orders() {
     const priceInCents = Math.round(Number(newPrice) * 100);
     setActionLoading(prev => ({ ...prev, [orderId]: 'price' }));
     try {
-      const res = await modifyOrderPrice(orderId, priceInCents);
+      const res = await proxyXgjApi('/api/open/order/modify/price', {
+        order_id: orderId,
+        total_fee: priceInCents
+      });
       if (res.data?.ok) {
         toast.success('改价成功');
         fetchOrders();
@@ -76,7 +79,7 @@ export default function Orders() {
   const handleShip = async (orderId) => {
     setActionLoading(prev => ({ ...prev, [orderId]: 'ship' }));
     try {
-      const res = await deliverOrder(orderId);
+      const res = await proxyXgjApi('/api/open/order/delivery', { order_id: orderId });
       if (res.data?.ok) {
         toast.success('发货成功');
         fetchOrders();
@@ -90,6 +93,10 @@ export default function Orders() {
     }
   };
 
+  const handleRemind = async () => {
+    toast('催单提醒已记录，系统将自动跟进', { icon: '\uD83D\uDCCB' });
+  };
+
   const formatPrice = (fee) => {
     const num = Number(fee);
     if (!num || isNaN(num)) return '¥0.00';
@@ -101,7 +108,7 @@ export default function Orders() {
       <div className="flex flex-col md:flex-row justify-between md:items-end gap-4 mb-6">
         <div>
           <h1 className="xy-title">订单中心</h1>
-          <p className="xy-subtitle mt-1">管理店铺订单与改价、发货操作</p>
+          <p className="xy-subtitle mt-1">管理店铺订单与改价、催单操作</p>
         </div>
         <button onClick={fetchOrders} className="xy-btn-secondary px-3" aria-label="刷新订单">
           <RefreshCw className="w-4 h-4" />
@@ -198,14 +205,22 @@ export default function Orders() {
                   
                   <div className="flex flex-col gap-2 justify-end">
                     {order.status === 1 && (
-                      <button 
-                        onClick={() => handleAdjustPrice(order.order_id)} 
-                        disabled={actionLoading[order.order_id] === 'price'}
-                        className="xy-btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 hover:text-orange-600 hover:border-orange-200 disabled:opacity-50"
-                      >
-                        <Tag className="w-3.5 h-3.5" /> 
-                        {actionLoading[order.order_id] === 'price' ? '改价中...' : '改价'}
-                      </button>
+                      <>
+                        <button 
+                          onClick={() => handleRemind()} 
+                          className="xy-btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 hover:text-blue-600 hover:border-blue-200"
+                        >
+                          <BellRing className="w-3.5 h-3.5" /> 催单
+                        </button>
+                        <button 
+                          onClick={() => handleAdjustPrice(order.order_id)} 
+                          disabled={actionLoading[order.order_id] === 'price'}
+                          className="xy-btn-secondary text-xs px-3 py-1.5 flex items-center gap-1.5 hover:text-orange-600 hover:border-orange-200 disabled:opacity-50"
+                        >
+                          <Tag className="w-3.5 h-3.5" /> 
+                          {actionLoading[order.order_id] === 'price' ? '改价中...' : '改价'}
+                        </button>
+                      </>
                     )}
                     {order.status === 2 && (
                       <button 

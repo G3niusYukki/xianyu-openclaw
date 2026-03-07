@@ -10,7 +10,7 @@ from src.integrations.xianguanjia.signing import (
 )
 
 
-def test_sign_open_platform_request_matches_existing_formula_without_separator() -> None:
+def test_sign_open_platform_request_matches_formula_with_comma_separator() -> None:
     body = '{"product_id":"219530767978565"}'
     sign = sign_open_platform_request(
         app_key="A1B2C3D4",
@@ -20,7 +20,7 @@ def test_sign_open_platform_request_matches_existing_formula_without_separator()
     )
 
     body_md5 = hashlib.md5(body.encode("utf-8")).hexdigest()
-    expected = hashlib.md5(f"A1B2C3D4{body_md5}1740380565356SECRET".encode("utf-8")).hexdigest()
+    expected = hashlib.md5(f"A1B2C3D4,{body_md5},1740380565356,SECRET".encode("utf-8")).hexdigest()
     assert sign == expected
 
 
@@ -50,7 +50,6 @@ def test_verify_dual_callback_signature() -> None:
         app_secret="AS",
         timestamp="1000",
         body="{}",
-        seller_id="S01",
     )
     assert (
         verify_open_platform_callback_signature(
@@ -59,7 +58,6 @@ def test_verify_dual_callback_signature() -> None:
             timestamp="1000",
             sign=open_sign,
             body="{}",
-            seller_id="S01",
         )
         is True
     )
@@ -70,7 +68,6 @@ def test_verify_dual_callback_signature() -> None:
             timestamp="1000",
             sign="deadbeef",
             body="{}",
-            seller_id="S01",
         )
         is False
     )

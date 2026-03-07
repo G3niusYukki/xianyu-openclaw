@@ -1,4 +1,0 @@
-src/modules/quote/providers.py:421:            provider="remote_mock",
-src/modules/quote/providers.py:428:                "source": "remote_mock",
-src/core/startup_checks.py:192:def check_quote_remote_mock_guard() -> StartupCheckResult:
-src/core/startup_checks.py:241:        check_quote_remote_mock_guard(),

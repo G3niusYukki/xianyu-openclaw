@@ -5,6 +5,8 @@ Messages Service
 提供站内会话读取、自动回复与自动报价能力。
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import os

@@ -1,4 +1,12 @@
-"""闲管家开放平台 Client 骨架。"""
+"""闲管家开放平台 Client（自研模式）。
+
+签名规则: md5("appKey,bodyMd5,timestamp,appSecret")
+Query参数: appid, timestamp, sign
+时间戳: 秒级 int(time.time())
+Body序列化: separators=(",",":") 压缩JSON，不排序 key
+
+参考文档: docs/xianguanjiajieruapi.md
+"""
 
 from __future__ import annotations
 
@@ -14,32 +22,28 @@ from .models import XianGuanJiaResponse
 from .signing import sign_open_platform_request
 
 
-@dataclass(slots=True)
+@dataclass
 class OpenPlatformClient:
     base_url: str
     app_key: str
     app_secret: str
     timeout: float = 10.0
-    seller_id: str | None = None
 
     def _post(self, path: str, payload: dict[str, Any]) -> XianGuanJiaResponse:
         url = f"{self.base_url.rstrip('/')}{path}"
-        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-        timestamp = str(int(time.time() * 1000))
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        timestamp = str(int(time.time()))
         sign = sign_open_platform_request(
             app_key=self.app_key,
             app_secret=self.app_secret,
             timestamp=timestamp,
             body=body,
-            seller_id=self.seller_id,
         )
         params: dict[str, str] = {
-            "appKey": self.app_key,
+            "appid": self.app_key,
             "timestamp": timestamp,
             "sign": sign,
         }
-        if self.seller_id:
-            params["sellerId"] = self.seller_id
         try:
             resp = httpx.post(
                 url,
@@ -83,11 +87,13 @@ class OpenPlatformClient:
                 raw_payload=getattr(normalized, "raw_payload", None),
             )
 
+    # --- 商品管理 ---
+
     def create_product(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
         return self._post("/api/open/product/create", payload)
 
-    def list_products(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
-        return self._post("/api/open/product/list", payload)
+    def batch_create_products(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
+        return self._post("/api/open/product/batchCreate", payload)
 
     def publish_product(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
         return self._post("/api/open/product/publish", payload)
@@ -101,6 +107,26 @@ class OpenPlatformClient:
     def edit_stock(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
         return self._post("/api/open/product/edit/stock", payload)
 
+    def delete_product(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
+        return self._post("/api/open/product/delete", payload)
+
+    def list_products(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
+        return self._post("/api/open/product/list", payload)
+
+    def get_product_detail(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
+        return self._post("/api/open/product/detail", payload)
+
+    def list_categories(self, payload: dict[str, Any] | None = None) -> XianGuanJiaResponse:
+        return self._post("/api/open/product/category/list", payload or {})
+
+    def list_product_attrs(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
+        return self._post("/api/open/product/pv/list", payload)
+
+    def list_skus(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
+        return self._post("/api/open/product/sku/list", payload)
+
+    # --- 订单管理 ---
+
     def modify_order_price(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
         return self._post("/api/open/order/modify/price", payload)
 
@@ -113,5 +139,16 @@ class OpenPlatformClient:
     def get_order_detail(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
         return self._post("/api/open/order/detail", payload)
 
+    def get_order_kam_list(self, payload: dict[str, Any]) -> XianGuanJiaResponse:
+        return self._post("/api/open/order/kam/list", payload)
+
+    # --- 用户/授权 ---
+
     def list_authorized_users(self, payload: dict[str, Any] | None = None) -> XianGuanJiaResponse:
         return self._post("/api/open/user/authorize/list", payload or {})
+
+    # --- 物流 ---
+
+    def list_express_companies(self, payload: dict[str, Any] | None = None) -> XianGuanJiaResponse:
+        return self._post("/api/open/express/companies", payload or {})
+

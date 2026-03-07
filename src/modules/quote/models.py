@@ -1,5 +1,7 @@
 """自动报价领域模型。"""
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,7 +11,7 @@ DEFAULT_QUOTE_REPLY_TEMPLATE = (
 )
 
 
-@dataclass(slots=True)
+@dataclass
 class QuoteRequest:
     """报价请求。"""
 
@@ -33,7 +35,7 @@ class QuoteRequest:
         ).lower()
 
 
-@dataclass(slots=True)
+@dataclass
 class QuoteSnapshot:
     """报价快照：成本来源与规则版本追溯。"""
 
@@ -45,7 +47,7 @@ class QuoteSnapshot:
     fallback_reason: str = ""
 
 
-@dataclass(slots=True)
+@dataclass
 class QuoteResult:
     """报价结果。"""
 

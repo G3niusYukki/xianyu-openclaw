@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-@dataclass(slots=True)
+@dataclass
 class XianGuanJiaResponse:
     """标准化后的闲管家响应。"""
 

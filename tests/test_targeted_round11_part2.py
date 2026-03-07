@@ -99,12 +99,9 @@ async def test_monitor_load_alerts_and_reconnect_false_branch(monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_operations_and_listing_error_branches(mock_controller) -> None:
     ops = OperationsService(controller=mock_controller)
-    mock_controller.execute_script = AsyncMock(return_value=[])
-    assert (await ops._extract_product_ids("p", limit=2)) == ["unknown_1", "unknown_2"]
 
-    mock_controller.new_page = AsyncMock(side_effect=RuntimeError("new page fail"))
     assert (await ops.update_price("p", 1.0))["success"] is False
-    assert (await ops.delist("p", confirm=True))["success"] is False
+    assert (await ops.delist("p"))["success"] is False
     assert (await ops.relist("p"))["success"] is False
     assert (await ops.refresh_inventory())["success"] is False
     assert "error" in (await ops.get_listing_stats())

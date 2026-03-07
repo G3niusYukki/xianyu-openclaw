@@ -15,6 +15,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+if sys.version_info < (3, 10):
+    _policy = asyncio.DefaultEventLoopPolicy()
+    asyncio.set_event_loop_policy(_policy)
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
 from src.core.config import Config
 from src.core.logger import Logger
 

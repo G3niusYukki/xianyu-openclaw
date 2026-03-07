@@ -51,8 +51,8 @@ def test_mimic_ops_order_callback_auto_ships_when_enabled(tmp_path, monkeypatch)
     )
 
     fake_api = Mock()
-    fake_api.find_express_company = Mock(return_value={"express_code": "YTO", "express_name": "圆通"})
-    fake_api.ship_order = Mock(return_value={"code": 0, "data": {"ok": True}})
+    fake_api.list_express_companies = Mock(return_value=Mock(ok=True, data=[{"express_code": "YTO", "express_name": "圆通"}]))
+    fake_api.delivery_order = Mock(return_value=Mock(ok=True))
     monkeypatch.setattr("src.modules.orders.service.OrderFulfillmentService._build_shipping_api_client", lambda self: fake_api)
 
     out = ops.handle_order_callback(
@@ -67,7 +67,7 @@ def test_mimic_ops_order_callback_auto_ships_when_enabled(tmp_path, monkeypatch)
     assert out["success"] is True
     assert out["auto_delivery_triggered"] is True
     assert out["delivery"]["delivery"]["channel"] == "xianguanjia_api"
-    fake_api.ship_order.assert_called_once()
+    fake_api.delivery_order.assert_called_once()
 
 
 def test_mimic_ops_retry_price_uses_operations_service(tmp_path, monkeypatch) -> None:

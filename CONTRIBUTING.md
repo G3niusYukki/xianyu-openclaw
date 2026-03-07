@@ -144,61 +144,19 @@ ruff format --check src/
 
 ### 代码质量工具
 
-| 工具 | 用途 | 命令 |
-|------|------|------|
-| ruff | Lint 和格式化 | `ruff check src/` `ruff format src/` |
-| pytest | 测试 | `pytest tests/ -v` |
-| mypy | 类型检查 | `mypy src/` |
-| bandit | 安全扫描 | `bandit -r src/` |
-
----
-
-## 📝 提交规范
-
-我们使用 [Conventional Commits](https://www.conventionalcommits.org/) 规范。
-
-### 提交类型
-
-| 类型 | 描述 |
-|------|------|
-| `feat` | 新功能 |
-| `fix` | Bug 修复 |
-| `docs` | 文档更新 |
-| `style` | 代码格式（不影响功能）|
-| `refactor` | 代码重构 |
-| `perf` | 性能优化 |
-| `test` | 测试相关 |
-| `chore` | 构建/工具/依赖更新 |
-| `ci` | CI/CD 配置 |
-| `security` | 安全修复 |
-
-### 示例
-
-```bash
-# 新功能
-feat: add auto-reply template customization
-
-# Bug 修复
-fix: resolve cookie expiration detection issue
-
-# 文档更新
-docs: update API documentation for orders module
-
-# 性能优化
-perf: optimize message deduplication algorithm
-
-# 破坏性变更
-feat!: change config file format to YAML
-
-# 带作用域的提交
-fix(messaging): handle null content in reply generation
+```
+src/
+├── cli.py              # CLI entry point
+├── core/               # Framework: config, logging, browser client, crypto, cookie_grabber
+├── modules/            # Business logic: listing, operations, messages, orders, analytics
+├── dashboard_server.py # Python Dashboard API server
+└── integrations/       # Third-party integrations (xianguanjia)
+server/                 # Node.js backend (config proxy, webhook gate)
+client/                 # React frontend (Vite + Tailwind)
+tests/                  # Python test suite
 ```
 
-### Pull Request 规范
-
-**PR 标题格式：**
-```
-类型: 简短描述
+## How to Contribute
 
 例如：
 feat: add support for multiple AI providers
@@ -221,8 +179,13 @@ docs: update deployment guide for Windows
 - [ ] 破坏性变更
 - [ ] 文档更新
 
-## 测试
-<!-- 描述你如何测试这些变更 -->
+1. Fork the repo
+2. Create a feature branch: `git checkout -b feat/my-feature`
+3. Make your changes
+4. Run linting: `ruff check src/`
+5. Run tests: `python -m pytest tests/ -x`
+6. Commit with a clear message: `git commit -m "feat: add price optimization"`
+7. Push to your fork and open a PR
 
 ## 检查清单
 - [ ] 代码遵循项目编码规范
@@ -236,16 +199,7 @@ docs: update deployment guide for Windows
 
 ## 🔍 代码审查
 
-所有代码变更都需要经过审查才能合并。
-
-### 审查标准
-
-- **功能正确性** - 代码是否按预期工作
-- **测试覆盖** - 是否有足够的测试
-- **代码质量** - 是否遵循项目规范
-- **文档** - 相关文档是否更新
-- **性能** - 是否引入性能问题
-- **安全性** - 是否考虑安全问题
+## Code Style
 
 ### 审查流程
 

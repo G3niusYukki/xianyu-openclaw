@@ -1,11 +1,12 @@
 """
-Legacy Browser Gateway Client
+Browser Client — 浏览器自动化客户端。
 
-通过 HTTP 调用 legacy browser gateway 的 Browser Control API 实现浏览器自动化。
-该客户端保留在仓库内，作为 API-first 主路径之外的补充浏览器运行时。
-
-Gateway Browser Control API 端口 = gateway_port + 2（默认 18791）
+BrowserClient (OpenClaw Gateway) 已废弃。
+所有业务操作已迁移到闲管家 API，浏览器仅用于 Cookie 抓取和 HTML 截图。
+create_browser_client() 现在默认使用 PlaywrightBrowserClient (lite 模式)。
 """
+
+from __future__ import annotations
 
 import asyncio
 import os
@@ -624,7 +625,7 @@ def _resolve_runtime(config: dict[str, Any] | None = None) -> str:
     except Exception:
         pass
 
-    return "auto"
+    return "lite"
 
 
 async def _probe_gateway_available(config: dict[str, Any] | None = None) -> bool:

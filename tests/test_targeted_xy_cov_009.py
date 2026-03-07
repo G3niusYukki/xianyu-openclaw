@@ -12,9 +12,6 @@ import src.setup_wizard as sw
 from src.core.config import Config
 from src.core.config_models import AppConfig, MessagesConfig
 from src.core.error_handler import ConfigError
-from src.lite.msgpack import decrypt_payload
-from src.lite.ws_client import LiteWsClient
-from src.lite.xianyu_api import XianyuApiClient
 from src.modules.compliance.center import ComplianceCenter
 from src.modules.media.utils import add_watermark
 from src.modules.quote.cache import QuoteCache
@@ -37,27 +34,6 @@ def test_quote_models_missing_branches() -> None:
     reply = result.compose_reply(template="{additional_units}|{eta_days}")
     assert reply.startswith("0.0|1天")
     assert QuoteResult._format_days_from_minutes(2160) == "1.5天"
-
-
-@pytest.mark.asyncio
-async def test_xianyu_api_retry_and_final_raise_paths(monkeypatch) -> None:
-    api = XianyuApiClient("unb=u1; _m_h5_tk=tk_1")
-
-    class FailClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_a):
-            return False
-
-        async def post(self, *_a, **_k):
-            raise RuntimeError("net")
-
-    monkeypatch.setattr("src.lite.xianyu_api.httpx.AsyncClient", lambda **_k: FailClient())
-    with pytest.raises(ValueError, match="Token fetch failed"):
-        await api.get_token(max_attempts=0)
-    with pytest.raises(ValueError, match="Item detail fetch failed"):
-        await api.get_item_info("1", max_attempts=0)
 
 
 def test_quote_setup_load_yaml_non_dict_paths(tmp_path: Path) -> None:
@@ -111,27 +87,6 @@ def test_media_utils_font_fallback(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr("src.modules.media.utils.ImageFont.truetype", _tt)
     assert add_watermark(str(src), str(out), text="x") is True
-
-
-def test_msgpack_double_decode_fail_returns_none(monkeypatch) -> None:
-    monkeypatch.setattr("src.lite.msgpack.base64.b64decode", lambda *_a, **_k: (_ for _ in ()).throw(ValueError("x")))
-    monkeypatch.setattr("src.lite.msgpack.base64.urlsafe_b64decode", lambda *_a, **_k: (_ for _ in ()).throw(ValueError("y")))
-    assert decrypt_payload("abc") is None
-
-
-@pytest.mark.asyncio
-async def test_ws_client_cancelled_error_reraised(monkeypatch) -> None:
-    async def token_provider() -> str:
-        return "t"
-
-    c = LiteWsClient(ws_url="ws://x", cookie="c", device_id="d", my_user_id="u", token_provider=token_provider)
-
-    async def connect(*_a, **_k):
-        raise asyncio.CancelledError()
-
-    monkeypatch.setattr("src.lite.ws_client.websockets.connect", connect)
-    with pytest.raises(asyncio.CancelledError):
-        await c.run_forever()
 
 
 def test_doctor_port_open_and_urlerror_branch(monkeypatch) -> None:
@@ -220,13 +175,29 @@ def test_compliance_auto_reload_branches(tmp_path: Path) -> None:
 def test_setup_wizard_start_now_runs_post_checks(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sw, "_read_existing_env", lambda _p: {})
-    monkeypatch.setattr(sw, "_choose_gateway_provider", lambda: sw.GATEWAY_PROVIDERS[0])
     monkeypatch.setattr(sw, "_choose_content_provider", lambda: sw.CONTENT_PROVIDERS[0])
-    vals = iter(["gk", "tok", "8080", "admin", "pwd", "cookie", "", "", "Y"])
-    monkeypatch.setattr(sw, "_prompt", lambda *_a, **_k: next(vals))
+
+    def prompt_fn(text, default=None, required=False, secret=False):
+        if "DEEPSEEK_API_KEY" in text:
+            return "gk"
+        if "XGJ_APP_KEY" in text:
+            return "appkey"
+        if "XGJ_APP_SECRET" in text:
+            return "appsecret"
+        if "XGJ_BASE_URL" in text:
+            return ""
+        if "XIANYU_COOKIE_1" in text:
+            return "cookie"
+        if "XIANYU_COOKIE_2" in text:
+            return ""
+        if "请选择" in text:
+            return "2"
+        return ""
+
+    monkeypatch.setattr(sw, "_prompt", prompt_fn)
     monkeypatch.setattr(sw, "_ensure_docker_ready", lambda: True)
     ran = {"post": False}
-    monkeypatch.setattr(sw, "_run_post_start_checks", lambda _p: ran.__setitem__("post", True))
+    monkeypatch.setattr(sw, "_run_post_start_checks", lambda: ran.__setitem__("post", True))
 
     class R:
         returncode = 0

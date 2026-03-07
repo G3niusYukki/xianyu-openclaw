@@ -27,7 +27,6 @@ def test_open_platform_success_response_and_signed_request_surface(monkeypatch) 
         base_url="https://xg.test",
         app_key="ak-1",
         app_secret="as-1",
-        seller_id="seller-1",
     )
 
     methods_with_path = [
@@ -51,8 +50,7 @@ def test_open_platform_success_response_and_signed_request_surface(monkeypatch) 
     assert len(sign_calls) == 9
 
     _, params, content, headers, _ = called[0]
-    assert params["appKey"] == "ak-1"
-    assert params["sellerId"] == "seller-1"
+    assert params["appid"] == "ak-1"
     assert params["sign"] == "sig-op"
     assert "timestamp" in params
     assert headers["Content-Type"] == "application/json"

@@ -1,37 +1,101 @@
-# QUICKSTART
+# 快速开始
 
-目标：在本机启动当前 `main` 的 API-first 闲鱼自动化工作台。
+5 分钟内启动闲鱼管家。
 
 ## 1. 准备环境
 
-- Python `3.10+`
-- Node.js `18+`
-- 一个有效的闲鱼 Cookie
-- 一个可用的 AI 提供商 Key
-- 一个闲管家 Open Platform 应用
+## 前提条件
 
-## 2. 复制配置模板
+| 依赖 | 版本要求 | 说明 |
+|------|---------|------|
+| Python | 3.10+ | Python 后端运行时 |
+| Node.js | 18+ | Node.js 后端和 React 前端 |
+| npm | 随 Node.js 安装 | 包管理器 |
+| 闲鱼 Cookie | - | 从浏览器获取的登录凭证 |
+| AI API Key | - | DeepSeek / 阿里百炼 / OpenAI 等，任选一个 |
+
+---
+
+## 方式一：本地开发模式（推荐）
+
+### 第 1 步：克隆项目
+
+```bash
+git clone https://github.com/G3niusYukki/xianyu-openclaw.git
+cd xianyu-openclaw
+```
+
+### 第 2 步：安装依赖
+
+```bash
+# Python 依赖
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Node.js 依赖
+cd server && npm install && cd ..
+cd client && npm install && cd ..
+```
+
+> Windows 用户激活虚拟环境用 `.venv\Scripts\activate` 替代 `source .venv/bin/activate`。
+
+### 第 3 步：配置环境变量
 
 ```bash
 cp .env.example .env
 ```
 
-最小必填项：
+用编辑器打开 `.env`，填入以下必需信息：
 
-```env
-XIANYU_COOKIE_1=
+```bash
+# 闲鱼 Cookie（从浏览器获取）
+XIANYU_COOKIE_1=your_cookie_here
 
+# AI 服务配置（以 DeepSeek 为例）
 AI_PROVIDER=deepseek
-AI_API_KEY=
+AI_API_KEY=sk-your-deepseek-key
 AI_BASE_URL=https://api.deepseek.com/v1
 AI_MODEL=deepseek-chat
 
-XGJ_APP_KEY=
-XGJ_APP_SECRET=
-XGJ_BASE_URL=https://open.goofish.pro
 ```
 
-## 3. 安装依赖
+### 第 4 步：启动服务
+
+使用一键启动脚本（推荐）：
+
+```bash
+# macOS / Linux
+./start.sh
+
+# Windows
+start.bat
+```
+
+脚本会自动启动 Node.js 后端、React 前端和 Python 后端。如需 Lite 直连模式（WebSocket 消息监听 + AI 自动回复），可另开终端执行 `python -m src.lite`。
+
+### 第 5 步：验证启动
+
+打开浏览器，依次访问：
+
+| 服务 | 地址 | 预期结果 |
+|------|------|---------|
+| React 前端 | http://localhost:5173 | 管理面板首页 |
+| Python Dashboard | http://localhost:8091 | Dashboard 页面 |
+| Node.js 后端 | http://localhost:3001/health | 返回健康状态 JSON |
+
+---
+
+## 方式二：Docker 模式
+
+### 第 1 步：配置
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`，填入闲鱼 Cookie、AI 服务等配置（同本地模式）。
+
+### 第 2 步：启动
 
 ```bash
 python3 -m venv .venv
@@ -43,21 +107,15 @@ cd ../client && npm install
 cd ..
 ```
 
-## 4. 启动
+Docker Compose 会启动以下容器：
 
-macOS / Linux：
+| 容器 | 端口 | 说明 |
+|------|------|------|
+| xianyu-node-backend | 3001 | Node.js 后端 |
+| xianyu-python-backend | 8091 | Python 后端 |
+| xianyu-react-frontend | 5173 | React 前端 |
 
-```bash
-./start.sh
-```
-
-Windows：
-
-```bat
-start.bat
-```
-
-也可以分别启动：
+### 第 3 步：验证
 
 ```bash
 python3 -m src.dashboard_server --host 127.0.0.1 --port 8091
@@ -98,15 +156,93 @@ docker compose ps
 docker compose logs -f
 ```
 
-默认端口映射：
+所有容器应处于 `Up (healthy)` 状态。
 
-- 前端 `5173`
-- Python `8091`
-- Node `3001`
+访问 http://localhost:5173 打开管理面板。
 
-## 8. 重要说明
+---
 
-- 当前主线不依赖 OpenClaw。
-- React 页面全部接真实接口，不提供 mock 数据回退。
-- Python 是唯一业务真相源；Node 只做代理、验签和 webhook 接入。
-- `Legacy Browser Runtime` 只用于 API 暂时无法覆盖的补充链路。
+## 获取闲鱼 Cookie
+
+1. 用 Chrome 打开 https://www.goofish.com 并登录
+2. 按 **F12** 打开开发者工具
+3. 切换到 **Network** 标签
+4. 按 **F5** 刷新页面
+5. 点击任意一个请求
+6. 在右侧 **Request Headers** 中找到 `Cookie:` 一行
+7. 全部复制，粘贴到 `.env` 文件中
+
+Cookie 有效期通常 7-30 天。过期后可通过管理面板或 Dashboard（http://localhost:8091/cookie）在线更新，或重新从浏览器获取。
+
+---
+
+## 常见问题
+
+### 端口被占用
+
+**症状**：启动时报 `port already in use` 或 `address already in use`。
+
+**解决**：检查哪个进程占用了端口，停掉后重试：
+
+```bash
+# macOS/Linux
+lsof -i :5173
+lsof -i :3001
+lsof -i :8091
+
+# 或修改端口
+# .env 中设置 FRONTEND_PORT、NODE_PORT、PYTHON_PORT
+```
+
+### Cookie 失效
+
+**症状**：WebSocket 连接失败，或消息监听无响应。
+
+**解决**：重新从浏览器获取 Cookie，更新到 `.env` 或通过 Dashboard 在线更新，然后重启 Python 后端。
+
+### AI 服务报错
+
+**症状**：自动回复无输出，或日志中出现 API 错误。
+
+**解决**：
+1. 检查 `.env` 中的 `AI_API_KEY` 是否正确
+2. 确认 API Key 余额充足
+3. 检查 `AI_BASE_URL` 是否可访问
+
+### npm install 失败
+
+**症状**：Node.js 依赖安装报错。
+
+**解决**：
+1. 确认 Node.js 版本 >= 18：`node -v`
+2. 清除缓存重试：`npm cache clean --force && npm install`
+
+### Python 依赖安装失败
+
+**症状**：`pip install` 报错。
+
+**解决**：
+1. 确认 Python 版本 >= 3.10：`python3 --version`
+2. 确认已激活虚拟环境
+3. 国内用户可使用镜像源：`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`
+
+---
+
+## 停止服务
+
+```bash
+# 本地模式：Ctrl+C 终止各终端进程
+
+# Docker 模式
+docker compose down          # 停止（保留数据）
+docker compose down -v       # 停止并删除数据卷（谨慎）
+```
+
+---
+
+## 下一步
+
+- 详细使用指南：[USER_GUIDE.md](USER_GUIDE.md)
+- 完整功能说明：[README.md](README.md)
+- CLI 命令参考：`python -m src.cli --help`
+- 参与开发：[CONTRIBUTING.md](CONTRIBUTING.md)

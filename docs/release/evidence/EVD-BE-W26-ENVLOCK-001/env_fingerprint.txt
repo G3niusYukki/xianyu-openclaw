@@ -1,9 +1,0 @@
-timestamp=2026-03-05 21:26:32 +0800
-root=/Users/brianzhibo/openclaw/xianyu-openclaw
-venv=.venv312
-python=Python 3.12.12
-pytest=pytest 8.4.2
-pytest_path=/Users/brianzhibo/openclaw/xianyu-openclaw/.venv312/lib/python3.12/site-packages/pytest/__init__.py
-requirements_sha256=e7af862666d0a0c06530c2b9e6fce407d8c50792b25e4d51fcfa5772c725ab45
-requirements_lock_sha256=519976f3c4e3fe7c4d81350d15788169339bd7d44a432a43f397c0354775adba
-pip_freeze_sha256=74e9364ac5aad79de680ffdc98caf5d34638e3c7abd02acadaedb9d510c4f419

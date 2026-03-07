@@ -5,6 +5,8 @@ Startup Health Checks
 在应用启动时验证所有关键依赖和配置是否就绪
 """
 
+from __future__ import annotations
+
 import os
 import sqlite3
 import sys
@@ -91,6 +93,8 @@ def check_database_writable() -> StartupCheckResult:
         db_path = cfg.database.get("path", "data/agent.db")
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(db_path, timeout=5)) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
             conn.execute("SELECT 1")
         return StartupCheckResult("数据库", True, f"可读写 ({db_path})")
     except Exception as e:

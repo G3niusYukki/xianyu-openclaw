@@ -61,7 +61,7 @@ export default function Analytics() {
       </div>
 
       <div className="grid md:grid-cols-3 gap-6">
-        {/* 左侧：基于真实数据渲染的轻量趋势柱图 */}
+        {/* 左侧：趋势图 (这里用 CSS 模拟一个简单的柱状图) */}
         <div className="md:col-span-2 xy-card p-6">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-xy-text-primary">核心指标趋势</h3>

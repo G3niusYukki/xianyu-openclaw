@@ -1,9 +1,18 @@
 """消息 WebSocket 适配层基础测试。"""
 
+import asyncio
 import base64
 import json
+import sys
 
 from src.modules.messages.ws_live import GoofishWsTransport, decode_sync_payload, extract_chat_event, parse_cookie_header
+
+
+def _ensure_event_loop():
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 def test_parse_cookie_header_extracts_pairs() -> None:
@@ -65,6 +74,7 @@ def test_extract_chat_event_with_int_keys() -> None:
 
 
 def test_ws_transport_cookie_hot_reload() -> None:
+    _ensure_event_loop()
     holder = {
         "cookie": "unb=10001; _m_h5_tk=token_a_123; cookie2=a; _tb_token_=t; sgcookie=s"
     }
@@ -92,6 +102,7 @@ def test_ws_transport_auth_error_marker() -> None:
 
 
 def test_ws_transport_auth_hold_until_cookie_update_enabled_by_default() -> None:
+    _ensure_event_loop()
     transport = GoofishWsTransport(
         cookie_text="unb=10001; _m_h5_tk=token_a_123; cookie2=a; _tb_token_=t; sgcookie=s",
         config={},

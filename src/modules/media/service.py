@@ -5,6 +5,8 @@ Media Processing Service
 提供闲鱼商品图片的自动化处理功能
 """
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 

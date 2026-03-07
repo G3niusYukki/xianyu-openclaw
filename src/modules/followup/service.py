@@ -8,14 +8,14 @@ import time
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from src.core.logger import get_logger
 
 
-@dataclass(slots=True)
+@dataclass
 class FollowUpPolicy:
     max_touches_per_day: int = 2
     min_interval_hours: float = 4.0
@@ -27,7 +27,7 @@ class FollowUpPolicy:
     forbidden_keywords: tuple[str, ...] = ("微信", "vx", "v信", "私聊", "转账", "加我")
 
 
-@dataclass(slots=True)
+@dataclass
 class FollowUpAudit:
     id: int
     session_id: str
@@ -68,6 +68,8 @@ class FollowUpEngine:
     def _connect(self) -> Iterator[sqlite3.Connection]:
         with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
             yield conn
 
     def _init_db(self) -> None:
@@ -113,7 +115,7 @@ class FollowUpEngine:
             )
 
     def _is_silent_hours(self) -> bool:
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         hour = now.hour
         start = self.policy.silent_hours_start
         end = self.policy.silent_hours_end
@@ -238,7 +240,7 @@ class FollowUpEngine:
                     now,
                 ),
             )
-            return int(cur.rowcount)
+            return int(cur.lastrowid or 0)
 
     def process_session(
         self,
@@ -336,7 +338,10 @@ class FollowUpEngine:
         result: list[dict[str, Any]] = []
         for row in rows:
             data = dict(row)
-            data["metadata"] = json.loads(data.get("metadata") or "{}")
+            try:
+                data["metadata"] = json.loads(data.get("metadata") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                data["metadata"] = {}
             result.append(data)
         return result
 
@@ -355,4 +360,73 @@ class FollowUpEngine:
             "sent_count": sent,
             "dnd_count": dnd_count,
             "policy_version": self._policy_version,
+        }
+
+    # ── 催单（未支付订单提醒）────────────────────────────────
+
+    ORDER_REMINDER_TEMPLATES = [
+        {"id": "order_unpaid_1", "text": "您好，您的订单还没有完成支付哦~ 如有疑问可以随时问我，确认需要的话请尽快支付，我好给您安排发货。"},
+        {"id": "order_unpaid_2", "text": "提醒一下，您有一笔待支付订单，商品已为您预留，请在规定时间内完成支付，以免影响发货哦~"},
+        {"id": "order_final", "text": "最后提醒：您的订单即将超时关闭，如果还需要请尽快支付。若已不需要请忽略此消息。"},
+    ]
+
+    def process_unpaid_order(
+        self,
+        session_id: str,
+        order_id: str,
+        account_id: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """催单逻辑：对未支付订单发送提醒。
+
+        复用已读未回的合规框架（DND、静默时段、频率限制）。
+        """
+        eligible, reason = self.check_eligibility(
+            session_id=session_id,
+            account_id=account_id,
+        )
+        if not eligible:
+            return {
+                "session_id": session_id,
+                "order_id": order_id,
+                "eligible": False,
+                "reason": reason,
+                "action": "order_reminder",
+                "dry_run": dry_run,
+            }
+
+        daily_count, _ = self._get_touch_stats(session_id)
+        idx = min(daily_count, len(self.ORDER_REMINDER_TEMPLATES) - 1)
+        template = self.ORDER_REMINDER_TEMPLATES[idx]
+
+        valid, validation_reason = self.validate_template(template["text"])
+        if not valid:
+            return {
+                "session_id": session_id,
+                "order_id": order_id,
+                "eligible": False,
+                "reason": f"template_invalid:{validation_reason}",
+                "action": "order_reminder",
+                "dry_run": dry_run,
+            }
+
+        audit_id = self.record_trigger(
+            session_id=session_id,
+            account_id=account_id,
+            action="order_reminder",
+            template_id=template["id"],
+            status="sent" if not dry_run else "dry_run",
+            metadata={"order_id": order_id, "touch_count": daily_count + 1},
+        )
+
+        return {
+            "session_id": session_id,
+            "order_id": order_id,
+            "eligible": True,
+            "template_id": template["id"],
+            "template_text": template["text"],
+            "touch_count": daily_count + 1,
+            "audit_id": audit_id,
+            "action": "order_reminder",
+            "dry_run": dry_run,
         }

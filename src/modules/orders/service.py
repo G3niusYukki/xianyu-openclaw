@@ -6,11 +6,11 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .xianguanjia import XianGuanJiaClient
+from src.integrations.xianguanjia.open_platform_client import OpenPlatformClient
 
 
 class OrderFulfillmentService:
@@ -52,7 +52,7 @@ class OrderFulfillmentService:
         self,
         db_path: str = "data/orders.db",
         config: dict[str, Any] | None = None,
-        shipping_api_client: XianGuanJiaClient | None = None,
+        shipping_api_client: OpenPlatformClient | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -62,12 +62,14 @@ class OrderFulfillmentService:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
             yield conn
 
     def _init_db(self) -> None:
@@ -107,25 +109,19 @@ class OrderFulfillmentService:
                 """
             )
 
-    def _build_shipping_api_client(self) -> XianGuanJiaClient | None:
+    def _build_shipping_api_client(self) -> OpenPlatformClient | None:
         cfg = self.config.get("xianguanjia")
-        if not isinstance(cfg, dict):
+        if not isinstance(cfg, dict) or not cfg.get("enabled", False):
             return None
-        if not cfg.get("enabled", False):
-            return None
-
         app_key = str(cfg.get("app_key", "")).strip()
         app_secret = str(cfg.get("app_secret", "")).strip()
         if not app_key or not app_secret:
             return None
-
-        return XianGuanJiaClient(
+        return OpenPlatformClient(
+            base_url=str(cfg.get("base_url", "https://open.goofish.pro")).strip(),
             app_key=app_key,
             app_secret=app_secret,
-            base_url=str(cfg.get("base_url", "https://open.goofish.pro")).strip(),
             timeout=float(cfg.get("timeout", 30.0)),
-            merchant_id=str(cfg.get("merchant_id", "")).strip() or None,
-            merchant_query_key=str(cfg.get("merchant_query_key", "merchantId")).strip() or "merchantId",
         )
 
     @staticmethod
@@ -509,6 +505,24 @@ class OrderFulfillmentService:
                 return dict(ctx)
         return {}
 
+    def _find_express_company(self, keyword: str) -> dict[str, Any] | None:
+        """通过闲管家 API 查找快递公司。"""
+        if not self.shipping_api_client or not keyword:
+            return None
+        resp = self.shipping_api_client.list_express_companies()
+        if not resp.ok:
+            return None
+        rows = resp.data if isinstance(resp.data, list) else []
+        text = str(keyword).strip().lower()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("express_code", "")).lower()
+            name = str(row.get("express_name", "")).lower()
+            if text in {code, name} or text in code or text in name:
+                return row
+        return None
+
     def _ship_via_xianguanjia(
         self, order_id: str, shipping_info: dict[str, Any], dry_run: bool
     ) -> tuple[dict[str, Any] | None, str | None]:
@@ -519,7 +533,7 @@ class OrderFulfillmentService:
         express_code = str(shipping_info.get("express_code", "")).strip()
         express_name = str(shipping_info.get("express_name", "")).strip()
         if not express_code and express_name:
-            company = self.shipping_api_client.find_express_company(express_name)
+            company = self._find_express_company(express_name)
             if company:
                 express_code = str(company.get("express_code", "")).strip()
                 if not express_name:
@@ -541,18 +555,22 @@ class OrderFulfillmentService:
                 "express_name": express_name,
             }, None
 
-        response = self.shipping_api_client.ship_order(
-            order_no=str(shipping_info.get("order_no") or order_id),
-            waybill_no=waybill_no,
-            express_code=express_code,
-            express_name=express_name or None,
-            ship_name=str(shipping_info.get("ship_name", "")).strip() or None,
-            ship_mobile=str(shipping_info.get("ship_mobile", "")).strip() or None,
-            ship_province=str(shipping_info.get("ship_province", "")).strip() or None,
-            ship_city=str(shipping_info.get("ship_city", "")).strip() or None,
-            ship_area=str(shipping_info.get("ship_area", "")).strip() or None,
-            ship_address=str(shipping_info.get("ship_address", "")).strip() or None,
-        )
+        payload: dict[str, Any] = {
+            "order_no": str(shipping_info.get("order_no") or order_id),
+            "waybill_no": waybill_no,
+            "express_code": express_code,
+        }
+        for key in ("express_name", "ship_name", "ship_mobile", "ship_province", "ship_city", "ship_area", "ship_address"):
+            val = str(shipping_info.get(key, "")).strip()
+            if val:
+                payload[key] = val
+        if express_name and "express_name" not in payload:
+            payload["express_name"] = express_name
+
+        response = self.shipping_api_client.delivery_order(payload)
+        if not response.ok:
+            return None, response.error_message or "ship_order_api_failed"
+
         return {
             "action": "ship_order_via_xianguanjia",
             "channel": "xianguanjia_api",
@@ -561,7 +579,6 @@ class OrderFulfillmentService:
             "waybill_no": waybill_no,
             "express_code": express_code,
             "express_name": express_name,
-            "api_response": response,
         }, None
 
     def deliver(

@@ -5,6 +5,8 @@ Service Container
 提供依赖注入和服务管理
 """
 
+from __future__ import annotations
+
 import threading
 from collections.abc import Callable
 from functools import wraps

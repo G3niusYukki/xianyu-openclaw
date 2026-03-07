@@ -180,14 +180,10 @@ async def test_operations_listing_media_content_analytics(monkeypatch, tmp_path)
 
     monkeypatch.setattr("src.modules.operations.service.asyncio.sleep", no_sleep)
 
-    class Cmp:
-        async def evaluate_batch_polish_rate(self, _):
-            return {"blocked": False, "warn": False, "message": ""}
-
-    monkeypatch.setattr("src.modules.operations.service.get_compliance_guard", lambda: Cmp())
     ops = OperationsService(controller=DummyController())
     rp = await ops.batch_polish(product_ids=["a", "b"], max_items=1)
-    assert rp["total"] == 1
+    assert rp["total"] == 0
+    assert rp["blocked"] is True
     err = ops._error_result("x", None, "e")
     assert err["success"] is False
 
@@ -204,10 +200,18 @@ async def test_operations_listing_media_content_analytics(monkeypatch, tmp_path)
     svc = ListingService(controller=DummyController())
     listing = Listing(title="t", description="d", price=1.0, images=["a.jpg"], category="General", tags=["9成新"])
 
-    async def fake_verify(*_):
-        return "id", "https://x/success/id"
+    import types as _types
+    mock_api = _Obj(
+        create_product=lambda payload: _types.SimpleNamespace(
+            ok=True,
+            data={"xianyu_product_id": "id"},
+            error_message=None,
+            error_code=None,
+            to_dict=lambda: {"ok": True, "data": {"xianyu_product_id": "id"}},
+        ),
+    )
+    svc._build_open_platform_client = lambda: mock_api
 
-    monkeypatch.setattr(svc, "_step_verify_success", fake_verify)
     out = await svc.create_listing(listing)
     assert out.success is True
     assert svc._extract_product_id("https://a/b/c") == "c"

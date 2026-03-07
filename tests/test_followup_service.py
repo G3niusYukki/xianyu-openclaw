@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -13,7 +13,7 @@ class _FakeDateTime(datetime):
 
     @classmethod
     def now(cls, tz=None):
-        return datetime(2026, 1, 1, cls._hour, 0, 0, tzinfo=UTC)
+        return datetime(2026, 1, 1, cls._hour, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture

@@ -1,8 +1,0 @@
-https://file.goofish.pro/doc/商品异常状态码.sql
-https://file.goofish.pro/doc/商品异常状态码.xlsx
-https://file.goofish.pro/doc/闲管家省市区.sql
-https://file.goofish.pro/doc/闲管家省市区.xlsx
-https://open.goofish.pro
-https://s.apifox.cn/3ac13d69-5a38-4536-ae9b-a54001854ef8
-https://s.apifox.cn/cf4d53fd-8bb2-41c5-8da3-371ba9a38956/doc-4985015
-https://s.apifox.cn/cf4d53fd-8bb2-41c5-8da3-371ba9a38956/doc-7646489

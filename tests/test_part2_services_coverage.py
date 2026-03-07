@@ -31,44 +31,49 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch):
 async def test_operations_service_branches(mock_controller):
     service = OperationsService(controller=mock_controller)
     service.analytics = Mock(log_operation=AsyncMock())
-    service.compliance = Mock(evaluate_batch_polish_rate=AsyncMock(return_value={"blocked": False, "warn": True, "message": "w"}))
 
     res = await service.polish_listing("pid1")
     assert res["action"] == "polish"
+    assert res["success"] is False
+    assert res["error"] == "feature_disabled"
 
-    mock_controller.find_elements = AsyncMock(return_value=[1, 2])
-    mock_controller.execute_script = AsyncMock(return_value=["a", "b"])
-    seq = {"n": 0}
-
-    async def _click(_pid, sel):
-        if sel == service.selectors.POLISH_CONFIRM:
-            seq["n"] += 1
-            return seq["n"] == 1
-        return True
-
-    mock_controller.click = AsyncMock(side_effect=_click)
     summary = await service.batch_polish(max_items=2)
-    assert summary["total"] == 2
-    assert summary["success"] == 1
+    assert summary["total"] == 0
+    assert summary["blocked"] is True
+    assert "擦亮功能已停用" in summary["message"]
 
-    service.compliance = Mock(evaluate_batch_polish_rate=AsyncMock(return_value={"blocked": True, "warn": False, "message": "blocked"}))
     blocked = await service.batch_polish(max_items=2)
     assert blocked["blocked"] is True
 
     assert (await service.update_price("p", 9.9))["action"] == "price_update"
     assert (await service.batch_update_price([{"product_id": "p", "new_price": 1.0}]))["total"] == 1
-    assert (await service.delist("p", confirm=False))["action"] == "delist"
+    assert (await service.delist("p"))["action"] == "delist"
     assert (await service.relist("p"))["action"] == "relist"
-    assert (await service.refresh_inventory())["success"] is True
-    assert (await service.get_listing_stats())["total"] == 0
+    assert (await service.refresh_inventory())["success"] is False
+    assert "error" in (await service.get_listing_stats())
 
-    mock_controller.new_page = AsyncMock(side_effect=RuntimeError("boom"))
     assert (await service.polish_listing("p"))["success"] is False
 
 
 @pytest.mark.asyncio
 async def test_listing_service_branches(mock_controller):
     svc = ListingService(controller=mock_controller)
+
+    mock_api = Mock()
+    mock_api.create_product = Mock(return_value=SimpleNamespace(
+        ok=True,
+        data={"xianyu_product_id": "abc"},
+        error_message=None,
+        error_code=None,
+        to_dict=lambda: {"ok": True, "data": {"xianyu_product_id": "abc"}},
+    ))
+    mock_api.list_products = Mock(return_value=SimpleNamespace(
+        ok=True,
+        data={"list": [{"id": 1}, {"id": 2}, {"id": 3}]},
+        error_message=None,
+    ))
+    svc._build_open_platform_client = Mock(return_value=mock_api)
+
     svc.compliance = Mock(
         evaluate_content=Mock(return_value={"warn": True, "blocked": False, "message": "w", "hits": ["x"]}),
         evaluate_publish_rate=AsyncMock(return_value={"warn": False, "blocked": False, "message": "ok"}),
@@ -76,7 +81,6 @@ async def test_listing_service_branches(mock_controller):
     svc.analytics = Mock(log_operation=AsyncMock())
 
     listing = Listing(title="t", description="d", price=10, category="General", images=["a.jpg"], tags=["99新"])
-    mock_controller.execute_script = AsyncMock(return_value="https://www.goofish.com/success/abc")
     out = await svc.create_listing(listing, account_id="a1")
     assert out.success is True
     assert out.product_id == "abc"
@@ -94,7 +98,6 @@ async def test_listing_service_branches(mock_controller):
     assert (await svc.verify_listing("x"))["exists"] is True
     assert await svc.update_listing("x", {"price": 99}) is True
     assert await svc.delete_listing("x") is True
-    mock_controller.find_elements = AsyncMock(return_value=[1, 2, 3])
     assert len(await svc.get_my_listings(page=2)) == 3
 
     mock_controller.execute_script = AsyncMock(return_value=False)

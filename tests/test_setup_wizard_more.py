@@ -16,11 +16,6 @@ def test_prompt_and_choose(monkeypatch):
     monkeypatch.setattr("getpass.getpass", lambda _: "sec")
     assert sw._prompt("x", secret=True) == "sec"
 
-    vals2 = iter(["999", "1"])
-    monkeypatch.setattr("builtins.input", lambda _: next(vals2))
-    gp = sw._choose_gateway_provider()
-    assert gp.id == sw.GATEWAY_PROVIDERS[0].id
-
     vals3 = iter(["0", "1"])
     monkeypatch.setattr("builtins.input", lambda _: next(vals3))
     cp = sw._choose_content_provider()
@@ -66,45 +61,43 @@ def test_post_start_checks(monkeypatch):
         return R()
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    sw._run_post_start_checks("8080")
+    sw._run_post_start_checks()
     assert called
 
 
 def test_run_setup_paths(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
-    monkeypatch.setattr(sw, "_choose_gateway_provider", lambda: sw.GATEWAY_PROVIDERS[0])
     monkeypatch.setattr(sw, "_choose_content_provider", lambda: sw.CONTENT_PROVIDERS[0])
 
     def prompt_no_start(text, default=None, required=False, secret=False):
-        mapping = {
-            "请输入 ANTHROPIC_API_KEY": "gk",
-            "请输入 DEEPSEEK_API_KEY": "ck",
-            "填写 XGJ_APP_KEY（可留空，稍后也可在 /config 配置）": "xgj-ak",
-            "填写 XGJ_APP_SECRET（可留空，稍后也可在 /config 配置）": "xgj-sk",
-            "填写 XGJ_MERCHANT_ID（可选）": "",
-            "设置 XGJ_BASE_URL": "https://open.goofish.pro",
-            "设置 AUTH_PASSWORD（后台登录密码）": "pass",
-            "设置 AUTH_USERNAME": "admin",
-            "设置 FRONTEND_PORT（前端端口）": "5173",
-            "粘贴 XIANYU_COOKIE_1": "c1",
-            "粘贴 XIANYU_COOKIE_2（可留空）": "",
-            "是否立即启动容器？[Y/n]": "n",
-        }
-        return mapping[text]
+        if "DEEPSEEK_API_KEY" in text:
+            return "ck"
+        if "XGJ_APP_KEY" in text:
+            return "appkey"
+        if "XGJ_APP_SECRET" in text:
+            return "appsecret"
+        if "XGJ_BASE_URL" in text:
+            return ""
+        if "XIANYU_COOKIE_1" in text:
+            return "c1"
+        if "XIANYU_COOKIE_2" in text:
+            return ""
+        if "请选择" in text:
+            return "3"
+        return ""
 
     monkeypatch.setattr(sw, "_prompt", prompt_no_start)
     rc = sw.run_setup()
     assert rc == 0
     assert (tmp_path / ".env").exists()
 
-    def prompt_start(text, default=None, required=False, secret=False):
-        val = prompt_no_start(text, default, required, secret)
-        if text == "是否立即启动容器？[Y/n]":
-            return "y"
-        return val
+    def prompt_docker(text, default=None, required=False, secret=False):
+        if "请选择" in text:
+            return "2"
+        return prompt_no_start(text, default, required, secret)
 
-    monkeypatch.setattr(sw, "_prompt", prompt_start)
+    monkeypatch.setattr(sw, "_prompt", prompt_docker)
     monkeypatch.setattr(sw, "_ensure_docker_ready", lambda: False)
     assert sw.run_setup() == 1
 
@@ -137,43 +130,6 @@ def test_run_post_start_checks_success_prints_actions(monkeypatch, capsys):
         return R()
 
     monkeypatch.setattr("subprocess.run", fake_run)
-    sw._run_post_start_checks("8090")
+    sw._run_post_start_checks()
     out = capsys.readouterr().out
-    assert "启动完成。打开: http://localhost:8090" in out
-    assert "Node 代理（可选）默认地址: http://localhost:3001" in out
-
-
-def test_run_setup_same_provider_reuses_gateway_key(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-
-    gateway = sw.GATEWAY_PROVIDERS[0]
-
-    class SameKeyContent:
-        id = "same-key"
-        env_key = gateway.env_key
-        base_url = "https://x"
-        model = "m"
-
-    monkeypatch.setattr(sw, "_choose_gateway_provider", lambda: gateway)
-    monkeypatch.setattr(sw, "_choose_content_provider", lambda: SameKeyContent())
-
-    answers = {
-        f"请输入 {gateway.env_key}": "k-same",
-        "填写 XGJ_APP_KEY（可留空，稍后也可在 /config 配置）": "xgj-ak",
-        "填写 XGJ_APP_SECRET（可留空，稍后也可在 /config 配置）": "xgj-sk",
-        "填写 XGJ_MERCHANT_ID（可选）": "",
-        "设置 XGJ_BASE_URL": "https://open.goofish.pro",
-        "设置 AUTH_PASSWORD（后台登录密码）": "pass",
-        "设置 AUTH_USERNAME": "admin",
-        "设置 FRONTEND_PORT（前端端口）": "5173",
-        "粘贴 XIANYU_COOKIE_1": "c1",
-        "粘贴 XIANYU_COOKIE_2（可留空）": "",
-        "是否立即启动容器？[Y/n]": "n",
-    }
-    monkeypatch.setattr(sw, "_prompt", lambda text, **kwargs: answers[text])
-
-    rc = sw.run_setup()
-    assert rc == 0
-    content = (tmp_path / ".env").read_text(encoding="utf-8")
-    assert f"{gateway.env_key}=k-same" in content
-    assert "AI_API_KEY=k-same" in content
+    assert "启动完成" in out

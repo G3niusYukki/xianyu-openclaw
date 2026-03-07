@@ -12,7 +12,7 @@ from .recognizer import ITicketRecognizer
 from .responder import ITicketTextResponder, RuleBasedTicketResponder
 
 
-@dataclass(slots=True)
+@dataclass
 class TicketingDecision:
     """End-to-end structured output for the two-stage pipeline."""
 

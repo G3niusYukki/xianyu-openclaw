@@ -3,57 +3,39 @@ const crypto = require('crypto');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-
 const router = express.Router();
 
-const ENV_FILE = path.join(__dirname, '../../.env');
-const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || 'http://localhost:8091/api/orders/callback';
+const CONFIG_FILE = path.join(__dirname, '../../data/system_config.json');
 
-function md5(value) {
-  return crypto.createHash('md5').update(value, 'utf8').digest('hex');
+
+function md5(str) {
+  return crypto.createHash('md5').update(str, 'utf8').digest('hex');
 }
 
-function parseEnvFile() {
-  try {
-    if (!fs.existsSync(ENV_FILE)) return {};
-    const lines = fs.readFileSync(ENV_FILE, 'utf8').split(/\r?\n/);
-    const parsed = {};
-    for (const line of lines) {
-      if (!line || line.trim().startsWith('#')) continue;
-      const index = line.indexOf('=');
-      if (index <= 0) continue;
-      parsed[line.slice(0, index).trim()] = line.slice(index + 1).trim();
-    }
-    return parsed;
-  } catch (error) {
-    console.error('Failed to parse .env:', error.message);
-    return {};
-  }
+function signRequest(appKey, appSecret, body, timestamp) {
+  const bodyMd5 = md5(body || '');
+  return md5(`${appKey},${bodyMd5},${timestamp},${appSecret}`);
 }
 
 function loadXgjConfig() {
-  const env = parseEnvFile();
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      const xgj = config.xianguanjia || {};
+      return {
+        appKey: xgj.app_key || process.env.XGJ_APP_KEY || '',
+        appSecret: xgj.app_secret || process.env.XGJ_APP_SECRET || '',
+        baseUrl: xgj.base_url || process.env.XGJ_BASE_URL || 'https://open.goofish.pro',
+      };
+    }
+  } catch (e) {
+    console.error('Failed to load XGJ config:', e.message);
+  }
   return {
-    appKey: env.XGJ_APP_KEY || process.env.XGJ_APP_KEY || '',
-    appSecret: env.XGJ_APP_SECRET || process.env.XGJ_APP_SECRET || '',
-    sellerId: env.XGJ_MERCHANT_ID || process.env.XGJ_MERCHANT_ID || '',
-    baseUrl: env.XGJ_BASE_URL || process.env.XGJ_BASE_URL || 'https://open.goofish.pro',
+    appKey: process.env.XGJ_APP_KEY || '',
+    appSecret: process.env.XGJ_APP_SECRET || '',
+    baseUrl: process.env.XGJ_BASE_URL || 'https://open.goofish.pro',
   };
-}
-
-function signRequest(appKey, appSecret, body, timestamp, sellerId = '') {
-  const bodyMd5 = md5(body || '');
-  const parts = [String(appKey), bodyMd5, String(timestamp)];
-  if (sellerId) parts.push(String(sellerId));
-  parts.push(String(appSecret));
-  return md5(parts.join(''));
-}
-
-function normalizeTimestampSeconds(rawValue) {
-  const text = String(rawValue || '').trim();
-  if (!/^\d+$/.test(text)) return 0;
-  if (text.length > 10) return Math.floor(Number(text) / 1000);
-  return Number(text);
 }
 
 function timingSafeCompare(a, b) {
@@ -70,41 +52,36 @@ router.post('/proxy', async (req, res) => {
     const resolvedPath = apiPath || legacyPath;
 
     if (!resolvedPath || typeof resolvedPath !== 'string' || !resolvedPath.startsWith('/api/open/')) {
-      return res.status(400).json({ ok: false, error: 'Invalid apiPath' });
+      return res.status(400).json({ error: 'Invalid apiPath' });
     }
 
     const cfg = loadXgjConfig();
     if (!cfg.appKey || !cfg.appSecret) {
-      return res.status(400).json({ ok: false, error: 'XianGuanJia API not configured' });
+      return res.status(400).json({ ok: false, error: 'XianGuanJia API not configured. Please configure in Settings.' });
     }
 
     const body = JSON.stringify(reqBody || payload || {});
-    const timestamp = Date.now().toString();
-    const sign = signRequest(cfg.appKey, cfg.appSecret, body, timestamp, cfg.sellerId);
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const sign = signRequest(cfg.appKey, cfg.appSecret, body, timestamp);
 
-    const params = { appKey: cfg.appKey, timestamp, sign };
-    if (cfg.sellerId) params.sellerId = cfg.sellerId;
-
-    const response = await axios.post(`${cfg.baseUrl}${resolvedPath}`, body, {
-      params,
+    const url = `${cfg.baseUrl}${resolvedPath}`;
+    const response = await axios.post(url, body, {
+      params: { appid: cfg.appKey, timestamp, sign },
       headers: { 'Content-Type': 'application/json' },
       timeout: 15000,
     });
 
-    const ok = response.data?.code === 0 || response.status < 400;
-    res.json({
-      ok,
-      data: response.data?.data ?? response.data,
-      raw: response.data,
-    });
+    res.json({ ok: true, data: response.data });
   } catch (error) {
     console.error('XGJ proxy error:', error.response?.data || error.message);
     res.status(error.response?.status || 500).json({
       ok: false,
-      error: error.response?.data?.msg || error.response?.data?.error || 'Request failed',
+      error: error.response?.data?.msg || 'Request failed',
     });
   }
 });
+
+const PYTHON_WEBHOOK_URL = process.env.PYTHON_WEBHOOK_URL || 'http://localhost:8091/api/webhook';
 
 async function handleWebhook(req, res) {
   try {
@@ -113,18 +90,19 @@ async function handleWebhook(req, res) {
       return res.status(400).json({ code: 1, msg: 'Not configured' });
     }
 
-    const rawTimestamp = String(req.body.timestamp || req.query.timestamp || '').trim();
-    const normalizedTimestamp = normalizeTimestampSeconds(rawTimestamp);
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    if (!normalizedTimestamp || Math.abs(nowSeconds - normalizedTimestamp) > 300) {
+    const timestamp = parseInt(req.body.timestamp || req.query.timestamp);
+    const now = Math.floor(Date.now() / 1000);
+    if (!timestamp || Math.abs(now - timestamp) > 300) {
       return res.status(400).json({ error: 'Timestamp expired' });
     }
 
-    const sign = String(req.query.sign || '').trim().toLowerCase();
-    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
-    const expected = signRequest(cfg.appKey, cfg.appSecret, rawBody, rawTimestamp, cfg.sellerId);
+    const { sign } = req.query;
+    const rawBody = req.rawBody
+      ? req.rawBody.toString('utf8')
+      : JSON.stringify(req.body);
+    const expected = signRequest(cfg.appKey, cfg.appSecret, rawBody, String(timestamp));
 
-    if (!timingSafeCompare(expected, sign)) {
+    if (!timingSafeCompare(expected, sign || '')) {
       return res.status(401).json({ code: 401, msg: 'Invalid signature' });
     }
 
@@ -133,9 +111,9 @@ async function handleWebhook(req, res) {
       timeout: 10000,
     });
 
-    res.status(forwarded.status).json(forwarded.data);
+    res.json(forwarded.data);
   } catch (error) {
-    console.error('Webhook error:', error.response?.data || error.message);
+    console.error('Webhook error:', error.message);
     if (error.response) {
       return res.status(error.response.status).json(error.response.data);
     }

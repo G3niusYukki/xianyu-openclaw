@@ -19,6 +19,9 @@ import httpx
 from src.core.error_handler import BrowserError
 from src.core.logger import get_logger
 
+_APP_KEY = os.environ.get("XGJ_APP_KEY", "34839810")
+_APP_SECRET = os.environ.get("XGJ_APP_SECRET", "444e9908a51d1cb236a27862abc769c9")
+
 try:
     import websockets
 except Exception:  # pragma: no cover - optional dependency path
@@ -38,7 +41,7 @@ def parse_cookie_header(cookie_text: str) -> dict[str, str]:
     return result
 
 
-def generate_sign(timestamp_ms: str, token: str, data: str, app_key: str = "34839810") -> str:
+def generate_sign(timestamp_ms: str, token: str, data: str, app_key: str = _APP_KEY) -> str:
     raw = f"{token}&{timestamp_ms}&{app_key}&{data}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
@@ -322,18 +325,21 @@ class GoofishWsTransport:
         self._token_ts: float = 0.0
 
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=max(10, self.max_queue_size))
-        self._queue_event = asyncio.Event()
+        self._queue_event: asyncio.Event = asyncio.Event()
         self._session_peer: dict[str, str] = {}
         self._seen_event: dict[str, float] = {}
 
         self._ws: Any | None = None
-        self._stop_event = asyncio.Event()
+        self._stop_event: asyncio.Event = asyncio.Event()
         self._run_task: asyncio.Task[Any] | None = None
-        self._ready = asyncio.Event()
+        self._ready: asyncio.Event = asyncio.Event()
         self._last_heartbeat_sent = 0.0
         self._last_heartbeat_ack = 0.0
         self._connect_failures = 0
         self._last_disconnect_reason = ""
+
+    def _ensure_async_primitives(self) -> None:
+        pass
 
     def _apply_cookie_text(self, cookie_text: str, reason: str = "") -> bool:
         text = str(cookie_text or "").strip()
@@ -533,13 +539,13 @@ class GoofishWsTransport:
 
             t = str(int(time.time() * 1000))
             data_val = json.dumps(
-                {"appKey": "444e9908a51d1cb236a27862abc769c9", "deviceId": self.device_id},
+                {"appKey": _APP_SECRET, "deviceId": self.device_id},
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
             params = {
                 "jsv": "2.7.2",
-                "appKey": "34839810",
+                "appKey": _APP_KEY,
                 "t": t,
                 "sign": generate_sign(t, token_seed, data_val),
                 "v": "1.0",
@@ -609,7 +615,7 @@ class GoofishWsTransport:
             "lwp": "/reg",
             "headers": {
                 "cache-header": "app-key token ua wv",
-                "app-key": "444e9908a51d1cb236a27862abc769c9",
+                "app-key": _APP_SECRET,
                 "token": token,
                 "ua": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -627,7 +633,7 @@ class GoofishWsTransport:
         await asyncio.sleep(1.0)
         ack_diff = {
             "lwp": "/r/SyncStatus/ackDiff",
-            "headers": {"mid": "5701741704675979 0"},
+            "headers": {"mid": generate_mid()},
             "body": [
                 {
                     "pipeline": "sync",
@@ -694,6 +700,11 @@ class GoofishWsTransport:
         self._cleanup_seen()
 
         self._session_peer[chat_id] = sender_id
+        _SESSION_PEER_MAX = 1000
+        if len(self._session_peer) > _SESSION_PEER_MAX:
+            oldest_keys = list(self._session_peer.keys())[: len(self._session_peer) - _SESSION_PEER_MAX]
+            for k in oldest_keys:
+                self._session_peer.pop(k, None)
         payload = {
             "session_id": chat_id,
             "peer_name": str(event.get("sender_name", "") or "买家"),
@@ -739,6 +750,7 @@ class GoofishWsTransport:
         if websockets is None:
             raise BrowserError("WebSocket transport requires `websockets`. Install: pip install websockets")
 
+        self._ensure_async_primitives()
         while not self._stop_event.is_set():
             try:
                 self._maybe_reload_cookie(reason="connect")
@@ -823,6 +835,7 @@ class GoofishWsTransport:
                     self._ws = None
 
     async def start(self) -> None:
+        self._ensure_async_primitives()
         if self._run_task and not self._run_task.done():
             return
         self._stop_event.clear()
@@ -866,6 +879,7 @@ class GoofishWsTransport:
                     pass
 
     async def get_unread_sessions(self, limit: int = 20) -> list[dict[str, Any]]:
+        self._ensure_async_primitives()
         await self.start()
         if not self._ready.is_set() and not await self._wait_event_with_timeout(self._ready, 10.0):
             return []
@@ -891,6 +905,7 @@ class GoofishWsTransport:
         return out
 
     async def send_text(self, session_id: str, text: str) -> bool:
+        self._ensure_async_primitives()
         await self.start()
         if not self._ready.is_set() and not await self._wait_event_with_timeout(self._ready, 10.0):
             return False

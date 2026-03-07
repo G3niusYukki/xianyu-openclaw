@@ -75,30 +75,25 @@ async def test_operations_missing_branches(monkeypatch):
         return None
 
     monkeypatch.setattr(asyncio, "sleep", _no_sleep)
-    c = DummyController()
-    svc = OperationsService(controller=c)
 
-    with pytest.raises(Exception):
-        await OperationsService(controller=None).refresh_inventory()
+    no_api = OperationsService(controller=None)
 
-    c.set_click_results([True, True])
-    out = await svc.delist("p1", confirm=True)
-    assert out["success"] is True
+    inv = await no_api.refresh_inventory()
+    assert inv["success"] is False
+    assert inv["error"] == "api_client_not_configured"
 
-    c.set_click_results([False])
-    out2 = await svc.relist("p2")
+    out = await no_api.delist("p1")
+    assert out["success"] is False
+    assert out["action"] == "delist"
+
+    out2 = await no_api.relist("p2")
     assert out2["success"] is False
+    assert out2["action"] == "relist"
 
-    c.set_script_results([["id1", "id2"], None])
-    ids = await svc._extract_product_ids("p1", limit=1)
-    assert ids == ["id1"]
-    fallback = await svc._extract_product_ids("p1", limit=2)
-    assert fallback == ["unknown_1", "unknown_2"]
-
-    c.set_click_results([True, True])
-    summary = await svc.batch_polish(product_ids=["a", "b"], max_items=1)
+    summary = await no_api.batch_polish(product_ids=["a", "b"], max_items=1)
     assert summary["action"] == "batch_polish"
-    assert "total" in summary
+    assert summary["blocked"] is True
+    assert summary["total"] == 0
 
 
 @pytest.mark.asyncio
@@ -139,8 +134,7 @@ async def test_listing_missing_branches(monkeypatch):
 
     svc._click_text_option = _false
     await svc._step_select_condition("p", ["no-match"])
-    with pytest.raises(Exception):
-        await ListingService(controller=None).get_my_listings()
+    assert await ListingService(controller=None).get_my_listings() == []
 
 
 def test_media_missing_branches(tmp_path, monkeypatch):

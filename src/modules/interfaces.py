@@ -5,6 +5,8 @@ Service Interface Layer
 定义所有服务的抽象接口，实现依赖倒置原则
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any
 

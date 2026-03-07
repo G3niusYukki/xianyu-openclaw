@@ -8,7 +8,7 @@ import json
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -95,16 +95,17 @@ class WorkflowStore:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @staticmethod
     def _ts_after(seconds: int) -> str:
-        return (datetime.now(UTC) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 3000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _init_schema(self) -> None:
@@ -545,7 +546,7 @@ class WorkflowStore:
         return ordered[index]
 
     def get_sla_summary(self, window_minutes: int = 1440) -> dict[str, Any]:
-        cutoff = (datetime.now(UTC) - timedelta(minutes=max(1, window_minutes))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max(1, window_minutes))).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         with self._connect() as conn:
             rows = conn.execute(
@@ -576,7 +577,7 @@ class WorkflowStore:
 
     def _raise_alert_once(self, alert_type: str, title: str, message: str, cooldown_minutes: int = 30) -> bool:
         now = self._now()
-        cutoff = (datetime.now(UTC) - timedelta(minutes=max(1, cooldown_minutes))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max(1, cooldown_minutes))).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self._connect() as conn:
             existed = conn.execute(
                 """

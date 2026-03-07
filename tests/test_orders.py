@@ -198,8 +198,8 @@ def test_record_after_sales_followup_event(temp_dir) -> None:
 
 def test_order_physical_delivery_prefers_xianguanjia_shipping(temp_dir) -> None:
     api = Mock()
-    api.find_express_company = Mock(return_value={"express_code": "YTO", "express_name": "圆通"})
-    api.ship_order = Mock(return_value={"code": 0, "data": {"ok": True}})
+    api.list_express_companies = Mock(return_value=Mock(ok=True, data=[{"express_code": "YTO", "express_name": "圆通"}]))
+    api.delivery_order = Mock(return_value=Mock(ok=True))
 
     service = OrderFulfillmentService(db_path=str(temp_dir / "orders_ship.db"), shipping_api_client=api)
     service.upsert_order(
@@ -222,13 +222,13 @@ def test_order_physical_delivery_prefers_xianguanjia_shipping(temp_dir) -> None:
     assert delivered["status"] == "shipping"
     assert delivered["delivery"]["channel"] == "xianguanjia_api"
     assert delivered["delivery"]["action"] == "ship_order_via_xianguanjia"
-    api.ship_order.assert_called_once()
+    api.delivery_order.assert_called_once()
 
 
 def test_order_physical_delivery_falls_back_when_shipping_info_incomplete(temp_dir) -> None:
     api = Mock()
-    api.find_express_company = Mock(return_value=None)
-    api.ship_order = Mock()
+    api.list_express_companies = Mock(return_value=Mock(ok=True, data=[]))
+    api.delivery_order = Mock()
 
     service = OrderFulfillmentService(db_path=str(temp_dir / "orders_ship_fallback.db"), shipping_api_client=api)
     service.upsert_order(
@@ -245,13 +245,13 @@ def test_order_physical_delivery_falls_back_when_shipping_info_incomplete(temp_d
     assert delivered["delivery"]["channel"] == "manual_fallback"
     assert delivered["delivery"]["action"] == "create_shipping_task"
     assert delivered["delivery"]["api_error"] == "missing_waybill_no"
-    api.ship_order.assert_not_called()
+    api.delivery_order.assert_not_called()
 
 
 def test_order_callback_triggers_auto_delivery_for_paid_physical_order(temp_dir) -> None:
     api = Mock()
-    api.find_express_company = Mock(return_value={"express_code": "YTO", "express_name": "圆通"})
-    api.ship_order = Mock(return_value={"code": 0, "data": {"ok": True}})
+    api.list_express_companies = Mock(return_value=Mock(ok=True, data=[{"express_code": "YTO", "express_name": "圆通"}]))
+    api.delivery_order = Mock(return_value=Mock(ok=True))
 
     service = OrderFulfillmentService(db_path=str(temp_dir / "orders_callback.db"), shipping_api_client=api)
 
@@ -272,7 +272,7 @@ def test_order_callback_triggers_auto_delivery_for_paid_physical_order(temp_dir)
     assert out["auto_delivery_triggered"] is True
     assert out["order"]["status"] == "shipping"
     assert out["delivery"]["delivery"]["channel"] == "xianguanjia_api"
-    api.ship_order.assert_called_once()
+    api.delivery_order.assert_called_once()
 
 
 def test_order_callback_upserts_without_auto_delivery_when_disabled(temp_dir) -> None:
@@ -296,8 +296,8 @@ def test_order_callback_upserts_without_auto_delivery_when_disabled(temp_dir) ->
 
 def test_order_callback_external_event_id_is_idempotent(temp_dir) -> None:
     api = Mock()
-    api.find_express_company = Mock(return_value={"express_code": "YTO", "express_name": "圆通"})
-    api.ship_order = Mock(return_value={"code": 0, "data": {"ok": True}})
+    api.list_express_companies = Mock(return_value=Mock(ok=True, data=[{"express_code": "YTO", "express_name": "圆通"}]))
+    api.delivery_order = Mock(return_value=Mock(ok=True))
 
     service = OrderFulfillmentService(db_path=str(temp_dir / "orders_callback_idempotent.db"), shipping_api_client=api)
 
@@ -328,4 +328,4 @@ def test_order_callback_external_event_id_is_idempotent(temp_dir) -> None:
     trace = service.trace_order("o_callback_idempotent")
     status_sync_count = sum(1 for ev in trace["events"] if ev["event_type"] == "status_sync")
     assert status_sync_count == 1
-    api.ship_order.assert_called_once()
+    api.delivery_order.assert_called_once()

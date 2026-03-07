@@ -113,22 +113,16 @@ async def test_monitor_load_fail_and_health_checker_paths(temp_dir, monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_operations_service_missing_controller_and_error_paths() -> None:
+async def test_operations_service_no_api_client_returns_errors() -> None:
     service = OperationsService(controller=None)
-    with pytest.raises(Exception):
-        await service.get_listing_stats()
 
-    fc = _FakeController()
-    service = OperationsService(controller=fc)
-    service._random_delay = Mock(return_value=0)
+    stats = await service.get_listing_stats()
+    assert "error" in stats
+    assert stats["error"] == "api_client_not_configured"
 
-    fc.current_url = "https://www.goofish.com/other"
-    with pytest.raises(Exception):
-        await service._step_verify_success("p1")
-
-    fc.click_ret = False
-    out = await service.delist("pid", confirm=True)
+    out = await service.delist("pid")
     assert out["success"] is False
+    assert out["error"] == "api_client_not_configured"
 
 
 @pytest.mark.asyncio

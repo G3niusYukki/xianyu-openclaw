@@ -40,7 +40,7 @@ PROHIBITED_KEYWORDS = (
 ALLOW_WHITELIST = ("蓝牙耳机",)
 
 
-@dataclass(slots=True)
+@dataclass
 class SafetyDecision:
     prohibited: bool
     reason: str | None

@@ -1,6 +1,12 @@
+from __future__ import annotations
+
+import logging
+
 import pandas as pd
 
 from .models import Listing, ListingImage
+
+logger = logging.getLogger(__name__)
 
 
 def load_listings_from_csv(file_path: str) -> list[Listing]:
@@ -29,6 +35,6 @@ def load_listings_from_csv(file_path: str) -> list[Listing]:
             )
             listings.append(listing)
         except Exception as e:
-            print(f"Error parsing row: {row}. Error: {e}")
+            logger.warning("Error parsing row: %s. Error: %s", row, e)
 
     return listings

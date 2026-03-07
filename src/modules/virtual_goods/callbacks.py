@@ -165,8 +165,6 @@ class VirtualGoodsCallbackService:
         xcfg = self.config.get("xianguanjia", {}) if isinstance(self.config, dict) else {}
         app_key = str(xcfg.get("app_key") or "")
         app_secret = str(xcfg.get("app_secret") or "")
-        seller_id = str(xcfg.get("seller_id") or "") or None
-
         if source_family == "open_platform":
             if not app_key or not app_secret:
                 return False, sign, "missing_open_platform_secret"
@@ -176,7 +174,6 @@ class VirtualGoodsCallbackService:
                 timestamp=ts,
                 sign=sign,
                 body=raw_body,
-                seller_id=seller_id,
             )
             return ok, sign, "" if ok else "invalid_signature"
 

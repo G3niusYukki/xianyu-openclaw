@@ -5,6 +5,8 @@ Compliance Guard
 提供最小可用的规则加载、内容拦截和频率控制。
 """
 
+from __future__ import annotations
+
 import asyncio
 import time
 from functools import lru_cache
@@ -23,7 +25,7 @@ class ComplianceGuard:
         self._last_action_at: dict[str, float] = {}
         self._rules_mtime: float | None = None
         self._last_reload_check: float = 0.0
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
         self.reload()
 
     def reload(self) -> None:
@@ -106,6 +108,8 @@ class ComplianceGuard:
         return {"allowed": False, "blocked": True, "warn": False, "hits": hits, "message": message}
 
     async def _enforce_min_interval(self, action_key: str, min_interval_seconds: int) -> tuple[bool, int]:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
         now = time.time()
         async with self._lock:
             last = self._last_action_at.get(action_key, 0.0)

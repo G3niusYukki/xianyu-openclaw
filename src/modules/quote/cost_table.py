@@ -160,7 +160,7 @@ def region_of_location(value: str | None, resolver: GeoResolver | None = None) -
     return geo.province_of(name)
 
 
-@dataclass(slots=True)
+@dataclass
 class CostRecord:
     courier: str
     origin: str

@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { nodeApi, pyApi } from '../api/index';
-import { getSystemConfig } from '../api/config';
-import { CheckCircle, Circle, ArrowRight, X, Zap } from 'lucide-react';
+import { CheckCircle, Circle, ArrowRight, X, Zap, Cookie, Settings, Bot, Play, ChevronRight, RotateCcw, Info, XCircle } from 'lucide-react';
 
 const DISMISS_KEY = 'xianyu_setup_guide_dismissed';
 
@@ -15,7 +14,9 @@ export default function SetupGuide() {
     aiConfigured: null,
     cookieSet: null,
   });
+  const [details, setDetails] = useState({});
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (dismissed) return;
@@ -31,28 +32,52 @@ export default function SetupGuide() {
       aiConfigured: false,
       cookieSet: false,
     };
+    const det = {};
 
     try {
-      const res = await nodeApi.get('/health');
-      result.nodeBackend = res.data?.status === 'ok';
-    } catch { /* node backend unavailable */ }
-
-    try {
-      const res = await getSystemConfig();
+      const res = await nodeApi.get('/config');
+      result.nodeBackend = true;
       const cfg = res.data?.config || {};
       const xgj = cfg.xianguanjia || {};
-      result.xgjConfigured = !!(xgj.app_key && xgj.app_secret);
+      result.xgjConfigured = !!(xgj.app_key && !String(xgj.app_key).includes('****') && xgj.app_secret && !String(xgj.app_secret).includes('****'));
       const ai = cfg.ai || {};
-      result.aiConfigured = !!ai.api_key;
-    } catch { /* config unavailable */ }
+      result.aiConfigured = !!(ai.api_key && !String(ai.api_key).includes('****'));
+    } catch { /* node backend unavailable */ }
 
     try {
       const res = await pyApi.get('/api/status');
       result.pythonBackend = true;
-      result.cookieSet = !!res.data?.cookie_exists;
+      const cookieHealth = res.data?.cookie_health;
+      result.cookieSet = !!(cookieHealth && cookieHealth.score > 0);
+      if (cookieHealth) det.cookie = cookieHealth.message;
     } catch { /* python backend unavailable */ }
 
+    const [nodeHealth, pyHealth] = await Promise.allSettled([
+      nodeApi.get('/health/check'),
+      pyApi.get('/api/health/check'),
+    ]);
+
+    if (nodeHealth.status === 'fulfilled') {
+      const d = nodeHealth.value.data;
+      if (d.xgj) {
+        det.xgj = d.xgj.ok ? `连通 (${d.xgj.latency_ms || 0}ms)` : d.xgj.message;
+        if (result.xgjConfigured && !d.xgj.ok) result.xgjConfigured = false;
+      }
+    }
+
+    if (pyHealth.status === 'fulfilled') {
+      const d = pyHealth.value.data;
+      if (d.ai) {
+        det.ai = d.ai.ok ? `连通 (${d.ai.latency_ms || 0}ms)` : d.ai.message;
+        if (result.aiConfigured && !d.ai.ok) result.aiConfigured = false;
+      }
+      if (d.cookie && !result.cookieSet) {
+        det.cookie = d.cookie.message;
+      }
+    }
+
     setChecks(result);
+    setDetails(det);
     setLoading(false);
   };
 
@@ -63,18 +88,53 @@ export default function SetupGuide() {
 
   if (dismissed) return null;
 
-  const allDone = checks.pythonBackend && checks.xgjConfigured && checks.aiConfigured && checks.cookieSet;
+  const allDone = checks.nodeBackend && checks.pythonBackend && checks.xgjConfigured && checks.aiConfigured && checks.cookieSet;
 
   if (loading) return null;
   if (allDone) return null;
 
   const steps = [
     {
+      key: 'cookieSet',
+      label: '获取闲鱼 Cookie',
+      desc: '系统需要 Cookie 来代替你操作闲鱼平台',
+      done: checks.cookieSet,
+      action: '/accounts',
+      actionLabel: '一键获取',
+      icon: Cookie,
+      hint: '点击"一键获取"可从浏览器自动读取，也支持手动粘贴',
+    },
+    {
+      key: 'xgjConfigured',
+      label: '配置闲管家 API',
+      desc: '连接闲管家开放平台，实现消息同步和订单管理',
+      done: checks.xgjConfigured,
+      action: '/config',
+      actionLabel: '去配置',
+      icon: Settings,
+      hint: details.xgj || '前往闲管家开放平台注册应用，获取 AppKey 和 AppSecret',
+      validated: !!details.xgj,
+    },
+    {
+      key: 'aiConfigured',
+      label: '配置 AI 服务',
+      desc: '启用智能自动回复、意图识别和内容生成',
+      done: checks.aiConfigured,
+      action: '/config',
+      actionLabel: '去配置',
+      icon: Bot,
+      hint: details.ai || '支持 DeepSeek、通义千问等 OpenAI 兼容 API，填入 API Key 即可',
+      validated: !!details.ai,
+    },
+    {
       key: 'nodeBackend',
-      label: 'Node 代理（可选）',
-      desc: '用于 webhook 校验和附加 API 代理',
+      label: 'Node.js 后端',
+      desc: '配置管理和闲管家 API 代理',
       done: checks.nodeBackend,
       action: null,
+      actionLabel: null,
+      icon: null,
+      hint: '运行 ./start.sh 自动启动',
     },
     {
       key: 'pythonBackend',
@@ -82,31 +142,20 @@ export default function SetupGuide() {
       desc: '自动化引擎和消息处理',
       done: checks.pythonBackend,
       action: null,
-    },
-    {
-      key: 'xgjConfigured',
-      label: '闲管家 API 配置',
-      desc: '填入 AppKey 和 AppSecret',
-      done: checks.xgjConfigured,
-      action: '/config',
-    },
-    {
-      key: 'aiConfigured',
-      label: 'AI 服务配置',
-      desc: '配置 AI API Key 用于自动回复',
-      done: checks.aiConfigured,
-      action: '/config',
-    },
-    {
-      key: 'cookieSet',
-      label: '闲鱼 Cookie',
-      desc: '粘贴浏览器 Cookie 授权账号',
-      done: checks.cookieSet,
-      action: '/accounts',
+      actionLabel: null,
+      icon: null,
+      hint: '运行 ./start.sh 自动启动',
     },
   ];
 
   const completedCount = steps.filter(s => s.done).length;
+
+  const WORKFLOW_STEPS = [
+    { label: '获取 Cookie', icon: '1' },
+    { label: '配置闲管家', icon: '2' },
+    { label: '配置 AI', icon: '3' },
+    { label: '开始运行', icon: '4' },
+  ];
 
   return (
     <div className="xy-card mb-8 overflow-hidden border-2 border-xy-brand-200">
@@ -116,8 +165,8 @@ export default function SetupGuide() {
             <Zap className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="font-bold text-xy-text-primary">首次使用配置引导</h2>
-            <p className="text-sm text-xy-text-secondary">完成以下 {steps.length} 个步骤即可开始使用 ({completedCount}/{steps.length})</p>
+            <h2 className="font-bold text-xy-text-primary">快速上手指南</h2>
+            <p className="text-sm text-xy-text-secondary">按顺序完成以下配置即可开始自动化运营 ({completedCount}/{steps.length})</p>
           </div>
         </div>
         <button onClick={handleDismiss} className="text-xy-text-muted hover:text-xy-text-primary p-1" aria-label="关闭引导">
@@ -125,8 +174,30 @@ export default function SetupGuide() {
         </button>
       </div>
 
+      <div className="px-6 py-4 bg-xy-gray-50 border-b border-xy-border">
+        <div className="flex items-center justify-center gap-0">
+          {WORKFLOW_STEPS.map((ws, idx) => (
+            <React.Fragment key={idx}>
+              <div className="flex items-center gap-2">
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${
+                  idx < completedCount ? 'bg-green-500 text-white' : idx === completedCount ? 'bg-xy-brand-500 text-white' : 'bg-xy-gray-200 text-xy-gray-500'
+                }`}>
+                  {idx < completedCount ? '\u2713' : ws.icon}
+                </div>
+                <span className={`text-sm font-medium hidden sm:inline ${
+                  idx <= completedCount ? 'text-xy-text-primary' : 'text-xy-text-muted'
+                }`}>{ws.label}</span>
+              </div>
+              {idx < WORKFLOW_STEPS.length - 1 && (
+                <ChevronRight className={`w-4 h-4 mx-2 sm:mx-4 shrink-0 ${idx < completedCount ? 'text-green-400' : 'text-xy-gray-300'}`} />
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+
       <div className="p-6">
-        <div className="space-y-4">
+        <div className="space-y-3">
           {steps.map((step) => (
             <div
               key={step.key}
@@ -144,13 +215,19 @@ export default function SetupGuide() {
               <div className="flex-1 min-w-0">
                 <p className={`font-medium ${step.done ? 'text-green-700' : 'text-xy-text-primary'}`}>{step.label}</p>
                 <p className="text-sm text-xy-text-secondary">{step.desc}</p>
+                {!step.done && step.hint && (
+                  <p className="text-xs text-xy-text-muted mt-1 flex items-start gap-1">
+                    <Info className="w-3 h-3 mt-0.5 shrink-0" />
+                    {step.hint}
+                  </p>
+                )}
               </div>
               {!step.done && step.action && (
                 <Link
                   to={step.action}
-                  className="flex items-center gap-1 text-sm font-medium text-xy-brand-500 hover:text-xy-brand-600 flex-shrink-0"
+                  className="flex items-center gap-1 text-sm font-medium text-xy-brand-500 hover:text-xy-brand-600 flex-shrink-0 bg-xy-brand-50 px-3 py-1.5 rounded-lg hover:bg-xy-brand-100 transition-colors"
                 >
-                  去配置 <ArrowRight className="w-4 h-4" />
+                  {step.actionLabel || '去配置'} <ArrowRight className="w-4 h-4" />
                 </Link>
               )}
               {step.done && (
@@ -161,8 +238,8 @@ export default function SetupGuide() {
         </div>
 
         <div className="mt-4 flex justify-between items-center">
-          <button onClick={runChecks} className="text-sm text-xy-brand-500 hover:text-xy-brand-600 font-medium">
-            重新检测
+          <button onClick={runChecks} className="text-sm text-xy-brand-500 hover:text-xy-brand-600 font-medium flex items-center gap-1">
+            <RotateCcw className="w-3.5 h-3.5" /> 重新检测
           </button>
           <button onClick={handleDismiss} className="text-sm text-xy-text-muted hover:text-xy-text-primary">
             稍后配置，跳过引导

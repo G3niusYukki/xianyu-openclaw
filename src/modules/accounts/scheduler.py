@@ -5,6 +5,8 @@ Task Scheduler
 提供定时任务调度功能
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import uuid
