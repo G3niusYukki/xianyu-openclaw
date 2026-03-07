@@ -16,10 +16,11 @@ import re
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from src.core.logger import get_logger
 
@@ -719,7 +720,7 @@ class CookieAutoRefresher:
 
         self._send_notification(
             "Cookie 自动刷新成功",
-            f"【闲鱼自动化】✅ Cookie 已自动刷新\n来源: 浏览器数据库\n状态: 验证通过\n系统已恢复正常运行",
+            "【闲鱼自动化】✅ Cookie 已自动刷新\n来源: 浏览器数据库\n状态: 验证通过\n系统已恢复正常运行",
             event="cookie_refresh",
         )
 

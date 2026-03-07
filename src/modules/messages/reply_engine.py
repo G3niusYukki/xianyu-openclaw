@@ -149,6 +149,7 @@ class ReplyStrategyEngine:
         if self._content_service is None:
             try:
                 from src.modules.content.service import ContentService
+
                 self._content_service = ContentService()
             except Exception:
                 pass
@@ -158,6 +159,7 @@ class ReplyStrategyEngine:
         if self._compliance_guard is None:
             try:
                 from src.core.compliance import get_compliance_guard
+
                 self._compliance_guard = get_compliance_guard()
             except Exception:
                 pass
@@ -167,6 +169,7 @@ class ReplyStrategyEngine:
         if self._dedup is None and self.dedup_enabled:
             try:
                 from src.modules.messages.dedup import MessageDedup
+
                 self._dedup = MessageDedup()
             except Exception:
                 pass
@@ -176,6 +179,7 @@ class ReplyStrategyEngine:
         if self._bargain_tracker is None and self.bargain_tracking_enabled:
             try:
                 from src.modules.messages.bargain_tracker import BargainTracker
+
                 self._bargain_tracker = BargainTracker()
             except Exception:
                 pass
@@ -229,16 +233,16 @@ class ReplyStrategyEngine:
         normalized = self._normalize_text(message_text)
 
         reply = ""
-        matched_intent = "unknown"
+        _matched_intent = "unknown"
         for rule in self.rules:
             if rule.matches(normalized):
                 reply = rule.reply
-                matched_intent = rule.name
+                _matched_intent = rule.name
                 break
 
         if not reply:
             if self.ai_intent_enabled:
-                matched_intent = self._ai_classify_intent(message_text, item_title)
+                _matched_intent = self._ai_classify_intent(message_text, item_title)
 
             if self._is_virtual_context(normalized, item_title):
                 reply = self.virtual_default_reply

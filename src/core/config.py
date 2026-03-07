@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import threading
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from dotenv import load_dotenv
@@ -28,7 +28,7 @@ class Config:
     负责加载和管理应用程序的配置，支持YAML配置文件和环境变量
     """
 
-    _instance: Optional["Config"] = None
+    _instance: Config | None = None
     _lock = threading.Lock()
     _config: dict[str, Any] = {}
     _config_path: str | None = None

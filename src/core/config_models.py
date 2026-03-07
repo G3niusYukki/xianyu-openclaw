@@ -271,7 +271,7 @@ class ConfigModel(BaseModel):
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ConfigModel":
+    def from_dict(cls, data: dict[str, Any]) -> ConfigModel:
         """从字典创建配置"""
         normalized = dict(data)
         if "browser_runtime" not in normalized and "openclaw" in normalized:

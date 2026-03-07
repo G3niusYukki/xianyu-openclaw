@@ -29,13 +29,12 @@ import logging
 import yaml
 
 from src.core.config import get_config
-
-logger = logging.getLogger(__name__)
 from src.modules.messages.service import MessagesService
 from src.modules.quote.cost_table import CostTableRepository, normalize_courier_name
 from src.modules.quote.setup import DEFAULT_MARKUP_RULES, QuoteSetupService
 from src.modules.virtual_goods.service import VirtualGoodsService
 
+logger = logging.getLogger(__name__)
 MODULE_TARGETS = ("presales", "operations", "aftersales")
 
 
@@ -738,17 +737,23 @@ class MimicOps:
         metrics = self._vg_service_metrics(dashboard_result)
         errors = dashboard_result.get("errors") if isinstance(dashboard_result.get("errors"), list) else []
 
-        total_orders = self._vg_int(metrics, "total_orders")
-        total_callbacks = self._vg_int(metrics, "total_callbacks")
-        pending_callbacks = self._vg_int(metrics, "pending_callbacks")
-        processed_callbacks = self._vg_int(metrics, "processed_callbacks")
+        _total_orders = self._vg_int(metrics, "total_orders")
+        _total_callbacks = self._vg_int(metrics, "total_callbacks")
+        _pending_callbacks = self._vg_int(metrics, "pending_callbacks")
+        _processed_callbacks = self._vg_int(metrics, "processed_callbacks")
         failed_callbacks = self._vg_int(metrics, "failed_callbacks")
         timeout_backlog = self._vg_int(metrics, "timeout_backlog")
         unknown_event_kind = self._vg_int(metrics, "unknown_event_kind")
         timeout_seconds = self._vg_int(metrics, "timeout_seconds")
 
-        funnel_data = funnel_result.get("data") if isinstance(funnel_result, dict) and isinstance(funnel_result.get("data"), dict) else {}
-        funnel_stage_totals = funnel_data.get("stage_totals") if isinstance(funnel_data.get("stage_totals"), dict) else {}
+        funnel_data = (
+            funnel_result.get("data")
+            if isinstance(funnel_result, dict) and isinstance(funnel_result.get("data"), dict)
+            else {}
+        )
+        funnel_stage_totals = (
+            funnel_data.get("stage_totals") if isinstance(funnel_data.get("stage_totals"), dict) else {}
+        )
 
         exception_data = (
             exception_result.get("data")
@@ -762,10 +767,14 @@ class MimicOps:
             if isinstance(fulfillment_result, dict) and isinstance(fulfillment_result.get("data"), dict)
             else {}
         )
-        fulfillment_summary = fulfillment_data.get("summary") if isinstance(fulfillment_data.get("summary"), dict) else {}
+        fulfillment_summary = (
+            fulfillment_data.get("summary") if isinstance(fulfillment_data.get("summary"), dict) else {}
+        )
 
         product_data = (
-            product_result.get("data") if isinstance(product_result, dict) and isinstance(product_result.get("data"), dict) else {}
+            product_result.get("data")
+            if isinstance(product_result, dict) and isinstance(product_result.get("data"), dict)
+            else {}
         )
         product_summary_raw = product_data.get("summary") if isinstance(product_data.get("summary"), dict) else {}
 
@@ -789,7 +798,9 @@ class MimicOps:
                 product_field_state[key] = "placeholder"
 
         exception_pool: list[dict[str, Any]] = [x for x in exception_items if isinstance(x, dict)]
-        if unknown_event_kind > 0 and not any(str(x.get("type") or "").upper() == "UNKNOWN_EVENT_KIND" for x in exception_pool):
+        if unknown_event_kind > 0 and not any(
+            str(x.get("type") or "").upper() == "UNKNOWN_EVENT_KIND" for x in exception_pool
+        ):
             exception_pool.insert(
                 0,
                 {
@@ -799,7 +810,9 @@ class MimicOps:
                     "summary": "检测到未知事件类型回调，需人工排查映射。",
                 },
             )
-        if failed_callbacks > 0 and not any(str(x.get("type") or "").upper() == "FAILED_CALLBACK" for x in exception_pool):
+        if failed_callbacks > 0 and not any(
+            str(x.get("type") or "").upper() == "FAILED_CALLBACK" for x in exception_pool
+        ):
             exception_pool.append(
                 {
                     "priority": "P1",
@@ -808,7 +821,9 @@ class MimicOps:
                     "summary": "回调处理失败，建议优先重放失败回调。",
                 }
             )
-        if timeout_backlog > 0 and not any(str(x.get("type") or "").upper() == "TIMEOUT_BACKLOG" for x in exception_pool):
+        if timeout_backlog > 0 and not any(
+            str(x.get("type") or "").upper() == "TIMEOUT_BACKLOG" for x in exception_pool
+        ):
             exception_pool.append(
                 {
                     "priority": "P1",
@@ -830,9 +845,7 @@ class MimicOps:
                     }
                 )
 
-        stage_totals_int = {
-            str(k): self._vg_int(funnel_stage_totals, str(k)) for k in funnel_stage_totals.keys()
-        }
+        stage_totals_int = {str(k): self._vg_int(funnel_stage_totals, str(k)) for k in funnel_stage_totals.keys()}
         funnel_total = sum(stage_totals_int.values())
 
         return {
@@ -843,7 +856,7 @@ class MimicOps:
                     if isinstance(funnel_result, dict)
                     else funnel_total
                 ),
-                "source": str(((funnel_result.get("metrics") or {}).get("source") or "ops_funnel_stage_daily"))
+                "source": str((funnel_result.get("metrics") or {}).get("source") or "ops_funnel_stage_daily")
                 if isinstance(funnel_result, dict)
                 else "ops_funnel_stage_daily",
             },
@@ -856,7 +869,8 @@ class MimicOps:
                 "failed_orders": self._vg_int(fulfillment_summary, "failed_orders"),
                 "fulfillment_rate_pct": float(
                     fulfillment_summary["fulfillment_rate_pct"]
-                    if "fulfillment_rate_pct" in fulfillment_summary and fulfillment_summary["fulfillment_rate_pct"] is not None
+                    if "fulfillment_rate_pct" in fulfillment_summary
+                    and fulfillment_summary["fulfillment_rate_pct"] is not None
                     else 0.0
                 ),
                 "failure_rate_pct": float(
@@ -866,12 +880,14 @@ class MimicOps:
                 ),
                 "avg_fulfillment_seconds": float(
                     fulfillment_summary["avg_fulfillment_seconds"]
-                    if "avg_fulfillment_seconds" in fulfillment_summary and fulfillment_summary["avg_fulfillment_seconds"] is not None
+                    if "avg_fulfillment_seconds" in fulfillment_summary
+                    and fulfillment_summary["avg_fulfillment_seconds"] is not None
                     else 0.0
                 ),
                 "p95_fulfillment_seconds": float(
                     fulfillment_summary["p95_fulfillment_seconds"]
-                    if "p95_fulfillment_seconds" in fulfillment_summary and fulfillment_summary["p95_fulfillment_seconds"] is not None
+                    if "p95_fulfillment_seconds" in fulfillment_summary
+                    and fulfillment_summary["p95_fulfillment_seconds"] is not None
                     else 0.0
                 ),
             },
@@ -1014,7 +1030,9 @@ class MimicOps:
         exception_pool_raw = (
             data.get("exception_priority_pool") if isinstance(data.get("exception_priority_pool"), dict) else {}
         )
-        exception_items_raw = exception_pool_raw.get("items") if isinstance(exception_pool_raw.get("items"), list) else []
+        exception_items_raw = (
+            exception_pool_raw.get("items") if isinstance(exception_pool_raw.get("items"), list) else []
+        )
 
         callbacks_view = [
             {
@@ -1071,7 +1089,9 @@ class MimicOps:
         ][:5]
 
         exception_items = [x for x in exception_items_raw if isinstance(x, dict)]
-        if unknown_count > 0 and not any(str(x.get("type") or "").upper() == "UNKNOWN_EVENT_KIND" for x in exception_items):
+        if unknown_count > 0 and not any(
+            str(x.get("type") or "").upper() == "UNKNOWN_EVENT_KIND" for x in exception_items
+        ):
             exception_items.insert(
                 0,
                 {
@@ -3208,6 +3228,7 @@ class MimicOps:
         cookie_health_info: dict[str, Any] = {"healthy": False, "message": "未检查", "score": 0}
         try:
             from src.core.cookie_health import CookieHealthChecker
+
             if cookie_text:
                 _ck_checker = CookieHealthChecker(cookie_text, timeout_seconds=5.0)
                 _ck_result = _ck_checker.check_sync(force=False)
@@ -6233,6 +6254,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         try:
             import asyncio
             from src.modules.listing.auto_publish import AutoPublishService
+
             service = AutoPublishService(config=self._xianguanjia_service_config())
             loop = asyncio.new_event_loop()
             try:
@@ -6593,7 +6615,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 metrics_query = getattr(self.mimic_ops, "get_virtual_goods_metrics", None)
                 if callable(metrics_query):
                     result = metrics_query()
-                    payload = result if isinstance(result, dict) else _error_payload("virtual_goods metrics payload invalid")
+                    payload = (
+                        result if isinstance(result, dict) else _error_payload("virtual_goods metrics payload invalid")
+                    )
                 else:
                     aggregate_query = getattr(self.mimic_ops, "get_dashboard_readonly_aggregate", None)
                     aggregate = aggregate_query() if callable(aggregate_query) else None
@@ -6609,7 +6633,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         if not payload["success"]:
                             payload = aggregate
                     else:
-                        payload = _error_payload("virtual_goods metrics endpoint unavailable", code="VG_QUERY_NOT_AVAILABLE")
+                        payload = _error_payload(
+                            "virtual_goods metrics endpoint unavailable", code="VG_QUERY_NOT_AVAILABLE"
+                        )
                 self._send_json(payload, status=200 if payload.get("success") else 400)
                 return
 
@@ -6626,16 +6652,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
             if path == "/api/listing/templates":
                 from src.modules.listing.templates import list_templates
+
                 self._send_json({"ok": True, "templates": list_templates()})
                 return
 
             if path == "/api/health/check":
                 import time as _t
+
                 result: dict[str, Any] = {"timestamp": _now_iso()}
 
                 cookie_info: dict[str, Any] = {"ok": False, "message": "未检查"}
                 try:
                     from src.core.cookie_health import CookieHealthChecker
+
                     cookie_text = os.environ.get("XIANYU_COOKIE_1", "")
                     if not cookie_text:
                         ck = self.mimic_ops.get_cookie()
@@ -6662,6 +6691,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     if ai_key and ai_base:
                         t0 = _t.time()
                         import httpx
+
                         models_url = ai_base.rstrip("/") + "/models"
                         with httpx.Client(timeout=8.0) as hc:
                             resp = hc.get(models_url, headers={"Authorization": f"Bearer {ai_key}"})
@@ -6691,19 +6721,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     for _ in range(600):
                         if grabber is not None:
                             p = grabber.progress
-                            event = json.dumps({
-                                "stage": p.stage.value if hasattr(p.stage, "value") else str(p.stage),
-                                "message": p.message,
-                                "hint": p.hint,
-                                "progress": p.progress,
-                                "error": p.error,
-                            }, ensure_ascii=False)
+                            event = json.dumps(
+                                {
+                                    "stage": p.stage.value if hasattr(p.stage, "value") else str(p.stage),
+                                    "message": p.message,
+                                    "hint": p.hint,
+                                    "progress": p.progress,
+                                    "error": p.error,
+                                },
+                                ensure_ascii=False,
+                            )
                             self.wfile.write(f"data: {event}\n\n".encode())
                             self.wfile.flush()
                             if p.stage.value in {"success", "failed", "cancelled"}:
                                 break
                         else:
-                            event = json.dumps({"stage": "idle", "message": "未在运行", "hint": "", "progress": 0, "error": ""}, ensure_ascii=False)
+                            event = json.dumps(
+                                {"stage": "idle", "message": "未在运行", "hint": "", "progress": 0, "error": ""},
+                                ensure_ascii=False,
+                            )
                             self.wfile.write(f"data: {event}\n\n".encode())
                             self.wfile.flush()
                             break
@@ -6715,13 +6751,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/api/cookie/auto-refresh/status":
                 refresher = getattr(DashboardHandler, "_cookie_auto_refresher", None)
                 if refresher is None:
-                    self._send_json({
-                        "enabled": False,
-                        "interval_minutes": 0,
-                        "message": "自动刷新未启用（设置 COOKIE_AUTO_REFRESH=true 启用）",
-                    })
+                    self._send_json(
+                        {
+                            "enabled": False,
+                            "interval_minutes": 0,
+                            "message": "自动刷新未启用（设置 COOKIE_AUTO_REFRESH=true 启用）",
+                        }
+                    )
                 else:
                     from dataclasses import asdict
+
                     s = refresher.status()
                     self._send_json(asdict(s))
                 return
@@ -6824,15 +6863,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     return
                 diagnosis = self.mimic_ops.diagnose_cookie(cookie_text)
                 grade = diagnosis.get("grade", "F")
-                self._send_json({
-                    "ok": grade in ("A", "B"),
-                    "grade": grade,
-                    "message": diagnosis.get("message", ""),
-                    "actions": diagnosis.get("actions", []),
-                    "required_present": diagnosis.get("required_present", []),
-                    "required_missing": diagnosis.get("required_missing", []),
-                    "cookie_items": diagnosis.get("cookie_items", 0),
-                })
+                self._send_json(
+                    {
+                        "ok": grade in ("A", "B"),
+                        "grade": grade,
+                        "message": diagnosis.get("message", ""),
+                        "actions": diagnosis.get("actions", []),
+                        "required_present": diagnosis.get("required_present", []),
+                        "required_missing": diagnosis.get("required_missing", []),
+                        "cookie_items": diagnosis.get("cookie_items", 0),
+                    }
+                )
                 return
 
             if path == "/api/import-routes":
@@ -6980,6 +7021,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
                 def _run_grab() -> None:
                     import asyncio
+
                     loop = asyncio.new_event_loop()
                     try:
                         result = loop.run_until_complete(grabber.auto_grab())
@@ -7018,14 +7060,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     return
 
                 import asyncio
+
                 test_msg = "【闲鱼自动化】通知测试\n如果你看到这条消息，说明通知配置成功！"
 
                 async def _send() -> bool:
                     if channel == "feishu":
                         from src.modules.messages.notifications import FeishuNotifier
+
                         return await FeishuNotifier(webhook_url).send_text(test_msg)
                     elif channel == "wechat":
                         from src.modules.messages.notifications import WeChatNotifier
+
                         return await WeChatNotifier(webhook_url).send_text(test_msg)
                     return False
 
@@ -7068,6 +7113,7 @@ def run_server(host: str = "127.0.0.1", port: int = 8091, db_path: str | None = 
     refresher = None
     if auto_refresh_enabled:
         from src.core.cookie_grabber import CookieAutoRefresher
+
         interval = int(os.environ.get("COOKIE_REFRESH_INTERVAL", "30"))
         mimic_ops = DashboardHandler.mimic_ops
 

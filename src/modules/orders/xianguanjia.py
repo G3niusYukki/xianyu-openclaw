@@ -3,23 +3,24 @@
 已废弃 — 请使用 src.integrations.xianguanjia.open_platform_client.OpenPlatformClient。
 本文件存在签名 bug（无逗号分隔、毫秒时间戳、sort_keys=True），保留仅为向后兼容。
 """
+
 from __future__ import annotations
 
+import hashlib
+import json
+import time
 import warnings as _warnings
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
 _warnings.warn(
     "orders.xianguanjia.XianGuanJiaClient is deprecated. "
     "Use integrations.xianguanjia.open_platform_client.OpenPlatformClient instead.",
     DeprecationWarning,
     stacklevel=2,
 )
-
-import hashlib
-import json
-import time
-from dataclasses import dataclass
-from typing import Any
-
-import httpx
 
 
 def _md5_hex(value: str | bytes) -> str:

@@ -581,7 +581,7 @@ class BrowserClient:
             return []
 
 
-async def create_browser_client(config: dict[str, Any] | None = None) -> "BrowserClient":
+async def create_browser_client(config: dict[str, Any] | None = None) -> BrowserClient:
     """创建并连接浏览器客户端（支持 auto/lite/pro 运行时）。"""
     runtime = _resolve_runtime(config)
     if runtime == "pro":

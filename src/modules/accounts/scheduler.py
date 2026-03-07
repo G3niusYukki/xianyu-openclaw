@@ -85,7 +85,7 @@ class Task:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Task":
+    def from_dict(cls, data: dict) -> Task:
         """从字典创建"""
         task = cls(
             task_id=data.get("task_id"),

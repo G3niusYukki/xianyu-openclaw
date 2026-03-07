@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
@@ -22,7 +22,7 @@ class ServiceContainer:
     管理服务的注册、创建和生命周期
     """
 
-    _instance: Optional["ServiceContainer"] = None
+    _instance: ServiceContainer | None = None
     _lock = threading.Lock()
 
     def __new__(cls):
