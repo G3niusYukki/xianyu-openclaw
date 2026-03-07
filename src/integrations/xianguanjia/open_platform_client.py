@@ -1,7 +1,8 @@
-"""闲管家开放平台 Client（自研模式）。
+"""闲管家开放平台 Client（支持自研 + 商务对接两种模式）。
 
-签名规则: md5("appKey,bodyMd5,timestamp,appSecret")
-Query参数: appid, timestamp, sign
+自研模式签名: md5("appKey,bodyMd5,timestamp,appSecret")
+商务对接签名: md5("appKey,bodyMd5,timestamp,sellerId,appSecret")
+Query参数: appid, timestamp, sign, (商务对接模式额外传 seller_id)
 时间戳: 秒级 int(time.time())
 Body序列化: separators=(",",":") 压缩JSON，不排序 key
 
@@ -19,7 +20,7 @@ import httpx
 
 from .errors import is_retryable_error, map_error
 from .models import XianGuanJiaResponse
-from .signing import sign_open_platform_request
+from .signing import sign_open_platform_request, sign_business_request
 
 
 @dataclass
@@ -28,22 +29,35 @@ class OpenPlatformClient:
     app_key: str
     app_secret: str
     timeout: float = 10.0
+    mode: str = "self_developed"
+    seller_id: str = ""
 
     def _post(self, path: str, payload: dict[str, Any]) -> XianGuanJiaResponse:
         url = f"{self.base_url.rstrip('/')}{path}"
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         timestamp = str(int(time.time()))
-        sign = sign_open_platform_request(
-            app_key=self.app_key,
-            app_secret=self.app_secret,
-            timestamp=timestamp,
-            body=body,
-        )
+        if self.mode == "business" and self.seller_id:
+            sign = sign_business_request(
+                app_key=self.app_key,
+                app_secret=self.app_secret,
+                seller_id=self.seller_id,
+                timestamp=timestamp,
+                body=body,
+            )
+        else:
+            sign = sign_open_platform_request(
+                app_key=self.app_key,
+                app_secret=self.app_secret,
+                timestamp=timestamp,
+                body=body,
+            )
         params: dict[str, str] = {
             "appid": self.app_key,
             "timestamp": timestamp,
             "sign": sign,
         }
+        if self.mode == "business" and self.seller_id:
+            params["seller_id"] = self.seller_id
         try:
             resp = httpx.post(
                 url,

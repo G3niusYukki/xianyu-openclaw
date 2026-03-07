@@ -155,11 +155,15 @@ class ListingService:
         app_secret = str(cfg.get("app_secret", "")).strip()
         if not app_key or not app_secret:
             return None
+        mode = str(cfg.get("mode", "self_developed")).strip() or "self_developed"
+        seller_id = str(cfg.get("seller_id", "")).strip()
         return OpenPlatformClient(
             base_url=str(cfg.get("base_url", "https://open.goofish.pro")).strip(),
             app_key=app_key,
             app_secret=app_secret,
             timeout=float(cfg.get("timeout", 30.0)),
+            mode=mode,
+            seller_id=seller_id,
         )
 
     def _build_mapping_store(self):

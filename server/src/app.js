@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -36,45 +37,76 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/api/health/check', async (req, res) => {
-  const result = { timestamp: new Date().toISOString() };
+  const pyUrl = process.env.PY_API_URL || 'http://localhost:8091';
+  try {
+    const pyResp = await axios.get(`${pyUrl}/api/health/check`, { timeout: 12000 });
+    const data = pyResp.data || {};
+    data.node = { ok: true, message: '运行中' };
+    if (!data.services) data.services = {};
+    data.services.python = { ok: true, message: '运行中' };
+    res.json(data);
+  } catch (err) {
+    res.json({
+      timestamp: new Date().toISOString(),
+      node: { ok: true, message: '运行中' },
+      services: { python: { ok: false, message: err.code === 'ECONNREFUSED' ? '服务未启动' : (err.message || '连接失败') } },
+      python: { ok: false, message: err.code === 'ECONNREFUSED' ? '服务未启动' : (err.message || '连接失败') },
+      cookie: { ok: false, message: 'Python 服务不可达' },
+      ai: { ok: false, message: 'Python 服务不可达' },
+      xgj: { ok: false, message: 'Python 服务不可达' },
+    });
+  }
+});
 
-  result.node = { ok: true, message: '运行中' };
-
-  // Python backend connectivity
+app.get('/api/service-status', async (req, res) => {
   try {
     const pyUrl = process.env.PY_API_URL || 'http://localhost:8091';
-    const pyResp = await axios.get(`${pyUrl}/healthz`, { timeout: 5000 });
-    result.python = { ok: pyResp.data?.status === 'ok', message: pyResp.data?.status || 'unknown' };
-  } catch (err) {
-    result.python = { ok: false, message: err.code === 'ECONNREFUSED' ? '服务未启动' : (err.message || '连接失败') };
+    const resp = await axios.get(`${pyUrl}/api/status`, { timeout: 5000 });
+    res.json(resp.data);
+  } catch {
+    res.json({ service_status: 'unknown' });
   }
+});
 
-  try {
-    const cfg = loadXgjConfig();
-    if (!cfg.appKey || !cfg.appSecret) {
-      result.xgj = { ok: false, message: 'AppKey 或 AppSecret 未配置' };
+app.use('/api', (req, res) => {
+  const pyBase = process.env.PY_API_URL || 'http://localhost:8091';
+  const target = new URL(pyBase);
+
+  const headers = { ...req.headers, host: target.host };
+  let body = null;
+  let pipe = false;
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (req.is('json') && req.body) {
+      body = JSON.stringify(req.body);
+      headers['content-type'] = 'application/json';
+      headers['content-length'] = String(Buffer.byteLength(body));
     } else {
-      const ts = Date.now().toString();
-      const body = JSON.stringify({ method: 'health.check' });
-      const sign = signRequest(cfg.appKey, cfg.appSecret, body, ts);
-      const t0 = Date.now();
-      const xgjResp = await axios.post(`${cfg.baseUrl}/api/open/proxy`, body, {
-        headers: { 'Content-Type': 'application/json', 'x-app-key': cfg.appKey, 'x-timestamp': ts, 'x-sign': sign },
-        timeout: 8000,
-        validateStatus: () => true,
-      });
-      const latency = Date.now() - t0;
-      if (xgjResp.status < 500) {
-        result.xgj = { ok: true, message: '连通', latency_ms: latency };
-      } else {
-        result.xgj = { ok: false, message: `HTTP ${xgjResp.status}`, latency_ms: latency };
-      }
+      pipe = true;
     }
-  } catch (err) {
-    result.xgj = { ok: false, message: err.code === 'ECONNREFUSED' ? '闲管家服务不可达' : (err.message || '连接失败') };
   }
 
-  res.json(result);
+  const proxyReq = http.request({
+    hostname: target.hostname,
+    port: target.port,
+    path: req.originalUrl,
+    method: req.method,
+    headers,
+    timeout: 15000,
+  }, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on('error', (err) => {
+    if (!res.headersSent) {
+      res.status(502).json({ error: 'Python backend unavailable', detail: err.message });
+    }
+  });
+
+  if (pipe) req.pipe(proxyReq);
+  else if (body) proxyReq.end(body);
+  else proxyReq.end();
 });
 
 app.use((err, req, res, next) => {

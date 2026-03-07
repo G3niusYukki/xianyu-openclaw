@@ -1,0 +1,83 @@
+id: exchange
+name: 兑换码/卡密
+icon: "\U0001F511"
+description: 游戏兑换码、充值卡密等虚拟商品
+
+features:
+  virtual_goods_inventory: true
+  auto_delivery_code: true
+  code_stock_management: true
+  duplicate_detection: true
+  usage_verification: true
+
+  auto_reply: true
+  ai_reply: true
+  auto_publish: true
+  order_management: true
+
+ai_prompts:
+  system_role: |
+    你是闲鱼虚拟商品（兑换码/卡密）店铺的智能客服。请根据以下规则回答：
+    1. 解答商品使用方法和兑换流程
+    2. 确认商品类型和适用平台
+    3. 说明兑换有效期和使用限制
+    4. 处理兑换失败的售后咨询
+    5. 禁止透露具体卡密内容
+    6. 使用温和友好的语气
+  greeting: "您好！欢迎咨询。请问您对哪款商品感兴趣？购买后系统将自动发送兑换码到您的聊天窗口。"
+
+compliance:
+  forbidden_keywords:
+    - 外挂
+    - 作弊
+    - 盗号
+    - 破解
+  required_disclaimers:
+    - "虚拟商品一经兑换不支持退款"
+    - "请在有效期内使用"
+  max_title_length: 30
+  require_platform_info: true
+
+listing_templates:
+  - name: 兑换码通用
+    title_pattern: "{platform} {product_name} 兑换码 秒发"
+    description_template: |
+      【{platform}】{product_name} 兑换码
+      ✅ 自动发货，购买后秒发
+      ✅ 官方正品，安全可靠
+
+      【使用方法】
+      {redeem_instructions}
+
+      【注意事项】
+      - 虚拟商品一经兑换不支持退款
+      - 请在有效期内使用
+      - 一个账号仅限兑换一次
+    fields:
+      - { key: platform, label: 适用平台, required: true }
+      - { key: product_name, label: 商品名称, required: true }
+      - { key: redeem_instructions, label: 兑换说明, required: true }
+
+  - name: 充值卡密
+    title_pattern: "{platform} {amount}元 充值卡 自动发货"
+    description_template: |
+      {platform} 充值卡 面值{amount}元
+      ✅ 官方渠道，安全充值
+      ✅ 自动发货，即买即用
+
+      【充值流程】
+      {charge_steps}
+
+      ⚠️ 虚拟商品一经使用不支持退款
+    fields:
+      - { key: platform, label: 充值平台, required: true }
+      - { key: amount, label: 面值(元), required: true }
+      - { key: charge_steps, label: 充值步骤, required: true }
+
+order_flow:
+  auto_confirm: true
+  auto_deliver: true
+  deliver_delay_seconds: 5
+  retry_on_failure: true
+  max_retries: 3
+  verify_after_delivery: true

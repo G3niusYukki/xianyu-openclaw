@@ -1,6 +1,7 @@
 """闲管家签名与验签工具。
 
 开放平台（自研模式）: md5("appKey,bodyMd5,timestamp,appSecret")
+开放平台（商务对接模式）: md5("appKey,bodyMd5,timestamp,sellerId,appSecret")
 虚拟货源（已废弃，仅保留兼容）: md5("app_id,app_secret,bodyMd5,timestamp,mch_id,mch_secret")
 
 参考文档: docs/xianguanjiajieruapi.md 签名规则说明
@@ -13,8 +14,10 @@ import hmac
 
 __all__ = [
     "sign_open_platform_request",
+    "sign_business_request",
     "sign_virtual_supply_request",
     "verify_open_platform_callback_signature",
+    "verify_business_callback_signature",
     "verify_virtual_supply_callback_signature",
 ]
 
@@ -44,6 +47,22 @@ def sign_open_platform_request(
     sign = md5("appKey,bodyMd5,timestamp,appSecret")
     """
     parts = [str(app_key), _body_md5(body), str(timestamp), str(app_secret)]
+    return _md5_hex(",".join(parts))
+
+
+def sign_business_request(
+    *,
+    app_key: str,
+    app_secret: str,
+    seller_id: str,
+    timestamp: str | int,
+    body: str | bytes | None,
+) -> str:
+    """开放平台请求签名（商务对接模式，含 sellerId）。
+
+    sign = md5("appKey,bodyMd5,timestamp,sellerId,appSecret")
+    """
+    parts = [str(app_key), _body_md5(body), str(timestamp), str(seller_id), str(app_secret)]
     return _md5_hex(",".join(parts))
 
 
@@ -82,6 +101,26 @@ def verify_open_platform_callback_signature(
     expected = sign_open_platform_request(
         app_key=app_key,
         app_secret=app_secret,
+        timestamp=timestamp,
+        body=body,
+    )
+    return hmac.compare_digest(expected, str(sign).strip().lower())
+
+
+def verify_business_callback_signature(
+    *,
+    app_key: str,
+    app_secret: str,
+    seller_id: str,
+    timestamp: str | int,
+    sign: str,
+    body: str | bytes | None,
+) -> bool:
+    """校验开放平台回调签名（商务对接模式，含 sellerId）。"""
+    expected = sign_business_request(
+        app_key=app_key,
+        app_secret=app_secret,
+        seller_id=seller_id,
         timestamp=timestamp,
         body=body,
     )

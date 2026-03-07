@@ -35,23 +35,9 @@ function writeConfig(data) {
 
 const SENSITIVE_KEYS = ['app_secret', 'api_key', 'access_key_secret', 'mch_secret', 'webhook'];
 
-function maskSensitive(obj) {
-  if (!obj || typeof obj !== 'object') return obj;
-  const result = Array.isArray(obj) ? [...obj] : { ...obj };
-  for (const key of Object.keys(result)) {
-    if (SENSITIVE_KEYS.some(s => key.toLowerCase().includes(s))) {
-      const val = String(result[key] || '');
-      result[key] = val.length > 8 ? val.slice(0, 4) + '****' + val.slice(-4) : '****';
-    } else if (typeof result[key] === 'object') {
-      result[key] = maskSensitive(result[key]);
-    }
-  }
-  return result;
-}
-
 router.get('/', (req, res) => {
   const config = readConfig();
-  res.json({ ok: true, config: maskSensitive(config) });
+  res.json({ ok: true, config });
 });
 
 router.put('/', (req, res) => {
@@ -66,6 +52,10 @@ router.put('/', (req, res) => {
       const clean = {};
       for (const [k, v] of Object.entries(values)) {
         if (typeof k === 'string' && !k.startsWith('__')) {
+          if (SENSITIVE_KEYS.some(s => k.toLowerCase().includes(s))
+              && typeof v === 'string' && v.includes('****')) {
+            continue;
+          }
           clean[k] = v;
         }
       }
@@ -74,7 +64,7 @@ router.put('/', (req, res) => {
   }
 
   writeConfig(current);
-  res.json({ ok: true, message: 'Configuration updated', config: maskSensitive(current) });
+  res.json({ ok: true, message: 'Configuration updated', config: current });
 });
 
 router.get('/sections', (req, res) => {
@@ -85,18 +75,20 @@ router.get('/sections', (req, res) => {
         key: 'xianguanjia',
         name: '闲管家配置',
         fields: [
-          { key: 'app_key', label: 'AppKey', type: 'text', required: true },
-          { key: 'app_secret', label: 'AppSecret', type: 'password', required: true },
-          { key: 'base_url', label: 'API 网关', type: 'text', default: 'https://open.goofish.pro' },
+          { key: 'mode', label: '接入模式', type: 'select', options: ['self_developed', 'business'], default: 'self_developed', labels: { self_developed: '自研应用', business: '商务对接' }, hint: '自研应用：个人或自有 ERP 直连；商务对接：第三方代商家接入' },
+          { key: 'app_key', label: 'AppKey', type: 'text', required: true, hint: '在闲管家开放平台创建应用后获取' },
+          { key: 'app_secret', label: 'AppSecret', type: 'password', required: true, hint: '应用密钥，请妥善保管不要泄露' },
+          { key: 'seller_id', label: '商家 ID (Seller ID)', type: 'text', required_when: { mode: 'business' }, hint: '商务对接模式下的商家标识，自研模式无需填写' },
+          { key: 'base_url', label: 'API 网关', type: 'text', default: 'https://open.goofish.pro', hint: '默认无需修改，仅在私有化部署时更改' },
         ],
       },
       {
         key: 'ai',
         name: 'AI 配置',
         fields: [
-          { key: 'provider', label: '提供商', type: 'select', options: ['qwen', 'glm', 'deepseek', 'openai', 'moonshot', 'yi'], default: 'qwen' },
-          { key: 'api_key', label: 'API Key', type: 'password', required: true },
-          { key: 'model', label: '模型', type: 'text', default: 'qwen-plus-latest' },
+          { key: 'provider', label: '提供商', type: 'select', options: ['qwen', 'deepseek', 'openai'], default: 'qwen', labels: { qwen: '百炼千问 (Qwen)', deepseek: 'DeepSeek', openai: 'OpenAI' } },
+          { key: 'api_key', label: 'API Key', type: 'text', required: true },
+          { key: 'model', label: '模型', type: 'combobox', default: 'qwen-plus-latest', options: ['qwen-plus-latest', 'qwen-max-latest', 'qwen-turbo-latest', 'qwen-flash', 'qwen3-max', 'qwen3.5-plus', 'qwq-plus-latest'] },
           { key: 'base_url', label: 'API 地址', type: 'text', placeholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
         ],
       },

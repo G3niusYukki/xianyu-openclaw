@@ -1,9 +1,24 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { nodeApi, pyApi } from '../api/index';
+import { api } from '../api/index';
 
 const POLL_INTERVAL = 60_000;
 
-const EMPTY = {
+export interface ServiceHealth {
+  ok: boolean;
+  message: string;
+}
+
+export interface HealthState {
+  loading: boolean;
+  lastChecked: string | null;
+  node: ServiceHealth;
+  python: ServiceHealth;
+  cookie: ServiceHealth;
+  ai: ServiceHealth;
+  xgj: ServiceHealth;
+}
+
+const EMPTY: HealthState = {
   loading: true,
   lastChecked: null,
   node:   { ok: false, message: '检查中...' },
@@ -14,47 +29,30 @@ const EMPTY = {
 };
 
 export default function useHealthCheck(enabled = true) {
-  const [health, setHealth] = useState(EMPTY);
-  const timerRef = useRef(null);
+  const [health, setHealth] = useState<HealthState>(EMPTY);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
 
   const check = useCallback(async () => {
-    const next = { loading: false, lastChecked: new Date().toISOString() };
+    const next: Partial<HealthState> = { loading: false, lastChecked: new Date().toISOString() };
 
-    const [nodeRes, pyRes] = await Promise.allSettled([
-      nodeApi.get('/health/check'),
-      pyApi.get('/api/health/check'),
-    ]);
-
-    if (!mountedRef.current) return;
-
-    if (nodeRes.status === 'fulfilled') {
-      const d = nodeRes.value.data;
+    try {
+      const res = await api.get('/health/check');
+      const d = res.data;
       next.node   = d.node   || { ok: true, message: '运行中' };
-      next.python = d.python || { ok: false, message: '未知' };
+      next.python = d.services?.python || d.python || { ok: false, message: '未检查' };
       next.xgj    = d.xgj    || { ok: false, message: '未检查' };
-    } else {
+      next.cookie  = d.cookie || { ok: false, message: '未检查' };
+      next.ai      = d.ai     || { ok: false, message: '未检查' };
+    } catch {
       next.node   = { ok: false, message: '不可达' };
-      next.python = { ok: false, message: '未知' };
+      next.python = { ok: false, message: '不可达' };
       next.xgj    = { ok: false, message: '未知' };
-    }
-
-    if (pyRes.status === 'fulfilled') {
-      const d = pyRes.value.data;
-      next.cookie = d.cookie || { ok: false, message: '未知' };
-      next.ai     = d.ai     || { ok: false, message: '未知' };
-      if (!next.python.ok && d.services?.python?.ok) {
-        next.python = d.services.python;
-      }
-    } else {
       next.cookie = { ok: false, message: '后端不可达' };
       next.ai     = { ok: false, message: '后端不可达' };
-      if (!next.python?.ok) {
-        next.python = { ok: false, message: '不可达' };
-      }
     }
 
-    setHealth(next);
+    if (mountedRef.current) setHealth(next as HealthState);
   }, []);
 
   useEffect(() => {
@@ -64,7 +62,7 @@ export default function useHealthCheck(enabled = true) {
     timerRef.current = setInterval(check, POLL_INTERVAL);
     return () => {
       mountedRef.current = false;
-      clearInterval(timerRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [enabled, check]);
 

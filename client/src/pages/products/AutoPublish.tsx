@@ -7,7 +7,7 @@ import { Wand2, Image as ImageIcon, Send, RefreshCw, AlertCircle } from 'lucide-
 export default function AutoPublish() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
-  const [categories, setCategories] = useState([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     category: 'exchange',
@@ -16,10 +16,9 @@ export default function AutoPublish() {
     features: '',
     extra_info: ''
   });
-  const [preview, setPreview] = useState(null);
+  const [preview, setPreview] = useState<any>(null);
 
   useEffect(() => {
-    // 载入模板
     getTemplates()
       .then(res => setCategories(res.data.templates || []))
       .catch(err => {
@@ -50,7 +49,7 @@ export default function AutoPublish() {
       } else {
         toast.error(res.data?.error || '生成失败');
       }
-    } catch (e) {
+    } catch (e: any) {
       toast.error(e.message || '生成预览失败');
     } finally {
       setLoading(false);
@@ -64,11 +63,11 @@ export default function AutoPublish() {
       const res = await publishListing({ preview_data: preview });
       if (res.data?.ok) {
         toast.success('发布成功');
-        setStep(3); // 完成页面
+        setStep(3);
       } else {
         toast.error(res.data?.error || '发布失败');
       }
-    } catch (e) {
+    } catch (e: any) {
       toast.error(e.message || '发布失败');
     } finally {
       setLoading(false);
@@ -79,7 +78,6 @@ export default function AutoPublish() {
     <div className="xy-page max-w-4xl xy-enter">
       <h1 className="xy-title mb-6">AI 智能自动上架</h1>
       
-      {/* 进度条 */}
       <div className="flex items-center mb-8 bg-xy-surface p-4 rounded-xl shadow-sm border border-xy-border">
         <div className={`flex items-center ${step >= 1 ? 'text-xy-brand-500' : 'text-xy-text-muted'}`}>
           <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 font-bold ${step >= 1 ? 'border-xy-brand-500 bg-xy-brand-50' : 'border-xy-text-muted'}`}>1</div>
@@ -162,14 +160,14 @@ export default function AutoPublish() {
           </div>
 
           <div className="pt-4 flex justify-end">
-            <button 
-              onClick={handleGeneratePreview}
-              disabled={loading}
-              className="xy-btn-primary px-6 py-2.5 flex items-center gap-2"
-            >
-              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-              AI 智能生成
-            </button>
+              <button 
+                onClick={handleGeneratePreview}
+                disabled={loading}
+                className="xy-btn-primary px-6 py-2.5 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                AI 智能生成
+              </button>
           </div>
         </div>
       )}
@@ -187,14 +185,12 @@ export default function AutoPublish() {
           )}
           
           <div className="grid md:grid-cols-5 gap-6">
-            {/* 左侧：预览图 */}
             <div className="md:col-span-2 space-y-3">
               <h3 className="font-semibold text-xy-text-primary flex items-center gap-2">
                 <ImageIcon className="w-4 h-4" /> 主图预览
               </h3>
               <div className="bg-xy-gray-100 rounded-xl overflow-hidden border border-xy-border relative">
                 <div className="aspect-[3/4] flex items-center justify-center">
-                  {/* 在生产中我们会先传OSS或有个临时链接，这里如果是本地绝对路径或者直接二进制就不太好展示，暂用占位或通过 Python 后端代理 */}
                   <div className="text-xy-text-secondary text-sm">
                     (图片已生成：{preview.local_images?.length}张)
                   </div>
@@ -202,7 +198,6 @@ export default function AutoPublish() {
               </div>
             </div>
 
-            {/* 右侧：文案编辑 */}
             <div className="md:col-span-3 space-y-4">
               <div className="xy-card p-5">
                 <label className="xy-label text-xy-brand-600 flex items-center gap-1.5"><Wand2 className="w-4 h-4"/> 优化后的标题</label>
@@ -242,7 +237,7 @@ export default function AutoPublish() {
               <button 
                 onClick={handlePublish}
                 disabled={loading || preview.compliance?.blocked}
-                className="xy-btn-primary px-6 py-2 flex items-center gap-2"
+                className="xy-btn-primary px-6 py-2 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 发布到闲鱼

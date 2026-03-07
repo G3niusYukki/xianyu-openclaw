@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { pyApi } from '../../api/index';
-import { nodeApi } from '../../api/index';
+import { api } from '../../api/index';
 import { Store, Plus, Settings, Power, PowerOff, ShieldAlert, RefreshCw, Zap, Loader2, CheckCircle, XCircle, Monitor, ClipboardPaste, Timer, Activity } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -21,19 +20,19 @@ const GRAB_STAGE_CONFIG = {
 export default function AccountList() {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [cookieMode, setCookieMode] = useState(null);
+  const [cookieMode, setCookieMode] = useState<string | null>(null);
   const [newCookie, setNewCookie] = useState('');
   const [saving, setSaving] = useState(false);
   const [grabbing, setGrabbing] = useState(false);
-  const [grabProgress, setGrabProgress] = useState(null);
-  const [autoRefresh, setAutoRefresh] = useState(null);
-  const eventSourceRef = useRef(null);
-  const refreshTimerRef = useRef(null);
+  const [grabProgress, setGrabProgress] = useState<any>(null);
+  const [autoRefresh, setAutoRefresh] = useState<any>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const navigate = useNavigate();
 
   const fetchAutoRefreshStatus = useCallback(async () => {
     try {
-      const res = await pyApi.get('/api/cookie/auto-refresh/status');
+      const res = await api.get('/cookie/auto-refresh/status');
       setAutoRefresh(res.data);
     } catch {
       setAutoRefresh(null);
@@ -53,7 +52,7 @@ export default function AccountList() {
   const fetchAccounts = async () => {
     setLoading(true);
     try {
-      const res = await nodeApi.get('/config');
+      const res = await api.get('/config');
       const cfg = res.data?.config || {};
       const xgj = cfg.xianguanjia || {};
       const configured = !!(xgj.app_key && xgj.app_secret && !String(xgj.app_key).includes('****'));
@@ -70,10 +69,10 @@ export default function AccountList() {
     }
   };
 
-  const toggleAutomation = async (currentStatus) => {
+  const toggleAutomation = async (currentStatus: boolean) => {
     try {
       const action = currentStatus ? 'stop' : 'start';
-      await pyApi.post('/api/module/control', { action, target: 'presales' });
+      await api.post('/module/control', { action, target: 'presales' });
       toast.success(`已${currentStatus ? '停用' : '启用'}自动化服务`);
       fetchAccounts();
     } catch {
@@ -88,7 +87,7 @@ export default function AccountList() {
     }
     setSaving(true);
     try {
-      await pyApi.post('/api/update-cookie', { cookie: newCookie });
+      await api.post('/update-cookie', { cookie: newCookie });
       toast.success('Cookie 已保存');
       setCookieMode(null);
       setNewCookie('');
@@ -105,8 +104,8 @@ export default function AccountList() {
     setGrabProgress({ stage: 'reading_db', message: '正在启动...', hint: '', progress: 0 });
 
     try {
-      await pyApi.post('/api/cookie/auto-grab');
-    } catch (err) {
+      await api.post('/cookie/auto-grab');
+    } catch (err: any) {
       if (err?.response?.status === 409) {
         toast.error('已有获取任务在运行');
       } else {
@@ -117,8 +116,7 @@ export default function AccountList() {
       }
     }
 
-    const pyBase = pyApi.defaults.baseURL || 'http://localhost:8091';
-    const es = new EventSource(`${pyBase}/api/cookie/auto-grab/status`);
+    const es = new EventSource('/api/cookie/auto-grab/status');
     eventSourceRef.current = es;
 
     es.onmessage = (event) => {
@@ -146,7 +144,7 @@ export default function AccountList() {
 
   const cancelAutoGrab = async () => {
     try {
-      await pyApi.post('/api/cookie/auto-grab/cancel');
+      await api.post('/cookie/auto-grab/cancel');
     } catch {}
     if (eventSourceRef.current) eventSourceRef.current.close();
     setGrabbing(false);
@@ -155,8 +153,19 @@ export default function AccountList() {
 
   if (loading) {
     return (
-      <div className="xy-page xy-enter flex items-center justify-center min-h-[50vh]">
-        <RefreshCw className="w-8 h-8 animate-spin text-xy-brand-500" />
+      <div className="xy-page xy-enter max-w-5xl">
+        <div className="flex justify-between mb-6">
+          <div className="w-1/3">
+            <div className="h-8 bg-xy-gray-200 rounded-lg w-1/2 mb-2 animate-pulse"></div>
+            <div className="h-4 bg-xy-gray-200 rounded w-2/3 animate-pulse"></div>
+          </div>
+          <div className="h-10 bg-xy-gray-200 rounded-xl w-32 animate-pulse"></div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1].map(i => (
+            <div key={i} className="xy-card p-5 h-48 bg-xy-gray-50 animate-pulse border-none"></div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -174,12 +183,12 @@ export default function AccountList() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {accounts.map(acc => (
+        {accounts.map((acc: any) => (
           <div key={acc.id} className="xy-card p-5 relative overflow-hidden ring-2 ring-xy-brand-500 ring-offset-2">
             <div className="absolute top-0 right-0 bg-xy-brand-500 text-white text-[10px] font-bold px-3 py-1 rounded-bl-lg z-10">
               当前店铺
             </div>
-            
+
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="p-3 rounded-xl bg-orange-50">
@@ -205,14 +214,14 @@ export default function AccountList() {
             </div>
 
             <div className="flex gap-2 pt-4 border-t border-xy-border">
-              <button 
+              <button
                 onClick={() => navigate('/config')}
                 className="flex-1 py-2 text-sm font-medium rounded-lg bg-xy-surface border border-xy-border hover:bg-xy-gray-50 flex items-center justify-center gap-1.5"
               >
                 <Settings className="w-4 h-4" /> 配置
               </button>
-              
-              <button 
+
+              <button
                 onClick={() => toggleAutomation(acc.enabled)}
                 className={`p-2 border rounded-lg transition-colors ${acc.enabled ? 'border-xy-border text-red-500 hover:bg-red-50' : 'border-xy-border text-green-600 hover:bg-green-50'}`}
                 title={acc.enabled ? "停用自动化" : "启用自动化"}
@@ -464,8 +473,8 @@ export default function AccountList() {
               </div>
               <div>
                 <label className="xy-label">闲鱼 Cookie</label>
-                <textarea 
-                  className="xy-input px-3 py-2 h-32 resize-none" 
+                <textarea
+                  className="xy-input px-3 py-2 h-32 resize-none"
                   placeholder={"支持多种格式粘贴，例如：\n• key1=value1; key2=value2\n• [{\"name\":\"key1\",\"value\":\"value1\"}]\n• Netscape cookies.txt 内容"}
                   value={newCookie}
                   onChange={e => setNewCookie(e.target.value)}
@@ -477,8 +486,8 @@ export default function AccountList() {
             </div>
             <div className="px-6 py-4 bg-xy-gray-50 border-t border-xy-border flex justify-end gap-3">
               <button onClick={() => setCookieMode(null)} className="xy-btn-secondary">取消</button>
-              <button 
-                onClick={handleSaveCookie} 
+              <button
+                onClick={handleSaveCookie}
                 disabled={saving}
                 className="xy-btn-primary disabled:opacity-50"
               >

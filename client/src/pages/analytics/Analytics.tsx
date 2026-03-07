@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getTrendData, getTopProducts } from '../../api/dashboard';
-import { TrendingUp, BarChart2, Calendar, RefreshCw } from 'lucide-react';
+import { TrendingUp, BarChart2, Calendar, RefreshCw, Package } from 'lucide-react';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import toast from 'react-hot-toast';
 
 export default function Analytics() {
@@ -23,12 +24,12 @@ export default function Analytics() {
       ]);
       
       if (trendRes.data) {
-        const trend = Array.isArray(trendRes.data) ? trendRes.data : (trendRes.data.trend || []);
-        setTrendData(trend);
+        const td = trendRes.data.data || trendRes.data;
+        setTrendData(Array.isArray(td) ? td : (td.trend || []));
       }
       if (topRes.data) {
-        const products = Array.isArray(topRes.data) ? topRes.data : (topRes.data.products || []);
-        setTopProducts(products);
+        const tp = topRes.data.data || topRes.data;
+        setTopProducts(Array.isArray(tp) ? tp : (tp.products || []));
       }
     } catch (e) {
       toast.error('加载分析数据失败');
@@ -84,24 +85,21 @@ export default function Analytics() {
             </div>
           </div>
           
-          <div className="h-64 flex items-end justify-between gap-1 mt-4 border-b border-xy-border pb-2 relative">
+          <div className="h-64 mt-4 relative">
             {loading ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-white/50">
+              <div className="absolute inset-0 flex items-center justify-center bg-white/50 z-10">
                 <RefreshCw className="w-6 h-6 animate-spin text-xy-brand-500" />
               </div>
             ) : trendData.length > 0 ? (
-              trendData.map((day, i) => (
-                <div key={i} className="w-full flex flex-col items-center group relative">
-                  <div 
-                    className="w-full bg-xy-brand-200 group-hover:bg-xy-brand-400 transition-colors rounded-t-sm"
-                    style={{ height: `${Math.max(5, (day.value / Math.max(...trendData.map(d=>d.value))) * 100)}%` }}
-                  ></div>
-                  {/* Tooltip */}
-                  <div className="opacity-0 group-hover:opacity-100 absolute bottom-full mb-2 bg-xy-gray-900 text-white text-xs py-1 px-2 rounded whitespace-nowrap z-10 pointer-events-none transition-opacity">
-                    {day.date}: {day.value}
-                  </div>
-                </div>
-              ))
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={trendData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tickFormatter={(v: string) => v.slice(5)} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
+                  <Tooltip labelFormatter={(v: string) => `日期: ${v}`} contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }} />
+                  <Bar dataKey="value" fill="#f97316" radius={[4, 4, 0, 0]} name={metric === 'views' ? '浏览量' : metric === 'wants' ? '想要数' : '成交量'} />
+                </BarChart>
+              </ResponsiveContainer>
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center text-xy-text-muted">
                 <Calendar className="w-8 h-8 mb-2" />
@@ -126,8 +124,8 @@ export default function Analytics() {
                   <div className="w-6 h-6 rounded-full bg-xy-gray-100 flex items-center justify-center text-xs font-bold text-xy-text-secondary flex-shrink-0">
                     {idx + 1}
                   </div>
-                  <div className="w-12 h-12 bg-xy-gray-200 rounded border border-xy-border overflow-hidden flex-shrink-0">
-                    {p.pic_url && <img src={p.pic_url} className="w-full h-full object-cover" alt="" />}
+                  <div className="w-12 h-12 bg-xy-gray-200 rounded border border-xy-border overflow-hidden flex-shrink-0 flex items-center justify-center">
+                    {p.pic_url ? <img src={p.pic_url} className="w-full h-full object-cover" alt="" /> : <Package className="w-5 h-5 text-xy-gray-400" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-xy-text-primary truncate">{p.title}</p>

@@ -1,0 +1,63 @@
+id: express
+name: 快递代发
+icon: "\U0001F4E6"
+description: 转转、闲鱼代发快递包裹
+
+features:
+  route_management: true
+  markup_rules: true
+  auto_ship: true
+  address_book: true
+  logistics_tracking: true
+  weight_calculation: true
+  pricing_engine: true
+
+  auto_reply: true
+  ai_reply: true
+  auto_publish: true
+  order_management: true
+
+ai_prompts:
+  system_role: |
+    你是闲鱼快递代发店铺的智能客服。请根据以下规则回答买家消息：
+    1. 主要处理快递代发业务咨询
+    2. 核实始发地、目的地、重量后报价
+    3. 提供物流时效估算
+    4. 解答运费、寄件流程等常见问题
+    5. 禁止承诺无法保证的事项（如必达时效）
+  greeting: "您好！我们提供全国快递代发服务，请问您需要寄什么快递？告诉我始发地、目的地和大概重量，我帮您查询报价。"
+
+compliance:
+  forbidden_keywords:
+    - 违禁品
+    - 管制刀具
+    - 烟草
+    - 易燃易爆
+  required_disclaimers:
+    - "实际运费以快递公司结算为准"
+    - "时效为估算值，不作为承诺"
+  max_title_length: 30
+  require_weight_range: true
+
+listing_templates:
+  - name: 快递代发通用
+    title_pattern: "{origin}发{destination} {carrier} 快递代发"
+    description_template: |
+      {origin}发往{destination}，{carrier}快递代发。
+      重量范围：{weight_range}
+      预计时效：{eta}天到达
+      【注意事项】
+      - 实际运费以快递公司结算为准
+      - 请提供准确的收件信息
+    fields:
+      - { key: origin, label: 始发地, required: true }
+      - { key: destination, label: 目的地, required: true }
+      - { key: carrier, label: 快递公司, required: true }
+      - { key: weight_range, label: 重量范围, required: true }
+      - { key: eta, label: 预计时效(天), required: false }
+
+order_flow:
+  auto_confirm: false
+  require_tracking_number: true
+  auto_ship_delay_minutes: 30
+  reminder_after_hours: 24

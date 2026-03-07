@@ -2,22 +2,27 @@ import React from 'react';
 import { RefreshCw, CheckCircle, XCircle, AlertTriangle, Loader2, Wifi, Bot, Cookie, Server, Link2 } from 'lucide-react';
 import useHealthCheck from '../hooks/useHealthCheck';
 
-const STATUS_ICON = {
+const STATUS_ICON: Record<string, React.ReactNode> = {
   ok:      <CheckCircle className="w-4 h-4 text-green-500" />,
   fail:    <XCircle className="w-4 h-4 text-red-500" />,
   warn:    <AlertTriangle className="w-4 h-4 text-amber-500" />,
   loading: <Loader2 className="w-4 h-4 text-xy-gray-400 animate-spin" />,
 };
 
-const SERVICES = [
-  { key: 'node',   label: 'Node 后端',   icon: Server },
-  { key: 'python', label: 'Python 后端', icon: Server },
+interface ServiceItem {
+  key: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const SERVICES: ServiceItem[] = [
+  { key: 'python', label: '后端服务', icon: Server },
   { key: 'cookie', label: '闲鱼 Cookie', icon: Cookie },
   { key: 'ai',     label: 'AI 服务',     icon: Bot },
   { key: 'xgj',    label: '闲管家 API',  icon: Link2 },
 ];
 
-function statusOf(item) {
+function statusOf(item: { ok?: boolean } | null | undefined): 'ok' | 'fail' | 'loading' {
   if (!item) return 'loading';
   return item.ok ? 'ok' : 'fail';
 }
@@ -25,8 +30,8 @@ function statusOf(item) {
 export default function ApiStatusPanel() {
   const { loading, lastChecked, refresh, ...services } = useHealthCheck();
 
-  const allOk   = !loading && SERVICES.every(s => services[s.key]?.ok);
-  const anyFail = !loading && SERVICES.some(s => !services[s.key]?.ok);
+  const allOk   = !loading && SERVICES.every(s => services[s.key as keyof typeof services]?.ok);
+  const anyFail = !loading && SERVICES.some(s => !services[s.key as keyof typeof services]?.ok);
 
   return (
     <div className="xy-card overflow-hidden">
@@ -50,7 +55,7 @@ export default function ApiStatusPanel() {
           <button
             onClick={refresh}
             disabled={loading}
-            className="p-1 rounded-md hover:bg-white/70 text-xy-text-muted hover:text-xy-text-primary transition-colors disabled:opacity-50"
+            className="p-1 rounded-md hover:bg-white/70 text-xy-text-muted hover:text-xy-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="刷新状态"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -60,7 +65,7 @@ export default function ApiStatusPanel() {
 
       <div className="divide-y divide-xy-border">
         {SERVICES.map(({ key, label, icon: Icon }) => {
-          const svc = services[key];
+          const svc = services[key as keyof typeof services];
           const st = loading ? 'loading' : statusOf(svc);
           return (
             <div key={key} className="px-5 py-2.5 flex items-center gap-3 hover:bg-xy-gray-50/50 transition-colors">
